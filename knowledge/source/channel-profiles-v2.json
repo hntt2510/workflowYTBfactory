@@ -1,0 +1,10 @@
+{
+  "source": "CHANNEL_PROFILES_KNOWLEDGE_v2_STYLE_ROUTER.txt",
+  "seedProfileIds": [
+    "insurance-made-simple",
+    "bible-mysteries-revealed",
+    "viral-case-files"
+  ],
+  "implementation": "packages/domain/src/seedProfiles.ts"
+}
+

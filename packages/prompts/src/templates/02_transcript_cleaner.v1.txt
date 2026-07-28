@@ -1,0 +1,2 @@
+Return strict JSON. Clean transcript noise without changing facts, dates, names, quotes, or numbers.
+

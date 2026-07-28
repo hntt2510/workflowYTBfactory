@@ -1,0 +1,223 @@
+:root {
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #18202a;
+  background: #f7f8fb;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 260px 1fr;
+}
+
+.sidebar {
+  background: #18202a;
+  color: #f8fafc;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 750;
+  margin-bottom: 24px;
+}
+
+.nav-button,
+.primary,
+.field-row button,
+.quick-topics button {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.nav-button {
+  background: transparent;
+  color: #dbe4ef;
+  justify-content: flex-start;
+  padding: 10px 12px;
+}
+
+.nav-button:hover {
+  background: #263241;
+}
+
+.workspace {
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+}
+
+.eyebrow {
+  color: #4b6b88;
+  font-size: 13px;
+  margin: 0 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  font-size: 28px;
+  margin-bottom: 0;
+}
+
+h2 {
+  font-size: 18px;
+}
+
+h3 {
+  font-size: 15px;
+}
+
+.primary {
+  background: #0f766e;
+  color: white;
+  padding: 0 14px;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 90px 1fr auto;
+  gap: 12px;
+  align-items: center;
+}
+
+.field-row input {
+  min-height: 42px;
+  border: 1px solid #cad6e0;
+  border-radius: 8px;
+  padding: 0 12px;
+}
+
+.field-row button,
+.quick-topics button {
+  background: #eef6f5;
+  color: #0f766e;
+  border-color: #bddbd7;
+  padding: 0 12px;
+}
+
+.quick-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  font-size: 20px;
+}
+
+.metric strong {
+  color: #0f766e;
+}
+
+.muted {
+  color: #5c6b7c;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tags span {
+  background: #eef2f7;
+  border-radius: 999px;
+  color: #314255;
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
+.stage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.stage {
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    min-height: auto;
+  }
+
+  .grid,
+  .field-row {
+    grid-template-columns: 1fr;
+  }
+}
+

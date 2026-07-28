@@ -1,0 +1,2 @@
+Return strict JSON scenes with stable IDs, linked script sections, startFrame, durationFrames, visual mode, and continuity refs.
+

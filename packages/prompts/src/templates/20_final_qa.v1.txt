@@ -1,0 +1,2 @@
+Return strict JSON final QA with script, visual, audio, timeline, CapCut, security, and export blockers.
+

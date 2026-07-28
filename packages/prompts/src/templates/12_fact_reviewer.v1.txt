@@ -1,0 +1,2 @@
+Return strict JSON fact review. Block high-risk unsupported claims and separate fact, estimate, opinion, interpretation, allegation.
+

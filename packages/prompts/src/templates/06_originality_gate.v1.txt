@@ -1,0 +1,2 @@
+Return strict JSON approve, revise, or reject. Reject synonym rewrites, same promise, same examples, same evidence order.
+

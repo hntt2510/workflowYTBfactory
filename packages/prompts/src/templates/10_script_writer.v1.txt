@@ -1,0 +1,2 @@
+Return strict JSON script sections with narration, linked claims, purpose, seconds, retention risk, and proof objects.
+

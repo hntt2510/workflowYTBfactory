@@ -1,0 +1,2 @@
+Return strict JSON image prompt. Include channel visual rules, avoid list, continuity refs, and aspect ratio.
+

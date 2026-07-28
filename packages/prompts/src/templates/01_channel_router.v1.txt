@@ -1,0 +1,2 @@
+Return strict JSON ChannelRouteDecision. Use explicit selected profile when present. Match router signals first.
+

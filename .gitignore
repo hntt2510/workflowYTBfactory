@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+out/
+coverage/
+.vite/
+.turbo/
+.codegraph/
+workspace/
+*.log
+*.local
+__pycache__/
+.pytest_cache/
+

@@ -1,0 +1,2 @@
+Return strict JSON continuity warnings for face, age, costume, props, direction, weather, lighting, and impossible state.
+

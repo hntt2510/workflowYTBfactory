@@ -1,0 +1,2 @@
+Return strict JSON route decisions for AI image, AI video, stock, upload, document, diagram, text card, or reuse.
+

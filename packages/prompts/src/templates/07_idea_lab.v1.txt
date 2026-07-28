@@ -1,0 +1,2 @@
+Return strict JSON IdeaCandidate array with 4 low-risk, 4 medium-difficulty, and 4 stretch ideas by default.
+

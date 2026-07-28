@@ -1,0 +1,2 @@
+Return strict JSON shots with stable IDs, integer frames, fps, visual mode, continuity states, prompt version, and asset refs.
+

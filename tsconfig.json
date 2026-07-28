@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "apps/desktop" },
+    { "path": "packages/domain" },
+    { "path": "packages/providers" },
+    { "path": "packages/generation-queue" },
+    { "path": "packages/media" },
+    { "path": "packages/capcut" },
+    { "path": "packages/db" },
+    { "path": "packages/prompts" }
+  ]
+}
+

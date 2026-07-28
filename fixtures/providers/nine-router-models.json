@@ -1,0 +1,7 @@
+{
+  "data": [
+    { "id": "mock-chat-model" },
+    { "id": "mock-image-model" },
+    { "id": "mock-tts-model" }
+  ]
+}

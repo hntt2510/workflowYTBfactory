@@ -1,0 +1,2 @@
+Return strict JSON competitor DNA. Extract abstractions and what not to copy. Do not reuse source wording.
+

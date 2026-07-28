@@ -1,0 +1,2 @@
+Return strict JSON transcript segments labeled hook, promise, context, conflict, proof, story, reveal, payoff, CTA, sponsor.
+

@@ -1,0 +1,2 @@
+Return strict JSON TTS segments with voice style, pronunciation terms, pauses, previous text, and next text.
+

@@ -1,0 +1,2 @@
+Return strict JSON video prompt. Reserve motion for hero moments, reveals, demonstrations, or emotional peaks.
+

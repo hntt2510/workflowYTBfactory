@@ -1,0 +1,2 @@
+Return strict JSON claims with type, source requirement, confidence, source state, qualification, and blocked/allowed state.
+
