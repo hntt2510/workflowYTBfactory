@@ -50,6 +50,23 @@ export const providerIdRequestSchema = z.object({
   providerId: idSchema
 });
 
+export const modelListStatusSchema = z.enum([
+  "not_tested",
+  "testing",
+  "models_discovered",
+  "empty_model_list",
+  "unauthorized",
+  "endpoint_not_found",
+  "rate_limited",
+  "server_error",
+  "timeout",
+  "network_error"
+]);
+
+export const listNineRouterModelsRequestSchema = z.object({
+  providerId: z.literal("9router").optional()
+});
+
 export const localTtsSettingsSchema = z.object({
   omnivoiceBinPath: localPathSchema,
   outputDir: localPathSchema,
@@ -162,8 +179,14 @@ export const localTtsGeneratedResponseSchema = z.object({
   outputPath: z.string(),
   provider: z.literal("omnivoice-local")
 });
+export const nineRouterModelListResponseSchema = z.object({
+  status: modelListStatusSchema,
+  models: z.array(z.object({ id: z.string().min(1).max(300) })),
+  message: z.string().max(500)
+}).strict();
 
 export type CreateProjectRequest = z.infer<typeof createProjectRequestSchema>;
 export type SaveProviderCredentialRequest = z.infer<typeof saveProviderCredentialRequestSchema>;
 export type LocalTtsSettings = z.infer<typeof localTtsSettingsSchema>;
 export type GenerateLocalTtsRequest = z.infer<typeof generateLocalTtsRequestSchema>;
+export type ModelListStatus = z.infer<typeof modelListStatusSchema>;

@@ -35,11 +35,13 @@ describe("security foundation", () => {
     );
     expect(await store.hasProviderCredential("9router")).toBe(true);
     expect(await store.testCredentialPresence("9router")).toEqual({ providerId: "9router", hasCredential: true });
+    expect(await store.resolveProviderSecret("9router")).toBe("sk-secret");
     const row = db.prepare("SELECT * FROM provider_credentials WHERE provider_id = ?").get("9router") as Record<string, string>;
     expect(JSON.stringify(row)).not.toContain("sk-secret");
     expect(row.credential_ref).toBe("9router:apiKey");
     expect(await store.deleteProviderCredential("9router")).toBe(true);
     expect(await store.hasProviderCredential("9router")).toBe(false);
+    expect(await store.resolveProviderSecret("9router")).toBeNull();
     db.close();
   });
 

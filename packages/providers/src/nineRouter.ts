@@ -19,6 +19,25 @@ export interface NineRouterConfig {
   textModel?: string;
   imageModel?: string;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+}
+
+export type NineRouterModelListFailure =
+  | "unauthorized"
+  | "endpoint_not_found"
+  | "rate_limited"
+  | "server_error"
+  | "timeout"
+  | "network_error";
+
+export class NineRouterModelListError extends Error {
+  constructor(
+    readonly status: NineRouterModelListFailure,
+    message: string,
+    readonly httpStatus?: number
+  ) {
+    super(message);
+  }
 }
 
 export interface ImageResult {
@@ -34,15 +53,35 @@ export class NineRouterClient {
     this.fetchImpl = config.fetchImpl ?? fetch;
   }
 
-  async listModels(): Promise<string[]> {
-    const response = await this.fetchImpl(`${this.config.baseUrl.replace(/\/$/, "")}/models`, {
-      headers: this.headers()
-    });
-    if (!response.ok) {
-      throw new Error(`9Router model listing failed: ${response.status}`);
+  async listModels(): Promise<Array<{ id: string }>> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 10_000);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.config.baseUrl.replace(/\/$/, "")}/models`, {
+        headers: this.headers(),
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new NineRouterModelListError("timeout", "9Router model listing timed out.");
+      }
+      throw new NineRouterModelListError("network_error", "9Router model listing network error.");
+    } finally {
+      clearTimeout(timeout);
     }
-    const payload = (await response.json()) as { data?: Array<{ id?: string }> };
-    return payload.data?.map((model) => model.id).filter((id): id is string => Boolean(id)) ?? [];
+    if (!response.ok) {
+      throw new NineRouterModelListError(mapHttpStatus(response.status), `9Router model listing failed: ${response.status}`, response.status);
+    }
+    try {
+      const payload = (await response.json()) as { data?: Array<{ id?: unknown }> };
+      return payload.data
+        ?.map((model) => model.id)
+        .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+        .map((id) => ({ id })) ?? [];
+    } catch {
+      throw new NineRouterModelListError("network_error", "9Router model listing returned malformed JSON.");
+    }
   }
 
   inferCapabilities(models: string[]): ProviderCapabilities {
@@ -102,3 +141,10 @@ export class NineRouterClient {
   }
 }
 
+function mapHttpStatus(status: number): NineRouterModelListFailure {
+  if (status === 401 || status === 403) return "unauthorized";
+  if (status === 404) return "endpoint_not_found";
+  if (status === 429) return "rate_limited";
+  if (status >= 500 && status <= 599) return "server_error";
+  return "network_error";
+}

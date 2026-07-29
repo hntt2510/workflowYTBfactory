@@ -99,6 +99,13 @@ export class ProviderCredentialStore {
     return Boolean(row?.credential_ref && (await this.keychain.getPassword(SERVICE, row.credential_ref)));
   }
 
+  async resolveProviderSecret(providerId: string): Promise<string | null> {
+    const row = this.db
+      .prepare("SELECT credential_ref FROM provider_credentials WHERE provider_id = ?")
+      .get(providerId) as Record<string, string> | undefined;
+    return row?.credential_ref ? this.keychain.getPassword(SERVICE, row.credential_ref) : null;
+  }
+
   async testCredentialPresence(providerId: string): Promise<{ providerId: string; hasCredential: boolean }> {
     return { providerId, hasCredential: await this.hasProviderCredential(providerId) };
   }

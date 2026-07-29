@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("longShortFactory", {
   hasProviderCredential: (providerId) => ipcRenderer.invoke("has-provider-credential", { providerId }),
   testCredentialPresence: (providerId) => ipcRenderer.invoke("test-credential-presence", { providerId }),
   deleteProviderCredential: (providerId) => ipcRenderer.invoke("delete-provider-credential", { providerId }),
+  list9RouterModels: () => ipcRenderer.invoke("list-9router-models", { providerId: "9router" }),
   loadLocalTtsSettings: () => ipcRenderer.invoke("load-local-tts-settings"),
   saveLocalTtsSettings: (input) => ipcRenderer.invoke("save-local-tts-settings", input),
   generateLocalTts: (input) => ipcRenderer.invoke("generate-local-tts", input),

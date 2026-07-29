@@ -22,9 +22,11 @@ import {
   nullableFactoryProjectResponseSchema,
   okResponseSchema,
   generateLocalTtsRequestSchema,
+  listNineRouterModelsRequestSchema,
   localTtsGeneratedResponseSchema,
   localTtsSettingsResponseSchema,
   localTtsSettingsSchema,
+  nineRouterModelListResponseSchema,
   projectIdRequestSchema,
   projectListResponseSchema,
   providerCredentialDeletedResponseSchema,
@@ -38,6 +40,7 @@ import {
   channelRouteInputSchema
 } from "@lsf/domain";
 import { PersistentGenerationQueue } from "@lsf/generation-queue";
+import { listNineRouterModels } from "./nineRouterModelService";
 
 if (process.env.ELECTRON_REMOTE_DEBUGGING_PORT) {
   app.commandLine.appendSwitch("remote-debugging-port", process.env.ELECTRON_REMOTE_DEBUGGING_PORT);
@@ -527,6 +530,11 @@ ipcMain.handle("load-provider-credential-settings", (_event, input: unknown) => 
       hasCredential: false
     }
   );
+});
+
+ipcMain.handle("list-9router-models", async (_event, input: unknown) => {
+  listNineRouterModelsRequestSchema.parse(input ?? {});
+  return nineRouterModelListResponseSchema.parse(await listNineRouterModels({ credentialStore, logger }));
 });
 
 ipcMain.handle("load-local-tts-settings", () => loadLocalTtsSettings());

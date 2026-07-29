@@ -80,6 +80,13 @@ function webFallback(): LongShortFactoryApi {
     async deleteProviderCredential(providerId: string): Promise<{ providerId: string; deleted: boolean }> {
       return { providerId, deleted: false };
     },
+    async list9RouterModels() {
+      return {
+        status: "network_error" as const,
+        models: [],
+        message: "Electron main process unavailable."
+      };
+    },
     async loadLocalTtsSettings(): Promise<LocalTtsSettings> {
       return {
         omnivoiceBinPath: "",

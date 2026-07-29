@@ -113,6 +113,24 @@ export interface LocalTtsGenerated {
   provider: "omnivoice-local";
 }
 
+export type ModelListStatus =
+  | "not_tested"
+  | "testing"
+  | "models_discovered"
+  | "empty_model_list"
+  | "unauthorized"
+  | "endpoint_not_found"
+  | "rate_limited"
+  | "server_error"
+  | "timeout"
+  | "network_error";
+
+export interface NineRouterModelListResult {
+  status: ModelListStatus;
+  models: Array<{ id: string }>;
+  message: string;
+}
+
 export interface LongShortFactoryApi {
   bootstrap: () => Promise<BootstrapData>;
   routeTopic: (input: {
@@ -138,6 +156,7 @@ export interface LongShortFactoryApi {
   hasProviderCredential: (providerId: string) => Promise<ProviderPresence>;
   testCredentialPresence: (providerId: string) => Promise<ProviderPresence>;
   deleteProviderCredential: (providerId: string) => Promise<{ providerId: string; deleted: boolean }>;
+  list9RouterModels: () => Promise<NineRouterModelListResult>;
   loadLocalTtsSettings: () => Promise<LocalTtsSettings>;
   saveLocalTtsSettings: (input: Omit<LocalTtsSettings, "available" | "resolvedBinPath">) => Promise<LocalTtsSettings>;
   generateLocalTts: (input: GenerateLocalTtsInput) => Promise<LocalTtsGenerated>;

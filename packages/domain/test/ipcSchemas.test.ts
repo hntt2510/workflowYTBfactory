@@ -3,6 +3,9 @@ import {
   channelRouteInputSchema,
   createProjectRequestSchema,
   factoryProjectResponseSchema,
+  listNineRouterModelsRequestSchema,
+  modelListStatusSchema,
+  nineRouterModelListResponseSchema,
   projectIdRequestSchema
 } from "../src";
 import { createFixtureProject } from "../src";
@@ -35,5 +38,21 @@ describe("ipc schemas", () => {
       targetDuration: "12-15 minutes"
     });
     expect(factoryProjectResponseSchema.parse(project).id).toBe(project.id);
+  });
+
+  it("validates 9Router model list contracts", () => {
+    expect(listNineRouterModelsRequestSchema.parse({ providerId: "9router" })).toEqual({ providerId: "9router" });
+    expect(modelListStatusSchema.parse("models_discovered")).toBe("models_discovered");
+    expect(nineRouterModelListResponseSchema.parse({
+      status: "models_discovered",
+      models: [{ id: "model-a" }],
+      message: "Models discovered."
+    }).models).toEqual([{ id: "model-a" }]);
+    expect(() => nineRouterModelListResponseSchema.parse({
+      status: "models_discovered",
+      models: [{ id: "model-a" }],
+      message: "Models discovered.",
+      apiKey: "sk-secret"
+    })).toThrow();
   });
 });

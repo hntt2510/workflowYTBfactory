@@ -6,7 +6,7 @@ import { seedChannelProfiles } from "@lsf/domain";
 import { factoryClient } from "./services/factoryClient";
 import { allRoutes, type RouteId } from "./navigation";
 import { DataTable, DisabledAction, EmptyState, FormField, MetricCard, PageHeader, ScoreBar, SectionCard, StatusBadge, TagList } from "./components/ui";
-import type { BootstrapData, LocalTtsSettings, ProjectSummary, ProviderCredentialSettings, ProviderPresence, QueueSnapshot } from "./types";
+import type { BootstrapData, LocalTtsSettings, ModelListStatus, ProjectSummary, ProviderCredentialSettings, ProviderPresence, QueueSnapshot } from "./types";
 import { currentStage, estimatedDuration, formatDate, formatTimecode, projectProgress, queueCounts, stageTone } from "./utils";
 import { AppShell, LoadingScreen } from "./layouts/AppShell";
 import "./styles.css";
@@ -1189,8 +1189,13 @@ function ProvidersScreen(props: {
   const [pexelsApiKey, setPexelsApiKey] = useState("");
   const [message, setMessage] = useState("");
   const [stockMessage, setStockMessage] = useState("");
+  const [modelListStatus, setModelListStatus] = useState<ModelListStatus>("not_tested");
+  const [modelListMessage, setModelListMessage] = useState("Endpoint not tested.");
+  const [models, setModels] = useState<Array<{ id: string }>>([]);
   const [savingCredential, setSavingCredential] = useState(false);
   const [savingStock, setSavingStock] = useState(false);
+  const modelListingRunning = modelListStatus === "testing";
+  const baseUrlValid = isValidProviderBaseUrl(baseUrl);
 
   useEffect(() => {
     const settings = props.settings;
@@ -1225,8 +1230,8 @@ function ProvidersScreen(props: {
       props.setPresence(presence);
       setMessage(presence.hasCredential ? "Credential saved. Raw key was cleared from the form." : "Credential saved to SQLite, but the keychain did not return the secret.");
       await props.onRefresh();
-    } catch (error) {
-      setMessage(`Credential save failed: ${error instanceof Error ? error.message : String(error)}`);
+    } catch {
+      setMessage("Credential save failed. The typed API key was preserved; check diagnostics or provider settings and try again.");
     } finally {
       setSavingCredential(false);
     }
@@ -1259,6 +1264,22 @@ function ProvidersScreen(props: {
       setStockMessage(`Pexels credential save failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setSavingStock(false);
+    }
+  }
+
+  async function refreshModels() {
+    setModelListStatus("testing");
+    setModelListMessage("Testing endpoint...");
+    try {
+      const result = await factoryClient.list9RouterModels();
+      setModelListStatus(result.status);
+      setModelListMessage(result.message);
+      if (result.status === "models_discovered" || result.status === "empty_model_list") {
+        setModels(result.models);
+      }
+    } catch {
+      setModelListStatus("network_error");
+      setModelListMessage("Model listing failed before a safe response was returned.");
     }
   }
 
@@ -1314,10 +1335,27 @@ function ProvidersScreen(props: {
             ) : (
               <DisabledAction reason="No provider credential is saved yet.">Delete credential</DisabledAction>
             )}
-            <DisabledAction reason="Model listing is not wired to main-process provider execution yet.">Refresh models</DisabledAction>
+            {props.presence.hasCredential && baseUrlValid && !modelListingRunning ? (
+              <button className="button secondary" type="button" onClick={() => void refreshModels()}>Refresh models</button>
+            ) : (
+              <DisabledAction reason={!props.presence.hasCredential ? "Save a 9Router credential first." : !baseUrlValid ? "Saved base URL must be valid before model listing." : "Model listing is already running."}>Refresh models</DisabledAction>
+            )}
             <DisabledAction reason="Paid capability tests require provider execution and confirmation flow.">Test capability</DisabledAction>
           </div>
           {message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}
+          <div className="capability-card">
+            <strong>Model listing</strong>
+            <StatusBadge tone={modelListTone(modelListStatus)}>{modelListStatus.replaceAll("_", " ")}</StatusBadge>
+            <small>{modelListMessage}</small>
+          </div>
+          {models.length ? (
+            <DataTable label="9Router discovered models">
+              <thead><tr><th>Model ID</th></tr></thead>
+              <tbody>
+                {models.map((model) => <tr key={model.id}><td>{model.id}</td></tr>)}
+              </tbody>
+            </DataTable>
+          ) : null}
         </div>
       </SectionCard>
       <SectionCard title="Pexels stock media" description="Pexels API key for stock video/image lookup. The key is stored in the OS keychain; the search adapter is still pending.">
@@ -1529,6 +1567,22 @@ function SettingsList(props: { items: Array<[string, string]> }) {
       ))}
     </dl>
   );
+}
+
+function isValidProviderBaseUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function modelListTone(status: ModelListStatus): "default" | "success" | "warning" | "danger" | "info" {
+  if (status === "models_discovered" || status === "empty_model_list") return "success";
+  if (status === "testing") return "info";
+  if (status === "not_tested") return "warning";
+  return "danger";
 }
 
 function DiagnosticsScreen(props: { bootstrap: BootstrapData; presence: ProviderPresence }) {
