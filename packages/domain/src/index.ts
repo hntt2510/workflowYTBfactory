@@ -7,4 +7,4 @@ export * from "./ideaLab";
 export * from "./scriptEngine";
 export * from "./visualRouter";
 export * from "./timeline";
-
+export * from "./ipcSchemas";

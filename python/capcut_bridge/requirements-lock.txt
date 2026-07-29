@@ -1,0 +1,13 @@
+colorama==0.4.6
+comtypes==1.4.16
+ImageIO==2.37.4
+iniconfig==2.3.0
+numpy==2.4.6
+packaging==26.2
+pillow==12.3.0
+pluggy==1.6.0
+pycapcut==0.0.3
+Pygments==2.20.0
+pymediainfo==7.0.1
+pytest==9.1.1
+uiautomation==2.0.29

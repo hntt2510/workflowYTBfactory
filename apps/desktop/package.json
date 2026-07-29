@@ -5,11 +5,12 @@
   "type": "module",
   "main": "src/main/main.ts",
   "scripts": {
-    "dev": "concurrently -k \"pnpm dev:web\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron -r tsx/cjs src/main/main.ts\"",
-    "dev:web": "vite --host 127.0.0.1",
+    "dev": "concurrently -k \"corepack pnpm dev:web\" \"wait-on tcp:5173 && cross-env NODE_OPTIONS=\\\"--import tsx\\\" VITE_DEV_SERVER_URL=http://localhost:5173 electron src/main/main.ts\"",
+    "dev:web": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "build": "vite build"
   },
   "dependencies": {
+    "@lsf/db": "workspace:*",
     "@lsf/domain": "workspace:*",
     "@lsf/generation-queue": "workspace:*",
     "@lsf/providers": "workspace:*",
@@ -20,4 +21,3 @@
   },
   "devDependencies": {}
 }
-

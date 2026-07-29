@@ -6,6 +6,11 @@
   "main": "src/index.ts",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@lsf/domain": "workspace:*"
+  },
+  "optionalDependencies": {
+    "keytar": "^7.9.0"
   }
 }
-

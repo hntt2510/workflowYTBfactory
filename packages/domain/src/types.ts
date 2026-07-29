@@ -1,6 +1,22 @@
 export type VideoFormat = "long" | "short";
+export type WorkflowMode = "guided" | "semi_automatic" | "full_automatic";
 
 export type StageStatus = "not_started" | "running" | "needs_review" | "approved" | "failed" | "stale";
+
+export interface ProjectSetup {
+  projectName: string;
+  targetDuration: string;
+  language: string;
+  workflowMode: WorkflowMode;
+}
+
+export interface CompetitorReference {
+  id: string;
+  sourceUrl?: string;
+  pastedTranscript: string;
+  notes?: string;
+  createdAt: string;
+}
 
 export interface ChannelProfile {
   id: string;
@@ -174,15 +190,16 @@ export interface FactoryProject {
   topic: string;
   format: VideoFormat;
   targetLanguage: string;
+  setup: ProjectSetup;
   profileId: string;
   routeDecision: ChannelRouteDecision;
   stages: PipelineStage[];
   ideas: IdeaCandidate[];
   approvedIdeaId?: string;
   claims: Claim[];
+  competitorReferences: CompetitorReference[];
   scriptSections: ScriptSection[];
   scenes: Scene[];
   shots: Shot[];
   timeline: Timeline;
 }
-

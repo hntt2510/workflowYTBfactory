@@ -7,10 +7,10 @@ out/
 coverage/
 .vite/
 .turbo/
+.tmp-chrome-ui-shots/
 .codegraph/
 workspace/
 *.log
 *.local
 __pycache__/
 .pytest_cache/
-

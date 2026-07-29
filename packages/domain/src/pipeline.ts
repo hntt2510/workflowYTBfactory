@@ -1,9 +1,17 @@
-import { generateIdeaLab } from "./ideaLab";
 import { routeChannelProfile } from "./router";
 import { seedChannelProfiles } from "./seedProfiles";
-import { createStarterClaims, createStarterScript, scenesFromScript, shotsFromScenes } from "./scriptEngine";
-import { assembleTimeline } from "./timeline";
-import type { ChannelProfile, FactoryProject, PipelineStage, VideoFormat } from "./types";
+import type { ChannelProfile, FactoryProject, PipelineStage, VideoFormat, WorkflowMode } from "./types";
+
+function uniqueId(prefix: string): string {
+  const random = typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}-${random}`;
+}
+
+function defaultTargetDuration(format: VideoFormat): string {
+  return format === "long" ? "8-12 minutes" : "45-60 seconds";
+}
 
 const stageNames = [
   "Channel/Profile",
@@ -41,31 +49,48 @@ export function createFixtureProject(input: {
   topic: string;
   format: VideoFormat;
   targetLanguage: string;
+  targetDuration?: string;
+  projectName?: string;
+  workflowMode?: WorkflowMode;
+  competitorReference?: {
+    sourceUrl?: string;
+    pastedTranscript: string;
+    notes?: string;
+  };
   profiles?: ChannelProfile[];
 }): FactoryProject {
   const profiles = input.profiles ?? seedChannelProfiles;
   const routeDecision = routeChannelProfile(profiles, input);
   const profile = profiles.find((item) => item.id === routeDecision.selectedProfileId) ?? profiles[0]!;
-  const ideas = generateIdeaLab(input.topic, profile, 12);
-  const claims = createStarterClaims(input.topic, profile.id);
-  const scriptSections = createStarterScript(input.topic, claims.map((claim) => claim.id));
-  const scenes = scenesFromScript(scriptSections);
-  const shots = shotsFromScenes(scenes);
-  const approvedIdeaId = ideas[0]?.id;
+  const competitorReferences = input.competitorReference?.pastedTranscript.trim()
+    ? [{
+        id: uniqueId("competitor"),
+        ...(input.competitorReference.sourceUrl?.trim() ? { sourceUrl: input.competitorReference.sourceUrl.trim() } : {}),
+        pastedTranscript: input.competitorReference.pastedTranscript,
+        ...(input.competitorReference.notes?.trim() ? { notes: input.competitorReference.notes.trim() } : {}),
+        createdAt: new Date().toISOString()
+      }]
+    : [];
   return {
-    id: `project-${Date.now()}`,
+    id: uniqueId("project"),
     topic: input.topic,
     format: input.format,
     targetLanguage: input.targetLanguage,
+    setup: {
+      projectName: input.projectName?.trim() || input.topic,
+      targetDuration: input.targetDuration?.trim() || defaultTargetDuration(input.format),
+      language: input.targetLanguage,
+      workflowMode: input.workflowMode ?? "guided"
+    },
     profileId: profile.id,
     routeDecision,
-    stages: createPipelineStages(4),
-    ideas,
-    ...(approvedIdeaId ? { approvedIdeaId } : {}),
-    claims,
-    scriptSections,
-    scenes,
-    shots,
-    timeline: assembleTimeline(shots)
+    stages: createPipelineStages(0),
+    ideas: [],
+    claims: [],
+    competitorReferences,
+    scriptSections: [],
+    scenes: [],
+    shots: [],
+    timeline: { fps: 30, items: [] }
   };
 }
