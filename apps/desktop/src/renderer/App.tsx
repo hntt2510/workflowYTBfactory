@@ -9,11 +9,6 @@ import { DataTable, DisabledAction, EmptyState, FormField, MetricCard, PageHeade
 import type {
   BootstrapData,
   LocalTtsSettings,
-  DevVoiceTestResult,
-  DevCapcutTestResult,
-  DevIdeaTestResult,
-  DevImageTestResult,
-  DevStockTestResult,
   ModelListStatus,
   ProjectSummary,
   ProviderCredentialSettings,
@@ -2764,55 +2759,19 @@ function modelListTone(status: ModelListStatus): "default" | "success" | "warnin
 }
 
 function DiagnosticsScreen(props: { bootstrap: BootstrapData; presence: ProviderPresence }) {
-  const [voiceText, setVoiceText] = useState("Xin chao. Day la bai kiem tra giong noi doc lap.");
-  const [subtitleText, setSubtitleText] = useState("CapCut development test");
-  const [ideaTopic, setIdeaTopic] = useState("Nhung bi an trong lich su Viet Nam");
-  const [imagePrompt, setImagePrompt] = useState("A cinematic ancient library at dawn, no text, vertical composition");
-  const [stockQuery, setStockQuery] = useState("ancient library");
-  const [stockMediaType, setStockMediaType] = useState<"image" | "video">("image");
-  const [running, setRunning] = useState<"voice" | "capcut" | "idea" | "image" | "stock" | null>(null);
-  const [result, setResult] = useState<DevVoiceTestResult | DevCapcutTestResult | DevIdeaTestResult | DevImageTestResult | DevStockTestResult | null>(null);
-  const [message, setMessage] = useState("");
   const diagnostics = {
     workspaceRoot: props.bootstrap.workspaceRoot,
     databasePath: props.bootstrap.databasePath,
     projectCount: props.bootstrap.projects.length,
     queueJobs: props.bootstrap.queue.jobs.length,
-    providerStatus: props.presence.hasCredential ? "credential_saved" : "not_configured",
-    devTestLabEnabled: props.bootstrap.runtime.devTestLabEnabled
+    providerStatus: props.presence.hasCredential ? "credential_saved" : "not_configured"
   };
-  async function run(kind: "voice" | "capcut" | "idea" | "image" | "stock") {
-    setRunning(kind); setMessage(""); setResult(null);
-    try {
-      const output = kind === "voice" ? await factoryClient.runDevVoiceTest({ text: voiceText }) : kind === "capcut" ? await factoryClient.runDevCapcutTest({ subtitleText }) : kind === "idea" ? await factoryClient.runDevIdeaTest({ topic: ideaTopic }) : kind === "image" ? await factoryClient.runDevImageTest({ prompt: imagePrompt, aspectRatio: "9:16" }) : await factoryClient.runDevStockTest({ query: stockQuery, mediaType: stockMediaType });
-      setResult(output); setMessage(kind === "voice" ? "Voice provider test completed and FFprobe validated the output." : kind === "capcut" ? "CapCut test draft is structurally validated. Open it in CapCut to verify editable tracks." : kind === "idea" ? "9Router Idea Test completed; raw response was saved locally." : kind === "image" ? "9Router Image Test completed; the image was validated and saved locally." : "Pexels Stock Test completed.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
-    } finally { setRunning(null); }
-  }
   return (
     <>
       <PageHeader title="Diagnostics" description="Redacted local state for troubleshooting." />
       <SectionCard>
         <pre className="diagnostics">{JSON.stringify(diagnostics, null, 2)}</pre>
       </SectionCard>
-      {props.bootstrap.runtime.devTestLabEnabled ? <SectionCard title="Dev Test Lab">
-        <p>Runs isolated integrations in <code>workspace/dev-test-lab</code>. These tests never create project artifacts or approvals.</p>
-        <div className="form-grid">
-          <FormField label="Selected voice provider test text" htmlFor="dev-voice-text"><textarea id="dev-voice-text" value={voiceText} onChange={(event) => setVoiceText(event.target.value)} /></FormField>
-          <div className="button-row"><button className="button primary" type="button" disabled={running !== null} onClick={() => void run("voice")}>{running === "voice" ? "Testing voice provider..." : "Test selected voice"}</button></div>
-          <FormField label="CapCut test subtitle" htmlFor="dev-capcut-subtitle"><input id="dev-capcut-subtitle" value={subtitleText} onChange={(event) => setSubtitleText(event.target.value)} /></FormField>
-          <div className="button-row"><button className="button primary" type="button" disabled={running !== null} onClick={() => void run("capcut")}>{running === "capcut" ? "Creating test draft..." : "Test CapCut Draft"}</button></div>
-          <FormField label="9Router idea topic" htmlFor="dev-idea-topic"><input id="dev-idea-topic" value={ideaTopic} onChange={(event) => setIdeaTopic(event.target.value)} /></FormField>
-          <div className="button-row"><button className="button primary" type="button" disabled={running !== null} onClick={() => void run("idea")}>{running === "idea" ? "Generating ideas..." : "Test 9Router Ideas"}</button></div>
-          <FormField label="9Router image prompt" htmlFor="dev-image-prompt"><textarea id="dev-image-prompt" value={imagePrompt} onChange={(event) => setImagePrompt(event.target.value)} /></FormField>
-          <div className="button-row"><button className="button primary" type="button" disabled={running !== null} onClick={() => void run("image")}>{running === "image" ? "Generating image..." : "Test 9Router Image"}</button></div>
-          <FormField label="Pexels stock query" htmlFor="dev-stock-query"><input id="dev-stock-query" value={stockQuery} onChange={(event) => setStockQuery(event.target.value)} /></FormField>
-          <div className="button-row"><select aria-label="Pexels stock type" value={stockMediaType} onChange={(event) => setStockMediaType(event.target.value as "image" | "video")}><option value="image">Image</option><option value="video">Video</option></select><button className="button primary" type="button" disabled={running !== null} onClick={() => void run("stock")}>{running === "stock" ? "Searching stock..." : "Test Pexels Stock"}</button></div>
-        </div>
-        {message ? <p className={message.includes("completed") || message.includes("validated") ? "safe-message" : "error-message"}>{message}</p> : null}
-        {result ? <pre className="diagnostics">{JSON.stringify(result, null, 2)}</pre> : null}
-      </SectionCard> : null}
     </>
   );
 }
