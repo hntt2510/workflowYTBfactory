@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
   "updatedAt": "2026-07-30T00:00:00.000Z",
-  "activeJobs": ["JOB-QA-STAGE"],
-  "notes": "Only one active coding job is permitted per worktree. Preview IPC is ready for independent review; QA stage resumed by direct user instruction on 2026-07-30."
+  "activeJobs": [],
+  "notes": "Preview IPC and QA Stage are ready for independent review after baseline commit 0992d72."
 }

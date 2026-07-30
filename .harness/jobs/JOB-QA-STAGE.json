@@ -2,7 +2,7 @@
   "jobId": "JOB-QA-STAGE",
   "type": "short",
   "title": "Deterministic QA stage lifecycle",
-  "status": "active",
+  "status": "review_required",
   "targetBranch": "chore/setup-agent-harness",
   "assignedRole": "builder",
   "description": "Add a persisted local QA report with explicit review controls after an approved preview render.",
