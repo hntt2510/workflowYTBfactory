@@ -1,6 +1,8 @@
 import { routeChannelProfile } from "./router";
 import { seedChannelProfiles } from "./seedProfiles";
 import type { ChannelProfile, FactoryProject, PipelineStage, VideoFormat, WorkflowMode } from "./types";
+import { normalizeReferenceIdentity } from "./referenceIdentity";
+import { workflowStageDefinitions } from "./workflowRegistry";
 
 function uniqueId(prefix: string): string {
   const random = typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -13,35 +15,12 @@ function defaultTargetDuration(format: VideoFormat): string {
   return format === "long" ? "8-12 minutes" : "45-60 seconds";
 }
 
-const stageNames = [
-  "Channel/Profile",
-  "Reference Intake",
-  "Competitor DNA",
-  "Opportunity Map",
-  "Idea Lab",
-  "Originality Gate",
-  "Research and Claim Map",
-  "Outline",
-  "Script",
-  "Retention and Fact Review",
-  "Scene Plan",
-  "Shot Plan",
-  "Visual Routing",
-  "Asset Acquisition",
-  "Voice Generation",
-  "Timeline Assembly",
-  "QA",
-  "CapCut Draft",
-  "Preview Render",
-  "Packaging Export"
-];
-
 export function createPipelineStages(approvedThroughIndex = 0): PipelineStage[] {
-  return stageNames.map((name, index) => ({
-    id: name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
-    name,
+  return workflowStageDefinitions.map((definition, index) => ({
+    id: definition.id,
+    name: definition.name,
     status: index <= approvedThroughIndex ? "approved" : "not_started",
-    dependsOn: index === 0 ? [] : [stageNames[index - 1]!.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")]
+    dependsOn: definition.dependsOn
   }));
 }
 
@@ -63,14 +42,25 @@ export function createFixtureProject(input: {
   const routeDecision = routeChannelProfile(profiles, input);
   const profile = profiles.find((item) => item.id === routeDecision.selectedProfileId) ?? profiles[0]!;
   const competitorReferences = input.competitorReference?.pastedTranscript.trim()
-    ? [{
-        id: uniqueId("competitor"),
-        ...(input.competitorReference.sourceUrl?.trim() ? { sourceUrl: input.competitorReference.sourceUrl.trim() } : {}),
-        pastedTranscript: input.competitorReference.pastedTranscript,
-        ...(input.competitorReference.notes?.trim() ? { notes: input.competitorReference.notes.trim() } : {}),
-        createdAt: new Date().toISOString()
-      }]
+    ? (() => {
+        const sourceUrl = input.competitorReference.sourceUrl?.trim();
+        const identityKey = normalizeReferenceIdentity(sourceUrl);
+        return [{
+          id: uniqueId("competitor"),
+          ...(identityKey ? { identityKey } : {}),
+          ...(sourceUrl ? { sourceUrl } : {}),
+          pastedTranscript: input.competitorReference.pastedTranscript,
+          ...(input.competitorReference.notes?.trim() ? { notes: input.competitorReference.notes.trim() } : {}),
+          status: "draft" as const,
+          included: true,
+          version: 1,
+          createdAt: new Date().toISOString()
+        }];
+      })()
     : [];
+  const stages = createPipelineStages(0).map((stage) => (
+    competitorReferences.length && stage.id === "reference-intake" ? { ...stage, status: "approved" as const } : stage
+  ));
   return {
     id: uniqueId("project"),
     topic: input.topic,
@@ -84,7 +74,8 @@ export function createFixtureProject(input: {
     },
     profileId: profile.id,
     routeDecision,
-    stages: createPipelineStages(0),
+    stages,
+    referenceSet: competitorReferences.length ? { status: "needs_validation" } : { status: "not_started" },
     ideas: [],
     claims: [],
     competitorReferences,

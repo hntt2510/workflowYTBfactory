@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureProject } from "@lsf/domain";
-import { AppSettingsStore, assertForeignKeysEnabled, openFactoryDatabase, ProjectRepository, runMigrations } from "../src";
+import { AppSettingsStore, assertForeignKeysEnabled, migrations as registeredMigrations, openFactoryDatabase, ProjectRepository, runMigrations, WorkflowRunStore } from "../src";
 
 function openTemp() {
   const dir = mkdtempSync(join(tmpdir(), "lsf-db-"));
@@ -17,8 +17,10 @@ describe("project persistence", () => {
     const { db } = openTemp();
     expect(assertForeignKeysEnabled(db)).toBe(true);
     runMigrations(db);
-    const migrations = db.prepare("SELECT id FROM schema_migrations").all();
-    expect(migrations).toHaveLength(1);
+    const appliedMigrations = db.prepare("SELECT id FROM schema_migrations").all();
+    expect(appliedMigrations).toHaveLength(registeredMigrations.length);
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflow_stage_runs'").get()).toBeTruthy();
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflow_artifacts'").get()).toBeTruthy();
     db.close();
   });
 
@@ -42,7 +44,7 @@ describe("project persistence", () => {
     const loaded = reopenedRepo.loadProject(project.id);
     expect(loaded?.id).toBe(project.id);
     expect(loaded?.setup).toEqual(project.setup);
-    expect(loaded?.stages.filter((stage) => stage.status === "approved").map((stage) => stage.id)).toEqual(["channel-profile"]);
+    expect(loaded?.stages.filter((stage) => stage.status === "approved").map((stage) => stage.id)).toEqual(["project-setup"]);
     expect(loaded?.ideas).toEqual([]);
     expect(loaded?.scriptSections).toEqual([]);
     expect(loaded?.scenes).toEqual([]);
@@ -104,6 +106,32 @@ describe("project persistence", () => {
       outputDir: "D:\\workspace\\assets\\tts",
       language: "Vietnamese"
     });
+    db.close();
+  });
+
+  it("persists immutable stage runs and review artifacts", () => {
+    const { db, repo } = openTemp();
+    const project = createFixtureProject({ topic: "reference run", format: "short", targetLanguage: "English" });
+    repo.saveProject(project);
+    const store = new WorkflowRunStore(db);
+    const now = "2026-07-30T00:00:00.000Z";
+    store.completeRun({
+      id: "run-1", projectId: project.id, stageId: "reference-validation", status: "needs_review",
+      runnerId: "reference-validation-local", runnerVersion: "v1", inputArtifactIds: [],
+      inputFingerprint: "a".repeat(64), outputArtifactIds: ["artifact-1"], startedAt: now, finishedAt: now
+    }, {
+      id: "artifact-1", projectId: project.id, stageId: "reference-validation", stageRunId: "run-1",
+      type: "reference-set.validated", version: 1, status: "needs_review", payloadJson: { valid: true }, createdAt: now, updatedAt: now
+    });
+    expect(store.findLatestByInput(project.id, "reference-validation", "a".repeat(64))?.id).toBe("run-1");
+    expect(store.listRuns(project.id, "reference-validation")).toHaveLength(1);
+    expect(store.listArtifacts(project.id, "reference-validation")[0]).toMatchObject({ id: "artifact-1", status: "needs_review" });
+    store.approveReviewRun("run-1");
+    expect(store.listRuns(project.id, "reference-validation")[0]?.status).toBe("approved");
+    expect(store.listArtifacts(project.id, "reference-validation")[0]?.status).toBe("approved");
+    store.markProjectArtifactsStale(project.id);
+    expect(store.listRuns(project.id, "reference-validation")[0]?.status).toBe("stale");
+    expect(store.listArtifacts(project.id, "reference-validation")[0]?.status).toBe("stale");
     db.close();
   });
 });

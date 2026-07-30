@@ -17,6 +17,8 @@ describe("renderer navigation model", () => {
 
   it("marks project workflow routes as project-scoped", () => {
     expect(projectRoutes.every((route) => route.requiresProject)).toBe(true);
+    expect(projectRoutes.map((route) => route.id)).toContain("reference-intake");
+    expect(projectRoutes.map((route) => route.id)).toContain("competitor-dna");
     expect(projectRoutes.map((route) => route.id)).toContain("shots");
     expect(projectRoutes.map((route) => route.id)).toContain("export");
   });
@@ -27,4 +29,3 @@ describe("renderer navigation model", () => {
     }
   });
 });
-

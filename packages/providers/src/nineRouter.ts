@@ -30,6 +30,15 @@ export type NineRouterModelListFailure =
   | "timeout"
   | "network_error";
 
+export type NineRouterTextResponseFailure =
+  | "unauthorized"
+  | "endpoint_not_found"
+  | "rate_limited"
+  | "server_error"
+  | "timeout"
+  | "network_error"
+  | "invalid_response_shape";
+
 export class NineRouterModelListError extends Error {
   constructor(
     readonly status: NineRouterModelListFailure,
@@ -38,6 +47,21 @@ export class NineRouterModelListError extends Error {
   ) {
     super(message);
   }
+}
+
+export class NineRouterTextResponseError extends Error {
+  constructor(
+    readonly status: NineRouterTextResponseFailure,
+    message: string,
+    readonly httpStatus?: number
+  ) {
+    super(message);
+  }
+}
+
+export interface NineRouterTextResponse {
+  text: string;
+  returnedModelId?: string;
 }
 
 export interface ImageResult {
@@ -81,6 +105,53 @@ export class NineRouterClient {
         .map((id) => ({ id })) ?? [];
     } catch {
       throw new NineRouterModelListError("network_error", "9Router model listing returned malformed JSON.");
+    }
+  }
+
+  async createResponseText(input: { model: string; input: string }): Promise<NineRouterTextResponse> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 30_000);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.config.baseUrl.replace(/\/$/, "")}/responses`, {
+        method: "POST",
+        headers: {
+          ...this.headers(),
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: input.model,
+          input: input.input
+        }),
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new NineRouterTextResponseError("timeout", "9Router text response timed out.");
+      }
+      throw new NineRouterTextResponseError("network_error", "9Router text response network error.");
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!response.ok) {
+      throw new NineRouterTextResponseError(mapHttpStatus(response.status), `9Router text response failed: ${response.status}`, response.status);
+    }
+
+    try {
+      const payload = await response.json();
+      const text = extractResponseText(payload);
+      const returnedModelId = extractReturnedModelId(payload);
+      if (text === null) {
+        throw new NineRouterTextResponseError("invalid_response_shape", "9Router text response shape was not supported.");
+      }
+      return {
+        text,
+        ...(returnedModelId ? { returnedModelId } : {})
+      };
+    } catch (error) {
+      if (error instanceof NineRouterTextResponseError) throw error;
+      throw new NineRouterTextResponseError("invalid_response_shape", "9Router text response returned malformed JSON.");
     }
   }
 
@@ -147,4 +218,37 @@ function mapHttpStatus(status: number): NineRouterModelListFailure {
   if (status === 429) return "rate_limited";
   if (status >= 500 && status <= 599) return "server_error";
   return "network_error";
+}
+
+function extractResponseText(payload: unknown): string | null {
+  const record = payload as {
+    output_text?: unknown;
+    output?: Array<{
+      content?: Array<{ text?: unknown; output_text?: unknown }>;
+    }>;
+    choices?: Array<{
+      message?: { content?: unknown };
+    }>;
+  };
+
+  if (typeof record.output_text === "string") return record.output_text;
+
+  const outputParts: string[] = [];
+  for (const item of record.output ?? []) {
+    for (const part of item.content ?? []) {
+      if (typeof part.text === "string") outputParts.push(part.text);
+      if (typeof part.output_text === "string") outputParts.push(part.output_text);
+    }
+  }
+  if (outputParts.length > 0) return outputParts.join("");
+
+  const choiceParts = record.choices
+    ?.map((choice) => choice.message?.content)
+    .filter((content): content is string => typeof content === "string") ?? [];
+  return choiceParts.length > 0 ? choiceParts.join("") : null;
+}
+
+function extractReturnedModelId(payload: unknown): string | undefined {
+  const model = (payload as { model?: unknown }).model;
+  return typeof model === "string" && model.trim().length > 0 ? model : undefined;
 }

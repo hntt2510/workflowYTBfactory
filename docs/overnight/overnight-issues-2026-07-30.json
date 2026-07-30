@@ -1,0 +1,38 @@
+[
+  {
+    "id": "ISSUE-001",
+    "severity": "P1",
+    "status": "open",
+    "checkpoint": "workflow-stage-engine",
+    "projectId": null,
+    "stageId": "reference-segmentation",
+    "stageRunId": null,
+    "title": "Downstream production stages do not yet have trusted runners",
+    "expected": "Every canonical stage has a trusted runner and StageRun/artifact review lifecycle.",
+    "actual": "Reference Validation through Script have runtime StageRun/artifact behavior; Fact Review and later stages remain unavailable.",
+    "reproduction": ["Approve a Script", "Open Script", "Observe Fact Review remains unavailable"],
+    "evidence": [".tmp-workflow-contract/reference-stage-run-33888.json", "docs/WORKFLOW_STAGE_MATRIX.md"],
+    "blocksDownstream": true,
+    "safeIndependentWorkRemains": true,
+    "suggestedFixBatch": "Fact Review using approved Script and cited claims.",
+    "acceptanceCriteria": ["Explicit idempotent run", "Validated artifact", "Human approval before downstream unlock"]
+  },
+  {
+    "id": "ISSUE-002",
+    "severity": "P2",
+    "status": "open",
+    "checkpoint": "security-audit",
+    "projectId": null,
+    "stageId": "capcut-draft",
+    "stageRunId": null,
+    "title": "Runtime environment probes still use synchronous child processes",
+    "expected": "Potentially slow child processes are asynchronous and bounded.",
+    "actual": "Python and FFmpeg diagnostics still use execFileSync.",
+    "reproduction": ["Open runtime diagnostics while a probe is slow"],
+    "evidence": ["Static audit of apps/desktop/src/main/main.ts"],
+    "blocksDownstream": false,
+    "safeIndependentWorkRemains": true,
+    "suggestedFixBatch": "Move diagnostics probes to an asynchronous service.",
+    "acceptanceCriteria": ["No blocking probe on Electron main", "Safe bounded failure reporting"]
+  }
+]

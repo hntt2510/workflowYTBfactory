@@ -24,7 +24,8 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
-import type { ChannelProfile, FactoryProject } from "@lsf/domain";
+import { resolveStageEligibilities, workflowStageDefinitions } from "@lsf/domain";
+import type { ChannelProfile, FactoryProject, WorkflowStageStatus } from "@lsf/domain";
 import { projectRoutes, routeLabel, type RouteId, workspaceRoutes } from "../navigation";
 import type { ProjectSummary, QueueSnapshot } from "../types";
 import { currentStage } from "../utils";
@@ -35,6 +36,8 @@ const routeIcons: Record<RouteId, LucideIcon> = {
   "new-project": Plus,
   "project-overview": Layers3,
   "channel-profiles": Route,
+  "reference-intake": FileText,
+  "competitor-dna": Search,
   "idea-lab": FlaskConical,
   "research-claims": ShieldCheck,
   script: FileText,
@@ -102,7 +105,7 @@ function Sidebar(props: {
         {props.selectedProject ? (
           <>
             <div className="nav-heading">Project</div>
-            <NavGroup items={projectRoutes} route={props.route} setRoute={props.setRoute} collapsed={props.collapsed} />
+            <NavGroup items={projectRoutes} route={props.route} setRoute={props.setRoute} collapsed={props.collapsed} selectedProject={props.selectedProject} />
           </>
         ) : null}
       </nav>
@@ -115,11 +118,14 @@ function NavGroup(props: {
   route: RouteId;
   setRoute: (route: RouteId) => void;
   collapsed: boolean;
+  selectedProject?: FactoryProject | null;
 }) {
+  const stageStatusByRoute = props.selectedProject ? routeStageStatuses(props.selectedProject) : new Map<RouteId, WorkflowStageStatus>();
   return (
     <div className="nav-group">
       {props.items.map((item) => {
         const Icon = routeIcons[item.id];
+        const status = stageStatusByRoute.get(item.id);
         return (
           <button
             className={`nav-button ${props.route === item.id ? "active" : ""}`}
@@ -130,11 +136,32 @@ function NavGroup(props: {
           >
             <Icon size={17} />
             <span>{item.label}</span>
+            {status ? <small className={`nav-status tone-${statusTone(status)}`}>{status.replaceAll("_", " ")}</small> : null}
           </button>
         );
       })}
     </div>
   );
+}
+
+function routeStageStatuses(project: FactoryProject): Map<RouteId, WorkflowStageStatus> {
+  const statuses = new Map<RouteId, WorkflowStageStatus>();
+  const eligibilities = resolveStageEligibilities(project);
+  for (const route of projectRoutes) {
+    const stageIds: Set<string> = new Set(workflowStageDefinitions.filter((stage) => stage.screenRoute === route.id).map((stage) => stage.id));
+    const routeEligibilities = eligibilities.filter((eligibility) => stageIds.has(eligibility.stageId));
+    const status = routeEligibilities.find((eligibility) => eligibility.status !== "approved")?.status ?? routeEligibilities.at(-1)?.status;
+    if (status) statuses.set(route.id, status);
+  }
+  return statuses;
+}
+
+function statusTone(status: WorkflowStageStatus): "success" | "warning" | "danger" | "info" | "default" {
+  if (status === "approved") return "success";
+  if (status === "blocked" || status === "not_started" || status === "stale") return "warning";
+  if (status === "failed" || status === "rejected") return "danger";
+  if (status === "running" || status === "queued" || status === "needs_review" || status === "ready") return "info";
+  return "default";
 }
 
 function TopBar(props: {

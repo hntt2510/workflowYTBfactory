@@ -1,7 +1,21 @@
 export type VideoFormat = "long" | "short";
 export type WorkflowMode = "guided" | "semi_automatic" | "full_automatic";
 
-export type StageStatus = "not_started" | "running" | "needs_review" | "approved" | "failed" | "stale";
+export type WorkflowStageStatus =
+  | "not_started"
+  | "blocked"
+  | "ready"
+  | "queued"
+  | "running"
+  | "needs_review"
+  | "approved"
+  | "rejected"
+  | "failed"
+  | "stale";
+
+export type StageStatus = WorkflowStageStatus;
+
+export type ReferenceStatus = "draft" | "duplicate" | "invalid" | "valid" | "approved" | "rejected" | "stale";
 
 export interface ProjectSetup {
   projectName: string;
@@ -12,10 +26,24 @@ export interface ProjectSetup {
 
 export interface CompetitorReference {
   id: string;
+  identityKey?: string;
   sourceUrl?: string;
   pastedTranscript: string;
   notes?: string;
+  status?: ReferenceStatus;
+  included?: boolean;
+  validationMessage?: string;
+  version?: number;
   createdAt: string;
+  updatedAt?: string;
+  parentReferenceId?: string;
+}
+
+export interface ReferenceSetState {
+  status: "not_started" | "needs_validation" | "valid" | "approved" | "stale";
+  approvedAt?: string;
+  validationRunAt?: string;
+  currentFingerprint?: string;
 }
 
 export interface ChannelProfile {
@@ -171,6 +199,80 @@ export interface PipelineStage {
   dependsOn: string[];
 }
 
+export type WorkflowExecutionKind =
+  | "manual_input"
+  | "local_deterministic"
+  | "provider_text"
+  | "provider_image"
+  | "provider_video"
+  | "provider_audio"
+  | "media_process"
+  | "export";
+
+export interface WorkflowStageDefinition {
+  id: string;
+  name: string;
+  order: number;
+  screenRoute: string;
+  dependsOn: string[];
+  requiredInputTypes: string[];
+  outputArtifactTypes: string[];
+  runnerId: string | null;
+  executionKind: WorkflowExecutionKind;
+  requiredCapability?: string;
+  approvalRequired: boolean;
+  invalidates: string[];
+}
+
+export interface WorkflowStageRun {
+  id: string;
+  projectId: string;
+  stageId: string;
+  status: WorkflowStageStatus;
+  runnerId: string;
+  runnerVersion: string;
+  providerId?: string;
+  configuredModelId?: string;
+  returnedModelId?: string;
+  promptTemplateId?: string;
+  promptVersion?: string;
+  inputArtifactIds: string[];
+  inputFingerprint: string;
+  outputArtifactIds: string[];
+  startedAt?: string;
+  finishedAt?: string;
+  safeErrorCategory?: string;
+  safeErrorMessage?: string;
+}
+
+export interface WorkflowArtifact {
+  id: string;
+  projectId: string;
+  stageId: string;
+  stageRunId?: string;
+  type: string;
+  version: number;
+  status: "draft" | "needs_review" | "approved" | "rejected" | "stale";
+  payloadJson?: Record<string, unknown>;
+  relativeFilePath?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StageEligibility {
+  stageId: string;
+  status: WorkflowStageStatus;
+  viewable: boolean;
+  runnable: boolean;
+  reviewable: boolean;
+  approvable: boolean;
+  blockingReasons: Array<{
+    code: string;
+    message: string;
+    actionRoute?: string;
+  }>;
+}
+
 export interface TimelineItem {
   id: string;
   track: "primary_visual" | "overlay_visual" | "narration" | "music" | "sfx" | "subtitles" | "text" | "markers";
@@ -194,6 +296,7 @@ export interface FactoryProject {
   profileId: string;
   routeDecision: ChannelRouteDecision;
   stages: PipelineStage[];
+  referenceSet?: ReferenceSetState;
   ideas: IdeaCandidate[];
   approvedIdeaId?: string;
   claims: Claim[];

@@ -1,0 +1,3 @@
+import { describe, expect, it } from "vitest";
+import { reviewFacts } from "../src";
+describe("reviewFacts", () => { it("blocks unsupported claims and preserves qualifications", () => { const findings = reviewFacts([{ id: "unsupported", text: "x", type: "fact", sourceRequirement: "either", sourceIds: [], confidence: 0, state: "unsupported", approvalState: "blocked" }, { id: "interpretation", text: "y", type: "interpretation", sourceRequirement: "either", sourceIds: ["source-1"], confidence: 0.5, qualification: "Interpretation", state: "interpretive", approvalState: "allowed" }]); expect(findings.map((item) => item.verdict)).toEqual(["blocked", "needs_qualification"]); }); });

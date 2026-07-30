@@ -11,9 +11,9 @@ export function formatDate(value?: string): string {
 
 export function stageTone(status: StageStatus | string): "default" | "success" | "warning" | "danger" | "info" {
   if (status === "approved" || status === "succeeded") return "success";
-  if (status === "failed") return "danger";
-  if (status === "needs_review" || status === "stale" || status === "rate_limited") return "warning";
-  if (status === "running") return "info";
+  if (status === "failed" || status === "rejected") return "danger";
+  if (status === "blocked" || status === "not_started" || status === "stale" || status === "rate_limited") return "warning";
+  if (status === "running" || status === "queued" || status === "ready" || status === "needs_review") return "info";
   return "default";
 }
 

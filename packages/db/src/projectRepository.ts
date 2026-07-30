@@ -1,5 +1,5 @@
 import type { FactoryProject } from "@lsf/domain";
-import { seedChannelProfiles } from "@lsf/domain";
+import { normalizeProjectStages, seedChannelProfiles } from "@lsf/domain";
 import type { FactoryDatabase } from "./connection";
 
 export interface ProjectSummary {
@@ -46,8 +46,8 @@ export class ProjectRepository {
     return project;
   }
 
-  saveProject(project: FactoryProject): void {
-    this.db.exec("BEGIN IMMEDIATE;");
+  saveProject(project: FactoryProject, options: { withinTransaction?: boolean } = {}): void {
+    if (!options.withinTransaction) this.db.exec("BEGIN IMMEDIATE;");
     try {
       this.seedProfiles();
       this.db
@@ -76,6 +76,7 @@ export class ProjectRepository {
             stages: project.stages,
             timelineFps: project.timeline.fps,
             setup: project.setup,
+            referenceSet: project.referenceSet,
             competitorReferences: project.competitorReferences
           })
         );
@@ -86,9 +87,9 @@ export class ProjectRepository {
       this.replaceScenes(project);
       this.replaceShots(project);
       this.replaceTimeline(project);
-      this.db.exec("COMMIT;");
+      if (!options.withinTransaction) this.db.exec("COMMIT;");
     } catch (error) {
-      this.db.exec("ROLLBACK;");
+      if (!options.withinTransaction) this.db.exec("ROLLBACK;");
       throw error;
     }
   }
@@ -100,6 +101,7 @@ export class ProjectRepository {
       stages: FactoryProject["stages"];
       timelineFps: number;
 	      setup?: FactoryProject["setup"];
+	      referenceSet?: FactoryProject["referenceSet"];
 	      competitorReferences?: FactoryProject["competitorReferences"];
 	    };
     return {
@@ -116,7 +118,8 @@ export class ProjectRepository {
         },
       profileId: projectRow.profile_id,
       routeDecision: JSON.parse(projectRow.route_decision_json) as FactoryProject["routeDecision"],
-      stages: payload.stages,
+      stages: normalizeProjectStages(payload.stages ?? []),
+      referenceSet: payload.referenceSet ?? { status: payload.competitorReferences?.length ? "needs_validation" : "not_started" },
       ideas: this.loadPayloadRows("ideas", projectId),
       ...(projectRow.approved_idea_id ? { approvedIdeaId: projectRow.approved_idea_id } : {}),
 	      claims: this.loadPayloadRows("claims", projectId),

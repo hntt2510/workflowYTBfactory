@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { FactoryDatabase } from "./connection";
 
 export interface ProviderCredentialSettings {
@@ -12,6 +13,14 @@ export interface ProviderCredentialSettings {
 
 export interface LoadedProviderCredentialSettings extends ProviderCredentialSettings {
   hasCredential: boolean;
+}
+
+export interface ProviderModelConfiguration {
+  textModel?: string;
+  imageModel?: string;
+  videoModel?: string;
+  ttsModel?: string;
+  sttModel?: string;
 }
 
 export type SavedProviderCredentialSettings = LoadedProviderCredentialSettings;
@@ -32,25 +41,28 @@ export class ProviderCredentialStore {
 
   async saveProviderCredential(settings: ProviderCredentialSettings, apiKey: string): Promise<string> {
     const credentialRef = `${settings.providerId}:apiKey`;
+    const credentialVersionRef = `credential:${randomUUID()}`;
     await this.keychain.setPassword(SERVICE, credentialRef, apiKey);
     this.db
       .prepare(
         `INSERT INTO provider_credentials
-          (provider_id, credential_ref, base_url, text_model, image_model, video_model, tts_model, stt_model, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          (provider_id, credential_ref, credential_version_ref, base_url, text_model, image_model, video_model, tts_model, stt_model, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
          ON CONFLICT(provider_id) DO UPDATE SET
           credential_ref = excluded.credential_ref,
+          credential_version_ref = excluded.credential_version_ref,
           base_url = excluded.base_url,
-          text_model = excluded.text_model,
-          image_model = excluded.image_model,
-          video_model = excluded.video_model,
-          tts_model = excluded.tts_model,
-          stt_model = excluded.stt_model,
+          text_model = COALESCE(excluded.text_model, provider_credentials.text_model),
+          image_model = COALESCE(excluded.image_model, provider_credentials.image_model),
+          video_model = COALESCE(excluded.video_model, provider_credentials.video_model),
+          tts_model = COALESCE(excluded.tts_model, provider_credentials.tts_model),
+          stt_model = COALESCE(excluded.stt_model, provider_credentials.stt_model),
           updated_at = CURRENT_TIMESTAMP`
       )
       .run(
         settings.providerId,
         credentialRef,
+        credentialVersionRef,
         settings.baseUrl,
         settings.textModel ?? null,
         settings.imageModel ?? null,
@@ -92,6 +104,31 @@ export class ProviderCredentialStore {
     };
   }
 
+  saveProviderModelConfiguration(providerId: string, models: ProviderModelConfiguration): void {
+    const result = this.db
+      .prepare(
+        `UPDATE provider_credentials SET
+          text_model = ?,
+          image_model = ?,
+          video_model = ?,
+          tts_model = ?,
+          stt_model = ?,
+          updated_at = CURRENT_TIMESTAMP
+         WHERE provider_id = ?`
+      )
+      .run(
+        models.textModel ?? null,
+        models.imageModel ?? null,
+        models.videoModel ?? null,
+        models.ttsModel ?? null,
+        models.sttModel ?? null,
+        providerId
+      );
+    if (result.changes === 0) {
+      throw new Error("Provider settings must exist before saving model configuration.");
+    }
+  }
+
   async hasProviderCredential(providerId: string): Promise<boolean> {
     const row = this.db
       .prepare("SELECT credential_ref FROM provider_credentials WHERE provider_id = ?")
@@ -104,6 +141,13 @@ export class ProviderCredentialStore {
       .prepare("SELECT credential_ref FROM provider_credentials WHERE provider_id = ?")
       .get(providerId) as Record<string, string> | undefined;
     return row?.credential_ref ? this.keychain.getPassword(SERVICE, row.credential_ref) : null;
+  }
+
+  loadProviderCredentialVersionRef(providerId: string): string | undefined {
+    const row = this.db
+      .prepare("SELECT credential_version_ref FROM provider_credentials WHERE provider_id = ?")
+      .get(providerId) as Record<string, string | null> | undefined;
+    return row?.credential_version_ref ?? undefined;
   }
 
   async testCredentialPresence(providerId: string): Promise<{ providerId: string; hasCredential: boolean }> {
