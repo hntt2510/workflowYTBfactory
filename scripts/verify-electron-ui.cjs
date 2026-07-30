@@ -76,7 +76,7 @@ async function runElectronMode(workspaceRoot, mode) {
     throw new Error(`Electron UI verification produced no report in ${mode}. Exit: ${exitCode}. Output: ${electron.output}`);
   }
   if (exitCode !== 0 || !report.ok) {
-    throw new Error(`Electron UI verification failed in ${mode}: ${report.error || `exit ${exitCode}`}. Output: ${electron.output}`);
+    throw new Error(`Electron UI verification failed in ${mode}: ${report.error || `exit ${exitCode}`}. Evidence: ${JSON.stringify(report)}. Output: ${electron.output}`);
   }
   return report;
 }

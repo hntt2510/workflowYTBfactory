@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Harness Job",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["jobId", "type", "title", "status", "targetBranch", "assignedRole", "description", "businessContext", "allowedPaths", "forbiddenPaths", "dependencies", "acceptanceCriteria", "verificationCommands", "requiredReviewers", "maxReviewRounds", "humanEscalationConditions"],
+  "properties": {
+    "jobId": { "type": "string", "pattern": "^JOB-[A-Z0-9]+(?:-[A-Z0-9]+)*$" },
+    "type": { "enum": ["short", "long"] },
+    "title": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["planned", "ready", "active", "review_required", "changes_requested", "qa_required", "passed", "failed", "blocked", "human_review", "merged"] },
+    "targetBranch": { "type": "string", "minLength": 1 },
+    "assignedRole": { "const": "builder" },
+    "description": { "type": "string", "minLength": 1 },
+    "businessContext": { "type": "string" },
+    "allowedPaths": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+    "forbiddenPaths": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "dependencies": { "type": "array", "items": { "type": "string" } },
+    "acceptanceCriteria": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+    "verificationCommands": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
+    "requiredReviewers": { "type": "array", "items": { "enum": ["reviewer", "qa"] }, "allOf": [{ "contains": { "const": "reviewer" } }, { "contains": { "const": "qa" } }] },
+    "maxReviewRounds": { "type": "integer", "minimum": 1, "maximum": 3 },
+    "humanEscalationConditions": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+  }
+}

@@ -6,6 +6,7 @@ export interface ProviderCapabilitySnapshot {
   imageVerified?: boolean;
   videoVerified?: boolean;
   audioVerified?: boolean;
+  localAudioAvailable?: boolean;
 }
 
 export interface WorkflowStateSnapshot {
@@ -153,11 +154,11 @@ function providerBlockingReasons(definition: WorkflowStageDefinition, snapshot: 
       actionRoute: "providers"
     }];
   }
-  if (definition.executionKind === "provider_audio" && !snapshot.providerCapabilities?.audioVerified) {
+  if (definition.executionKind === "provider_audio" && !snapshot.providerCapabilities?.audioVerified && !snapshot.providerCapabilities?.localAudioAvailable) {
     return [{
       code: "AUDIO_MODEL_NOT_VERIFIED",
-      message: "Voice generation capability is not verified.",
-      actionRoute: "providers"
+      message: "Configure a verified voice provider or local OmniVoice before generating narration.",
+      actionRoute: "settings"
     }];
   }
   return [];

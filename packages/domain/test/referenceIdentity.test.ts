@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateReferenceSet, findDuplicateReference, normalizeReferenceIdentity, validateReference } from "../src";
+import { evaluateReferenceSet, findDuplicateReference, normalizeReferenceIdentity, referenceSetFingerprint, validateReference } from "../src";
 import type { CompetitorReference } from "../src";
 
 describe("reference identity and validation", () => {
@@ -27,7 +27,7 @@ describe("reference identity and validation", () => {
     expect(findDuplicateReference([reference], normalizeReferenceIdentity("http://youtube.com/watch?v=3GKC4kC3iQ0"))?.id).toBe("reference-1");
   });
 
-  it("requires included valid references before approval", () => {
+  it("requires included valid references before approval", async () => {
     const draft: CompetitorReference = {
       id: "reference-1",
       pastedTranscript: "Transcript long enough to validate.",
@@ -35,9 +35,23 @@ describe("reference identity and validation", () => {
       included: true,
       createdAt: "2026-07-30T00:00:00.000Z"
     };
-    expect(evaluateReferenceSet([draft]).status).toBe("needs_validation");
+    expect((await evaluateReferenceSet([draft])).status).toBe("needs_validation");
     const validation = validateReference(draft);
-    expect(evaluateReferenceSet([{ ...draft, status: validation.status }]).status).toBe("valid");
+    expect((await evaluateReferenceSet([{ ...draft, status: validation.status }])).status).toBe("valid");
+  });
+
+  it("uses a canonical SHA-256 fingerprint for the included validation input", async () => {
+    const reference: CompetitorReference = {
+      id: "reference-1",
+      pastedTranscript: "Transcript long enough to validate.",
+      status: "valid",
+      included: true,
+      createdAt: "2026-07-30T00:00:00.000Z"
+    };
+    const first = await referenceSetFingerprint([reference]);
+    const reordered = await referenceSetFingerprint([{ ...reference, updatedAt: "2026-07-30T01:00:00.000Z" }]);
+    expect(first).toMatch(/^[a-f0-9]{64}$/);
+    expect(reordered).toBe(first);
   });
 
   it("rejects malformed and incomplete YouTube source URLs", () => {

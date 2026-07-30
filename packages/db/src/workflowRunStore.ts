@@ -139,6 +139,10 @@ export class WorkflowRunStore {
     ).run(projectId);
   }
 
+  recoverInterruptedRuns(): number {
+    return Number(this.db.prepare("UPDATE workflow_stage_runs SET status = 'failed', safe_error_category = 'interrupted', safe_error_message = 'The previous application session ended before this run completed.', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE status IN ('queued', 'running') AND runner_version NOT LIKE 'voice-generation-tts-job-v1:%'").run().changes);
+  }
+
   private saveArtifact(artifact: WorkflowArtifact): void {
     this.db.prepare(
       `INSERT INTO workflow_artifacts (

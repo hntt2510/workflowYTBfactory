@@ -75,7 +75,7 @@ export function findDuplicateReference(references: CompetitorReference[], identi
   return references.find((reference) => (reference.identityKey ?? normalizeReferenceIdentity(reference.sourceUrl)) === identityKey);
 }
 
-export function referenceSetFingerprint(references: CompetitorReference[]): string {
+export async function referenceSetFingerprint(references: CompetitorReference[]): Promise<string> {
   const payload = references
     .filter((reference) => reference.included !== false)
     .map((reference) => ({
@@ -83,21 +83,36 @@ export function referenceSetFingerprint(references: CompetitorReference[]): stri
       identityKey: reference.identityKey ?? normalizeReferenceIdentity(reference.sourceUrl) ?? `manual:${reference.id}`,
       status: reference.status ?? "draft",
       version: reference.version ?? 1,
-      transcriptHash: hashText(reference.pastedTranscript)
+      transcript: reference.pastedTranscript
     }))
     .sort((left, right) => left.id.localeCompare(right.id));
-  return hashText(JSON.stringify(payload));
+  return canonicalSha256(payload);
 }
 
-export function evaluateReferenceSet(references: CompetitorReference[]): ReferenceSetState {
+export async function evaluateReferenceSet(references: CompetitorReference[]): Promise<ReferenceSetState> {
   const included = references.filter((reference) => reference.included !== false);
   if (!included.length) {
-    return { status: "needs_validation", currentFingerprint: referenceSetFingerprint(references) };
+    return { status: "needs_validation", currentFingerprint: await referenceSetFingerprint(references) };
   }
   if (included.some((reference) => reference.status === "duplicate" || reference.status === "invalid" || !reference.status || reference.status === "draft")) {
-    return { status: "needs_validation", currentFingerprint: referenceSetFingerprint(references) };
+    return { status: "needs_validation", currentFingerprint: await referenceSetFingerprint(references) };
   }
-  return { status: "valid", validationRunAt: new Date().toISOString(), currentFingerprint: referenceSetFingerprint(references) };
+  return { status: "valid", validationRunAt: new Date().toISOString(), currentFingerprint: await referenceSetFingerprint(references) };
+}
+
+async function canonicalSha256(value: unknown): Promise<string> {
+  const normalize = (input: unknown): unknown => {
+    if (Array.isArray(input)) return input.map(normalize);
+    if (input && typeof input === "object") {
+      return Object.fromEntries(Object.entries(input as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, normalize(item)]));
+    }
+    return input;
+  };
+  const bytes = new TextEncoder().encode(JSON.stringify(normalize(value)));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function canonicalUrlIdentity(parsed: URL): string {

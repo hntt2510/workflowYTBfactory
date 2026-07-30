@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createFixtureProject } from "@lsf/domain";
-import { AppSettingsStore, assertForeignKeysEnabled, migrations as registeredMigrations, openFactoryDatabase, ProjectRepository, runMigrations, WorkflowRunStore } from "../src";
+import { AppSettingsStore, assertForeignKeysEnabled, GenerationJobStore, migrations as registeredMigrations, openFactoryDatabase, ProjectRepository, runMigrations, TtsJobStore, WorkflowRunStore } from "../src";
 
 function openTemp() {
   const dir = mkdtempSync(join(tmpdir(), "lsf-db-"));
@@ -13,6 +13,19 @@ function openTemp() {
 }
 
 describe("project persistence", () => {
+  it("persists TTS jobs and recovers only interrupted jobs", () => {
+    const { db, repo } = openTemp();
+    const store = new TtsJobStore(db);
+    const project = createFixtureProject({ topic: "TTS persistence", format: "short", targetLanguage: "Vietnamese" });
+    repo.saveProject(project);
+    store.create({ id: "tts-job-01", projectId: project.id, state: "running", payload: { provider: "edge-tts" }, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }, [{ id: "tts-segment-01", jobId: "tts-job-01", order: 0, state: "running", payload: { segmentId: "section-01" }, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }]);
+
+    expect(store.recoverInterruptedJobs()).toBe(1);
+    expect(store.get("tts-job-01")?.job.state).toBe("queued");
+    expect(store.latestForProject(project.id)?.id).toBe("tts-job-01");
+    db.close();
+  });
+
   it("runs migrations on a fresh DB and re-runs safely", () => {
     const { db } = openTemp();
     expect(assertForeignKeysEnabled(db)).toBe(true);
@@ -132,6 +145,32 @@ describe("project persistence", () => {
     store.markProjectArtifactsStale(project.id);
     expect(store.listRuns(project.id, "reference-validation")[0]?.status).toBe("stale");
     expect(store.listArtifacts(project.id, "reference-validation")[0]?.status).toBe("stale");
+    db.close();
+  });
+
+  it("rejects a review artifact without deleting its immutable run history", () => {
+    const { db, repo } = openTemp();
+    const project = createFixtureProject({ topic: "review revision", format: "short", targetLanguage: "English" });
+    repo.saveProject(project);
+    const store = new WorkflowRunStore(db);
+    const now = "2026-07-30T00:00:00.000Z";
+    store.completeRun({ id: "run-reject", projectId: project.id, stageId: "visual-routing", status: "needs_review", runnerId: "visual-routing-local", runnerVersion: "v1", inputArtifactIds: [], inputFingerprint: "b".repeat(64), outputArtifactIds: ["artifact-reject"], startedAt: now, finishedAt: now }, { id: "artifact-reject", projectId: project.id, stageId: "visual-routing", stageRunId: "run-reject", type: "visual-routing", version: 1, status: "needs_review", payloadJson: { shots: [] }, createdAt: now, updatedAt: now });
+    store.rejectReviewRun("run-reject");
+    expect(store.listRuns(project.id, "visual-routing")[0]).toMatchObject({ id: "run-reject", status: "rejected" });
+    expect(store.listArtifacts(project.id, "visual-routing")[0]).toMatchObject({ id: "artifact-reject", status: "rejected" });
+    db.close();
+  });
+
+  it("persists idempotent generation jobs and recovers interrupted work", () => {
+    const { db, repo } = openTemp();
+    const project = createFixtureProject({ topic: "asset job", format: "short", targetLanguage: "English" }); repo.saveProject(project);
+    const jobs = new GenerationJobStore(db);
+    jobs.create({ id: "job-1", projectId: project.id, shotId: "shot-1", idempotencyKey: "c".repeat(64), state: "running", payload: { promptVersionId: "prompt-1" } });
+    expect(jobs.recoverInterruptedJobs()).toBe(1);
+    expect(jobs.findByIdempotencyKey("c".repeat(64))).toMatchObject({ id: "job-1", state: "failed", shotId: "shot-1" });
+    jobs.restart("job-1", { promptVersionId: "prompt-1" }); jobs.finish("job-1", "succeeded", { asset: { shotId: "shot-1" } });
+    expect(jobs.findByIdempotencyKey("c".repeat(64))?.state).toBe("succeeded");
+    expect(() => jobs.create({ id: "job-2", projectId: project.id, shotId: "shot-1", idempotencyKey: "c".repeat(64), state: "running", payload: {} })).toThrow();
     db.close();
   });
 });

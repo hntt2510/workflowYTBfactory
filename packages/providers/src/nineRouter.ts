@@ -70,6 +70,16 @@ export interface ImageResult {
   dataUri?: string;
 }
 
+export class NineRouterImageGenerationError extends Error {
+  constructor(
+    readonly status: NineRouterTextResponseFailure,
+    message: string,
+    readonly httpStatus?: number
+  ) {
+    super(message);
+  }
+}
+
 export class NineRouterClient {
   private readonly fetchImpl: typeof fetch;
 
@@ -78,11 +88,19 @@ export class NineRouterClient {
   }
 
   async listModels(): Promise<Array<{ id: string }>> {
+    return this.listModelsAt("models");
+  }
+
+  async listImageModels(): Promise<Array<{ id: string }>> {
+    return this.listModelsAt("models/image");
+  }
+
+  private async listModelsAt(path: string): Promise<Array<{ id: string }>> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 10_000);
     let response: Response;
     try {
-      response = await this.fetchImpl(`${this.config.baseUrl.replace(/\/$/, "")}/models`, {
+      response = await this.fetchImpl(`${this.config.baseUrl.replace(/\/$/, "")}/${path}`, {
         headers: this.headers(),
         signal: controller.signal
       });
@@ -152,6 +170,66 @@ export class NineRouterClient {
     } catch (error) {
       if (error instanceof NineRouterTextResponseError) throw error;
       throw new NineRouterTextResponseError("invalid_response_shape", "9Router text response returned malformed JSON.");
+    }
+  }
+
+  async createChatCompletionText(input: { model: string; prompt: string }): Promise<NineRouterTextResponse> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 30_000);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.config.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+        method: "POST",
+        headers: { ...this.headers(), "Content-Type": "application/json" },
+        body: JSON.stringify({ model: input.model, messages: [{ role: "user", content: input.prompt }], stream: false }),
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw new NineRouterTextResponseError("timeout", "9Router chat completion timed out.");
+      throw new NineRouterTextResponseError("network_error", "9Router chat completion network error.");
+    } finally { clearTimeout(timeout); }
+    if (!response.ok) throw new NineRouterTextResponseError(mapHttpStatus(response.status), `9Router chat completion failed: ${response.status}`, response.status);
+    try {
+      const payload = await response.json() as { choices?: Array<{ message?: { content?: unknown } }>; model?: unknown };
+      const text = payload.choices?.map((choice) => choice.message?.content).find((value): value is string => typeof value === "string" && value.trim().length > 0);
+      if (!text) throw new NineRouterTextResponseError("invalid_response_shape", "9Router chat completion response shape was not supported.");
+      return { text, ...(typeof payload.model === "string" && payload.model.trim() ? { returnedModelId: payload.model } : {}) };
+    } catch (error) {
+      if (error instanceof NineRouterTextResponseError) throw error;
+      throw new NineRouterTextResponseError("invalid_response_shape", "9Router chat completion returned malformed JSON.");
+    }
+  }
+
+  async createImage(input: { model: string; prompt: string; aspectRatio: "16:9" | "9:16"; idempotencyKey?: string }): Promise<ImageResult[]> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 60_000);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.config.baseUrl.replace(/\/$/, "")}/images/generations`, {
+        method: "POST",
+        headers: { ...this.headers(), "Content-Type": "application/json", ...(input.idempotencyKey ? { "Idempotency-Key": input.idempotencyKey } : {}) },
+        // Request inline bytes where available so transient signed URLs never become persisted data.
+        body: JSON.stringify({ model: input.model, prompt: input.prompt, size: input.aspectRatio === "9:16" ? "1024x1792" : "1792x1024", response_format: "b64_json" }),
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new NineRouterImageGenerationError("timeout", "9Router image generation timed out.");
+      }
+      throw new NineRouterImageGenerationError("network_error", "9Router image generation network error.");
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!response.ok) {
+      throw new NineRouterImageGenerationError(mapHttpStatus(response.status), `9Router image generation failed: ${response.status}`, response.status);
+    }
+    try {
+      const results = this.parseImageResults(await response.json());
+      if (results.length === 0) throw new Error("missing image result");
+      return results;
+    } catch (error) {
+      if (error instanceof NineRouterImageGenerationError) throw error;
+      throw new NineRouterImageGenerationError("invalid_response_shape", "9Router image response shape was not supported.");
     }
   }
 

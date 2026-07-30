@@ -24,7 +24,10 @@ export async function listNineRouterModels(input: {
   }
   try {
     const client = createNineRouterClient(settings, secret, input.timeoutMs ?? 10_000);
-    const models = await client.listModels();
+    const textModels = await client.listModels();
+    // Image models use a dedicated 9Router discovery endpoint.
+    const imageModels = await client.listImageModels().catch(() => []);
+    const models = [...new Map([...textModels, ...imageModels].map((model) => [model.id, model])).values()];
     const status: ModelListStatus = models.length > 0 ? "models_discovered" : "empty_model_list";
     input.logger.info("nine_router_model_listing_succeeded", { providerId, status, modelCount: models.length });
     return {

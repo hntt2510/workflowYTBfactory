@@ -8,6 +8,11 @@ import {
 import type {
   BootstrapData,
   GenerateLocalTtsInput,
+  DevVoiceTestResult,
+  DevCapcutTestResult,
+  DevIdeaTestResult,
+  DevImageTestResult,
+  DevStockTestResult,
   LongShortFactoryApi,
   LocalTtsGenerated,
   LocalTtsSettings,
@@ -17,6 +22,7 @@ import type {
   ProviderCredentialSettings,
   ProviderPresence,
   TextModelCertificationResponse
+  , ImageModelCertificationResponse
 } from "../types";
 
 const emptyQueue = { concurrency: 5, running: 0, jobs: [] };
@@ -33,6 +39,7 @@ const browserRuntime = {
   capcutDraftDir: "Not configured",
   draftDirConfigured: false,
   capcutCompatibility: "Unavailable in browser preview"
+  , devTestLabEnabled: false
 };
 
 function webFallback(): LongShortFactoryApi {
@@ -121,13 +128,21 @@ function webFallback(): LongShortFactoryApi {
         errorCategory: "network_error"
       };
     },
+    async load9RouterImageCertification(): Promise<ImageModelCertificationResponse> { return { status: "not_tested", message: "Electron main process unavailable." }; },
+    async run9RouterImageCertification(): Promise<ImageModelCertificationResponse> { return { status: "failed", message: "Electron main process unavailable.", errorCategory: "credential_missing" }; },
     async loadLocalTtsSettings(): Promise<LocalTtsSettings> {
       return {
         omnivoiceBinPath: "",
         outputDir: "Electron main process unavailable",
+        ttsProvider: "omnivoice-local",
+        ttsVoiceProvider: "edge-tts",
+        ttsVoiceId: "",
+        ttsPythonPath: "",
         modelPath: "",
         language: "",
         instruct: "",
+        referenceAudioPath: "",
+        referenceTranscript: "",
         available: false,
         resolvedBinPath: ""
       };
@@ -135,9 +150,28 @@ function webFallback(): LongShortFactoryApi {
     async saveLocalTtsSettings(input: Omit<LocalTtsSettings, "available" | "resolvedBinPath">): Promise<LocalTtsSettings> {
       return { ...input, available: false, resolvedBinPath: input.omnivoiceBinPath };
     },
+    async selectLocalTtsReferenceAudio(): Promise<{ referenceAudioPath?: string }> { throw new Error("Electron main process unavailable."); },
     async generateLocalTts(_input: GenerateLocalTtsInput): Promise<LocalTtsGenerated> {
       throw new Error("Electron main process unavailable.");
     },
+    async listNineRouterTtsCatalog(_input: { provider: "edge-tts" | "google-tts"; language: string }): Promise<import("../types").NineRouterTtsCatalogResult> { throw new Error("Electron main process unavailable."); },
+    async listTtsProviders(): Promise<import("../types").TtsProviderCatalog> { throw new Error("Electron main process unavailable."); },
+    async runTtsProviderHealthCheck(): Promise<import("../types").TtsProviderStatus> { throw new Error("Electron main process unavailable."); },
+    async previewTtsProvider(): Promise<import("../types").TtsPreviewResult> { throw new Error("Electron main process unavailable."); },
+    async createTtsJob(): Promise<import("../types").TtsJob> { throw new Error("Electron main process unavailable."); },
+    async getTtsJob(): Promise<import("../types").TtsJob> { throw new Error("Electron main process unavailable."); },
+    async getProjectTtsJob(): Promise<import("../types").TtsJob | null> { throw new Error("Electron main process unavailable."); },
+    async retryTtsJobSegment(): Promise<import("../types").TtsJob> { throw new Error("Electron main process unavailable."); },
+    async cancelTtsJob(): Promise<import("../types").TtsJob> { throw new Error("Electron main process unavailable."); },
+    async runDevVoiceTest(_input: { text: string; provider?: "omnivoice-local" | "nine-router-tts" | "edge-tts" | "gtts" | "kokoro-vietnamese" | "capcut-experimental"; voiceId?: string }): Promise<DevVoiceTestResult> {
+      throw new Error("Dev Test Lab requires Electron.");
+    },
+    async runDevCapcutTest(_input: { subtitleText?: string }): Promise<DevCapcutTestResult> {
+      throw new Error("Dev Test Lab requires Electron.");
+    },
+    async runDevIdeaTest(_input: { topic: string; language?: string }): Promise<DevIdeaTestResult> { throw new Error("Dev Test Lab requires Electron."); },
+    async runDevImageTest(_input: { prompt: string; aspectRatio: "16:9" | "9:16" }): Promise<DevImageTestResult> { throw new Error("Dev Test Lab requires Electron."); },
+    async runDevStockTest(_input: { query: string; mediaType: "image" | "video" }): Promise<DevStockTestResult> { throw new Error("Dev Test Lab requires Electron."); },
     async addCompetitorReference(input): Promise<{ status: "saved"; project: FactoryProject; message: string }> {
       const project = projects.find((item) => item.id === input.projectId);
       if (!project) throw new Error("Project not found.");
@@ -177,6 +211,9 @@ function webFallback(): LongShortFactoryApi {
       throw new Error("Electron main process unavailable.");
     },
     async approveReferenceSet(): Promise<FactoryProject> {
+      throw new Error("Electron main process unavailable.");
+    },
+    async revokeReferenceSetApproval(): Promise<FactoryProject> {
       throw new Error("Electron main process unavailable.");
     },
     async runTranscriptCleaning(): Promise<FactoryProject> {
@@ -256,7 +293,43 @@ function webFallback(): LongShortFactoryApi {
     async approveShotPlan(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async runVisualRouting(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async listVisualRoutingArtifacts() { return []; },
+    async editVisualRouting(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async approveVisualRouting(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async runPromptPreparation(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async listPromptPreparationArtifacts() { return []; },
+    async approvePromptPreparation(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async runAssetAcquisition(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async listAssetAcquisitionArtifacts() { return []; },
+    async approveAssetAcquisition(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async runAssetReview(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async listAssetReviewArtifacts() { return []; },
+    async reviseAssetReview(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async selectManualAssetUpload(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async approveAssetReview(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async runVoiceGeneration(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async listVoiceGenerationArtifacts() { return []; },
+    async approveVoiceGeneration(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async runSubtitlePreparation(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async listSubtitlePreparationArtifacts() { return []; },
+    async approveSubtitlePreparation(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async runTimelineAssembly(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async listTimelineAssemblyArtifacts() { return []; },
+    async approveTimelineAssembly(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async runPreviewRender(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async listPreviewRenderArtifacts() { return []; },
+    async approvePreviewRender(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async rejectPreviewRender(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async runQa(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async listQaArtifacts() { return []; },
+    async approveQa(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async rejectQa(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async runCapCutDraft(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async listCapCutDraftArtifacts() { return []; },
+    async approveCapCutDraft(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async runPackagingExport(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async listPackagingExportArtifacts() { return []; },
+    async approvePackagingExport(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async rejectPackagingExport(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async mockImageBatch() {
       return emptyQueue;
     }

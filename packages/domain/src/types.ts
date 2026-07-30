@@ -176,6 +176,7 @@ export interface Shot {
     | "ai_video"
     | "stock_image"
     | "stock_video"
+    | "manual_upload"
     | "uploaded"
     | "document"
     | "diagram"

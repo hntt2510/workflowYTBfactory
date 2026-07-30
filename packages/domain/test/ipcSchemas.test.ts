@@ -17,7 +17,33 @@ import {
   cleanedTranscriptOutputSchema,
   runTranscriptCleaningRequestSchema,
   originalityReviewOutputSchema,
-  researchSourcesOutputSchema
+  researchSourcesOutputSchema,
+  editVisualRoutingRequestSchema,
+  assetReviewOutputSchema,
+  reviseAssetReviewRequestSchema
+  , voiceGenerationOutputSchema
+  , subtitlePreparationOutputSchema
+  , timelineAssemblyOutputSchema
+  , previewRenderRequestSchema
+  , previewRenderOutputSchema
+  , qaRequestSchema
+  , qaOutputSchema
+  , capcutDraftRequestSchema
+  , capcutDraftOutputSchema
+  , packagingExportRequestSchema
+  , packagingExportOutputSchema
+  , devVoiceTestRequestSchema
+  , devVoiceTestResponseSchema
+  , devCapcutTestRequestSchema
+  , devCapcutTestResponseSchema
+  , devIdeaTestRequestSchema
+  , devIdeaTestResponseSchema
+  , devImageTestRequestSchema
+  , devImageTestResponseSchema
+  , devStockTestRequestSchema
+  , devStockTestResponseSchema
+  , localTtsSettingsSchema
+  , localTtsReferenceAudioResponseSchema
 } from "../src";
 import { createFixtureProject } from "../src";
 
@@ -38,6 +64,12 @@ describe("ipc schemas", () => {
 
   it("rejects invalid project ids", () => {
     expect(() => projectIdRequestSchema.parse({ projectId: "../bad" })).toThrow();
+  });
+
+  it("keeps voice cloning settings local and validates their reference fields", () => {
+    expect(localTtsSettingsSchema.parse({ omnivoiceBinPath: "D:/OmniVoice/omnivoice-infer.exe", outputDir: "D:/workspace/tts", referenceAudioPath: "D:/voices/narrator.wav", referenceTranscript: "Reference words" }).referenceAudioPath).toContain("narrator.wav");
+    expect(localTtsReferenceAudioResponseSchema.parse({ referenceAudioPath: "D:/voices/narrator.wav" }).referenceAudioPath).toContain("narrator.wav");
+    expect(() => localTtsSettingsSchema.parse({ omnivoiceBinPath: "D:/OmniVoice/omnivoice-infer.exe", outputDir: "D:/workspace/tts", referenceTranscript: "x".repeat(12001) })).toThrow();
   });
 
   it("validates workflow and reference status contracts", () => {
@@ -189,5 +221,70 @@ describe("ipc schemas", () => {
       cleanedCharacterCount: transcript.length,
       unexpected: true
     })).toThrow();
+  });
+
+  it("allows only a supported visual-mode revision for a review artifact", () => {
+    expect(editVisualRoutingRequestSchema.parse({ projectId: "project-1", artifactId: "artifact-1", shotId: "shot-1", visualMode: "document" }).visualMode).toBe("document");
+    expect(editVisualRoutingRequestSchema.parse({ projectId: "project-1", artifactId: "artifact-1", shotId: "shot-1", visualMode: "manual_upload" }).visualMode).toBe("manual_upload");
+    expect(() => editVisualRoutingRequestSchema.parse({ projectId: "project-1", artifactId: "artifact-1", shotId: "shot-1", visualMode: "unknown_mode" })).toThrow();
+  });
+
+  it("keeps Asset Review decisions explicit and free of URLs or secrets", () => {
+    const asset = { shotId: "shot-1", promptVersionId: "prompt-1", relativeFilePath: "assets/images/project-1/shot-1.png", sha256: "d".repeat(64), mimeType: "image/png", byteLength: 10, width: 1, height: 1 };
+    expect(assetReviewOutputSchema.parse({ acquisitionArtifactId: "artifact-1", assets: [{ asset, reviewStatus: "needs_review" }] }).assets).toHaveLength(1);
+    expect(reviseAssetReviewRequestSchema.parse({ projectId: "project-1", artifactId: "artifact-2", assetSha256: "d".repeat(64), action: "assign", shotId: "shot-1" }).action).toBe("assign");
+    expect(() => assetReviewOutputSchema.parse({ acquisitionArtifactId: "artifact-1", assets: [{ asset: { ...asset, signedUrl: "https://example.com" }, reviewStatus: "needs_review" }] })).toThrow();
+  });
+
+  it("requires nonempty, portable, validated voice segment metadata", () => {
+    expect(voiceGenerationOutputSchema.parse({ segments: [{ scriptSectionId: "section-1", relativeFilePath: "assets/voice/project-1/section-1.wav", durationSeconds: 1.25, codec: "pcm_s16le", byteLength: 100, sha256: "e".repeat(64) }] }).segments).toHaveLength(1);
+    expect(() => voiceGenerationOutputSchema.parse({ segments: [{ scriptSectionId: "section-1", relativeFilePath: "C:/outside.wav", durationSeconds: 0, codec: "", byteLength: 0, sha256: "e".repeat(64) }] })).toThrow();
+  });
+
+  it("keeps development probes independent from project artifacts", () => {
+    expect(devVoiceTestRequestSchema.parse({ text: "Test voice", provider: "kokoro-vietnamese", voiceId: "storyvert" }).voiceId).toBe("storyvert");
+    expect(devVoiceTestResponseSchema.parse({ provider: "omnivoice-local", previewUrl: "file:///D:/workspace/dev-test-lab/voice/test.wav", relativeFilePath: "dev-test-lab/voice/test.wav", durationSeconds: 1, codec: "pcm_s16le", byteLength: 44, sha256: "d".repeat(64) }).provider).toBe("omnivoice-local");
+    expect(devCapcutTestRequestSchema.parse({ subtitleText: "Test subtitle" }).subtitleText).toBe("Test subtitle");
+    expect(devCapcutTestResponseSchema.parse({ draftDirectory: "D:/CapCut/test", contentPath: "D:/CapCut/test/draft_content.json", fixtureDirectory: "dev-test-lab/capcut/test", trackCounts: { video: 1, audio: 1, text: 1 } }).trackCounts.text).toBe(1);
+    expect(devIdeaTestRequestSchema.parse({ topic: "Test topic" }).topic).toBe("Test topic");
+    expect(devIdeaTestResponseSchema.parse({ model: "test-model", responseText: "1. Test", relativeFilePath: "dev-test-lab/ideas/test.json" }).model).toBe("test-model");
+    expect(devImageTestRequestSchema.parse({ prompt: "Test image", aspectRatio: "9:16" }).aspectRatio).toBe("9:16");
+    expect(devImageTestResponseSchema.parse({ relativeFilePath: "assets/images/dev-test/test.png", sha256: "c".repeat(64), mimeType: "image/png", byteLength: 100, width: 10, height: 10 }).mimeType).toBe("image/png");
+    expect(devStockTestRequestSchema.parse({ query: "library", mediaType: "image" }).query).toBe("library");
+    expect(devStockTestResponseSchema.parse({ mediaType: "video", results: [{ id: "1", url: "https://www.pexels.com/video/1", previewUrl: "https://images.pexels.com/video.jpg" }] }).results).toHaveLength(1);
+  });
+
+  it("requires ordered frame-valid subtitle cues with original text", () => {
+    expect(subtitlePreparationOutputSchema.parse({ fps: 30, cues: [{ id: "cue-1", scriptSectionId: "section-1", startFrame: 0, durationFrames: 15, text: "Original sentence." }] }).cues[0]?.text).toBe("Original sentence.");
+    expect(() => subtitlePreparationOutputSchema.parse({ fps: 30, cues: [{ id: "cue-1", scriptSectionId: "section-1", startFrame: -1, durationFrames: 0, text: "" }] })).toThrow();
+  });
+
+  it("requires integer-frame timeline media items", () => {
+    expect(timelineAssemblyOutputSchema.parse({ fps: 30, items: [{ id: "visual-shot-1", track: "primary_visual", sourceId: "asset-1", startFrame: 0, durationFrames: 30, fps: 30 }] }).items).toHaveLength(1);
+    expect(() => timelineAssemblyOutputSchema.parse({ fps: 30, items: [{ id: "visual-shot-1", track: "primary_visual", sourceId: "asset-1", startFrame: -1, durationFrames: 0, fps: 30 }] })).toThrow();
+  });
+
+  it("keeps Preview Render output local, validated, and tied to approved inputs", () => {
+    expect(previewRenderRequestSchema.parse({ projectId: "project-1" }).projectId).toBe("project-1");
+    expect(previewRenderOutputSchema.parse({ relativeFilePath: "previews/project-1/run-1.mp4", durationSeconds: 3.2, width: 1080, height: 1920, sha256: "a".repeat(64), inputArtifactIds: ["artifact-timeline", "artifact-assets", "artifact-voice"] }).relativeFilePath).toContain("previews/");
+    expect(() => previewRenderOutputSchema.parse({ relativeFilePath: "../outside.mp4", durationSeconds: 0, width: 0, height: 0, inputArtifactIds: [] })).toThrow();
+  });
+
+  it("keeps deterministic QA findings bounded and reviewable", () => {
+    expect(qaRequestSchema.parse({ projectId: "project-1" }).projectId).toBe("project-1");
+    expect(qaOutputSchema.parse({ runner: "local_deterministic", inputArtifactIds: ["artifact-preview"], findings: [{ code: "missing_audio", severity: "blocking", message: "Narration is missing.", evidence: "timeline-assembly" }] }).findings[0]?.severity).toBe("blocking");
+    expect(() => qaOutputSchema.parse({ runner: "ai", inputArtifactIds: [], findings: [] })).toThrow();
+  });
+
+  it("keeps CapCut Draft artifacts structurally validated but explicitly reviewable", () => {
+    expect(capcutDraftRequestSchema.parse({ projectId: "project-1" }).projectId).toBe("project-1");
+    expect(capcutDraftOutputSchema.parse({ draftName: "project-1-run-1", structurallyValidated: true, trackCounts: { video: 1, audio: 1, text: 2 }, inputArtifactIds: ["artifact-qa", "artifact-timeline", "artifact-preview"] }).trackCounts.text).toBe(2);
+    expect(() => capcutDraftOutputSchema.parse({ draftName: "../draft", structurallyValidated: false, trackCounts: { video: 0, audio: 0, text: 0 }, inputArtifactIds: [] })).toThrow();
+  });
+
+  it("keeps package manifests portable and artifact-only", () => {
+    expect(packagingExportRequestSchema.parse({ projectId: "project-1" }).projectId).toBe("project-1");
+    expect(packagingExportOutputSchema.parse({ relativeFilePath: "exports/project-1/package.json", artifactIds: ["a1", "a2", "a3", "a4", "a5", "a6"], sha256: "f".repeat(64) }).artifactIds).toHaveLength(6);
+    expect(() => packagingExportOutputSchema.parse({ relativeFilePath: "../secret.json", artifactIds: [], sha256: "bad" })).toThrow();
   });
 });

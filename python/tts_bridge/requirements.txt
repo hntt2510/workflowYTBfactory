@@ -1,0 +1,6 @@
+edge-tts
+gTTS
+kokoro
+git+https://github.com/iamdinhthuan/Kokoro-Vietnamese.git
+soundfile
+torch

@@ -50,6 +50,19 @@ describe("workflow eligibility", () => {
     expect(transcriptCleaning?.blockingReasons[0]?.code).toBe("TEXT_MODEL_NOT_VERIFIED");
   });
 
+  it("accepts an available local OmniVoice capability for voice generation", () => {
+    const project = createFixtureProject({ topic: "Topic", format: "long", targetLanguage: "English" });
+    const readyForVoice = {
+      ...project,
+      stages: project.stages.map((stage, index) => index < 21 ? { ...stage, status: "approved" as const } : stage)
+    };
+    const blocked = resolveStageEligibilities(readyForVoice).find((stage) => stage.stageId === "voice-generation");
+    const available = resolveStageEligibilities(readyForVoice, { localAudioAvailable: true }).find((stage) => stage.stageId === "voice-generation");
+    expect(blocked?.blockingReasons[0]?.code).toBe("AUDIO_MODEL_NOT_VERIFIED");
+    expect(available?.status).toBe("ready");
+    expect(available?.runnable).toBe(true);
+  });
+
   it("does not allow a needs-review stage to run", () => {
     const project = createFixtureProject({ topic: "Topic", format: "long", targetLanguage: "English" });
     const reviewProject = {

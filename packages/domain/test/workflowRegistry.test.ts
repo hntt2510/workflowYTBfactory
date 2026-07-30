@@ -46,6 +46,28 @@ describe("workflow registry", () => {
     }
   });
 
+  it("declares the runner that creates each executable stage run", () => {
+    const runners = Object.fromEntries(workflowStageDefinitions.map((stage) => [stage.id, stage.runnerId]));
+    expect(runners).toMatchObject({
+      "reference-segmentation": "reference-segmentation-9router",
+      "competitor-dna": "competitor-dna-9router",
+      "opportunity-map": "opportunity-map-9router",
+      "idea-lab": "idea-lab-9router",
+      "research-source-intake": "research-source-intake-manual",
+      "claim-map": "claim-map-9router",
+      outline: "outline-9router",
+      "visual-routing": "visual-routing-local",
+      "prompt-preparation": "prompt-preparation-9router",
+      "asset-acquisition": "asset-acquisition-9router",
+      "asset-review": "asset-review-user-action",
+      "voice-generation": "edge-tts",
+      "subtitle-preparation": "subtitle-preparation-local",
+      "timeline-assembly": "timeline-assembly-local",
+      "preview-render": "ffmpeg-preview",
+      "packaging-export": "packaging-export-local"
+    });
+  });
+
   it("has no dependency cycles", () => {
     const visited = new Set<string>();
     const visiting = new Set<string>();

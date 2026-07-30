@@ -25,6 +25,13 @@ describe("NineRouterClient", () => {
     await expect(client.listModels()).resolves.toEqual([{ id: "model-a" }, { id: "model-b" }]);
   });
 
+  it("discovers image models at the dedicated 9Router endpoint", async () => {
+    const calls: Array<RequestInfo | URL> = [];
+    const client = new NineRouterClient({ baseUrl: "http://localhost/v1", fetchImpl: async (url) => { calls.push(url); return new Response(JSON.stringify({ data: [{ id: "flux/dev" }] })); } });
+    await expect(client.listImageModels()).resolves.toEqual([{ id: "flux/dev" }]);
+    expect(String(calls[0])).toBe("http://localhost/v1/models/image");
+  });
+
   it.each([
     [401, "unauthorized"],
     [403, "unauthorized"],
@@ -94,6 +101,14 @@ describe("NineRouterClient", () => {
       const client = new NineRouterClient({ baseUrl: "http://localhost/v1", fetchImpl: async () => new Response(JSON.stringify(payload)) });
       await expect(client.createResponseText({ model: "model-a", input: "x" })).resolves.toMatchObject({ text: "MODEL_OK" });
     }
+  });
+
+  it("creates OpenAI-compatible chat completion requests", async () => {
+    const calls: Array<{ url: RequestInfo | URL; init?: RequestInit }> = [];
+    const client = new NineRouterClient({ baseUrl: "http://localhost/v1", apiKey: "sk-secret", fetchImpl: async (url, init) => { calls.push({ url, ...(init ? { init } : {}) }); return new Response(JSON.stringify({ model: "chat-model", choices: [{ message: { content: "IDEA_OK" } }] })); } });
+    await expect(client.createChatCompletionText({ model: "model-a", prompt: "Give an idea" })).resolves.toEqual({ text: "IDEA_OK", returnedModelId: "chat-model" });
+    expect(String(calls[0]?.url)).toBe("http://localhost/v1/chat/completions");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ model: "model-a", messages: [{ role: "user", content: "Give an idea" }], stream: false });
   });
 
   it("maps unsupported /responses shapes to invalid_response_shape", async () => {

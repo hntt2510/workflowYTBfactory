@@ -9,6 +9,11 @@ import { DataTable, DisabledAction, EmptyState, FormField, MetricCard, PageHeade
 import type {
   BootstrapData,
   LocalTtsSettings,
+  DevVoiceTestResult,
+  DevCapcutTestResult,
+  DevIdeaTestResult,
+  DevImageTestResult,
+  DevStockTestResult,
   ModelListStatus,
   ProjectSummary,
   ProviderCredentialSettings,
@@ -27,10 +32,22 @@ import type {
   ScenePlanArtifact,
   ShotPlanArtifact,
   VisualRoutingArtifact,
+  PromptPreparationArtifact,
+  AssetAcquisitionArtifact,
+  AssetReviewArtifact,
+  VoiceGenerationArtifact,
+  SubtitlePreparationArtifact,
+  TimelineAssemblyArtifact,
+  PreviewRenderArtifact,
+  QaArtifact,
+  CapCutDraftArtifact,
+  PackagingExportArtifact,
+  ImageModelCertificationResponse,
   TranscriptCleaningArtifact,
   ReferenceSegmentationArtifact,
   CompetitorDnaArtifact,
   OpportunityMapArtifact
+  , TtsProviderCatalog, TtsProviderId, TtsJob
 } from "./types";
 import { currentStage, estimatedDuration, formatDate, formatTimecode, projectProgress, queueCounts, stageTone } from "./utils";
 import { AppShell, LoadingScreen } from "./layouts/AppShell";
@@ -54,7 +71,8 @@ const fallbackBootstrap: BootstrapData = {
     ffmpegStatus: "Loading",
     capcutDraftDir: "Loading",
     draftDirConfigured: false,
-    capcutCompatibility: "Loading"
+    capcutCompatibility: "Loading",
+    devTestLabEnabled: false
   }
 };
 
@@ -288,10 +306,10 @@ function RouteScreen(props: {
   if (props.route === "scenes") return <ScenesScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} textCertification={props.textCertification} />;
   if (props.route === "shots") return <ShotsScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} textCertification={props.textCertification} />;
   if (props.route === "visuals") return <VisualsScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} />;
-  if (props.route === "voice") return <VoiceScreen project={props.selectedProject} localTtsSettings={props.localTtsSettings} onRefresh={props.onRefresh} />;
-  if (props.route === "timeline") return <TimelineScreen project={props.selectedProject} />;
-  if (props.route === "qa") return <UnavailableWorkflow title="QA" reason="The QA engine is missing; no fake AI QA findings are generated." />;
-  return <UnavailableWorkflow title="Export" reason="CapCut export remains manifest-only and disconnected; editable draft generation is unavailable." />;
+  if (props.route === "voice") return <VoiceScreen project={props.selectedProject} localTtsSettings={props.localTtsSettings} onRefresh={props.onRefresh} setSelectedProject={props.setSelectedProject} />;
+  if (props.route === "timeline") return <TimelineScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} />;
+  if (props.route === "qa") return <QaScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} />;
+  return <ExportScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} />;
 }
 
 function Dashboard(props: {
@@ -520,10 +538,6 @@ function NewProjectWizard(props: {
 
   async function routeTopic() {
     setMessage("");
-    if (!setupReady) {
-      setMessage("Setup is incomplete. Finish the required config checklist before creating or routing a new project.");
-      return;
-    }
     if (!targetLanguage.trim()) return;
     const input = {
       topic,
@@ -537,10 +551,6 @@ function NewProjectWizard(props: {
 
   async function create() {
     setMessage("");
-    if (!setupReady) {
-      setMessage("Setup is incomplete. Finish 9Router, OmniVoice, and FFmpeg first.");
-      return;
-    }
     setSaving(true);
     try {
       const competitorReference = competitorScript.trim()
@@ -708,7 +718,7 @@ function NewProjectWizard(props: {
               <p><strong>Mode:</strong> {workflowModeOptions.find((option) => option.value === workflowMode)?.label ?? "Guided"}</p>
               <p><strong>Competitor references:</strong> {competitorScript.trim() ? "1 pasted reference will be saved" : "None pasted yet"}</p>
               <p><StatusBadge tone="info">Ready</StatusBadge> Project creation saves setup and references only. Later stages must be run and approved one by one.</p>
-              <button className="button primary" type="button" onClick={() => void create()} disabled={saving || !topic.trim() || !targetLanguage.trim() || !setupReady}>
+              <button className="button primary" type="button" onClick={() => void create()} disabled={saving || !topic.trim() || !targetLanguage.trim()}>
                 {saving ? "Creating..." : "Create Project"}
               </button>
             </div>
@@ -1027,6 +1037,13 @@ function CompetitorReferenceIntake(props: { project: FactoryProject; setSelected
     setMessage("Reference set approved. Competitor Workflow is now available.");
   }
 
+  async function revokeReferenceSetApproval() {
+    if (!window.confirm("Revoking this approval will mark every downstream artifact stale. Continue?")) return;
+    const project = await factoryClient.revokeReferenceSetApproval({ projectId: props.project.id });
+    props.setSelectedProject(project);
+    setMessage("Reference set approval revoked. Validate the current references before continuing.");
+  }
+
   function startEdit(referenceId: string) {
     const reference = props.project.competitorReferences.find((item) => item.id === referenceId);
     if (!reference) return;
@@ -1091,6 +1108,9 @@ function CompetitorReferenceIntake(props: { project: FactoryProject; setSelected
           ) : (
             <DisabledAction reason="Reference set must be valid before approval.">Approve reference set</DisabledAction>
           )}
+          {referenceSetStatus === "approved" ? (
+            <button className="button danger" type="button" onClick={() => void revokeReferenceSetApproval()}>Revoke reference approval</button>
+          ) : null}
           {canContinue ? (
             <button className="button primary" type="button" onClick={() => props.setRoute("competitor-dna")}>Continue to Competitor Workflow</button>
           ) : (
@@ -1712,24 +1732,48 @@ function ShotsScreen(props: { project: FactoryProject; setSelectedProject: (proj
 }
 
 function VisualsScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void }) {
-  const [artifacts, setArtifacts] = useState<VisualRoutingArtifact[]>([]); const [running, setRunning] = useState(false); const [message, setMessage] = useState("");
+  const [artifacts, setArtifacts] = useState<VisualRoutingArtifact[]>([]); const [promptArtifacts, setPromptArtifacts] = useState<PromptPreparationArtifact[]>([]); const [assetArtifacts, setAssetArtifacts] = useState<AssetAcquisitionArtifact[]>([]); const [assetReviewArtifacts, setAssetReviewArtifacts] = useState<AssetReviewArtifact[]>([]); const [imageCertification, setImageCertification] = useState<ImageModelCertificationResponse>({ status: "not_tested", message: "Image model has not been certified." }); const [running, setRunning] = useState(false); const [message, setMessage] = useState("");
+  const visualModes = ["reuse", "document", "diagram", "stock_image", "stock_video", "ai_image", "ai_video", "manual_upload"] as const;
   const eligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "visual-routing")!;
-  const refresh = () => factoryClient.listVisualRoutingArtifacts({ projectId: props.project.id }).then(setArtifacts);
+  const promptEligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "prompt-preparation")!;
+  const assetEligibility = resolveStageEligibilities(props.project, { imageVerified: imageCertification.status === "verified" }).find((stage) => stage.stageId === "asset-acquisition")!;
+  const assetReviewEligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "asset-review")!;
+  const refresh = async () => { const [routing, prompts, assets, reviews, certification] = await Promise.all([factoryClient.listVisualRoutingArtifacts({ projectId: props.project.id }), factoryClient.listPromptPreparationArtifacts({ projectId: props.project.id }), factoryClient.listAssetAcquisitionArtifacts({ projectId: props.project.id }), factoryClient.listAssetReviewArtifacts({ projectId: props.project.id }), factoryClient.load9RouterImageCertification()]); setArtifacts(routing); setPromptArtifacts(prompts); setAssetArtifacts(assets); setAssetReviewArtifacts(reviews); setImageCertification(certification); };
   useEffect(() => { void refresh().catch(() => setArtifacts([])); }, [props.project.id]);
   async function perform(action: () => Promise<FactoryProject>, success: string) { setRunning(true); try { props.setSelectedProject(await action()); await refresh(); setMessage(success); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } finally { setRunning(false); } }
   return <>
     <PageHeader title="Visual Sources" description="Route approved shots to visual modes before preparing prompts or acquiring assets." actions={eligibility.runnable ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runVisualRouting({ projectId: props.project.id }), "Visual Routing is ready for review.")} disabled={running}>Run Visual Routing</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Visual Routing is not runnable."}>Run Visual Routing</DisabledAction>} />
     <StageStatusHeader stageName="Visual Routing" stageNumber={18} eligibility={eligibility} dependencies={["Approved Shot Plan"]} purpose="Assign an editable visual mode per shot; this stage does not generate assets." />
-    <SectionCard title="Visual Routing review">{artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.payloadJson.shots.map((shot) => <p key={shot.id}><strong>{shot.id}</strong>: {shot.purpose} - {shot.visualMode}</p>)}{artifact.status === "needs_review" ? <button className="button compact" type="button" onClick={() => void perform(() => factoryClient.approveVisualRouting({ projectId: props.project.id }), "Visual Routing approved.")} disabled={running}>Approve Visual Routing</button> : null}</div>)}{message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</SectionCard>
+    <SectionCard title="Visual Routing review">{artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.payloadJson.shots.map((shot) => <p key={shot.id}><strong>{shot.id}</strong>: {shot.purpose} - {artifact.status === "needs_review" ? <select aria-label={`Visual mode for ${shot.id}`} value={shot.visualMode} disabled={running} onChange={(event) => void perform(() => factoryClient.editVisualRouting({ projectId: props.project.id, artifactId: artifact.id, shotId: shot.id, visualMode: event.target.value as FactoryProject["shots"][number]["visualMode"] }), "Visual Routing revision is ready for review.")}>{visualModes.map((mode) => <option key={mode} value={mode}>{mode.replaceAll("_", " ")}</option>)}</select> : shot.visualMode}</p>)}{artifact.status === "needs_review" ? <button className="button compact" type="button" onClick={() => void perform(() => factoryClient.approveVisualRouting({ projectId: props.project.id }), "Visual Routing approved.")} disabled={running}>Approve Visual Routing</button> : null}</div>)}{message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</SectionCard>
+    <StageStatusHeader stageName="Prompt Preparation" stageNumber={19} eligibility={promptEligibility} dependencies={["Approved Visual Routing"]} purpose="Prepare reviewable generation prompts only for AI-routed shots; no assets are created." />
+    <SectionCard title="Prompt Preparation review">{promptEligibility.runnable ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runPromptPreparation({ projectId: props.project.id }), "Prompt Preparation is ready for review.")} disabled={running}>Run Prompt Preparation</button> : <DisabledAction reason={promptEligibility.blockingReasons[0]?.message ?? "Prompt Preparation is not runnable."}>Run Prompt Preparation</DisabledAction>}{promptArtifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.payloadJson.prompts.map((prompt) => <p key={prompt.shotId}><strong>{prompt.shotId}</strong>: {prompt.positivePrompt}</p>)}{artifact.status === "needs_review" ? <button className="button compact" type="button" onClick={() => void perform(() => factoryClient.approvePromptPreparation({ projectId: props.project.id }), "Prompt Preparation approved.")} disabled={running}>Approve Prompt Preparation</button> : null}</div>)}</SectionCard>
+    <StageStatusHeader stageName="Asset Acquisition" stageNumber={20} eligibility={assetEligibility} dependencies={["Approved Prompt Preparation", "Verified image model"]} purpose="Generate one validated local image per approved AI-image prompt; every result remains in review." />
+    <SectionCard title="Image model certification" description="This sends exactly one paid capability request only after you click the button. A selected or discovered model is not enough."><StatusBadge tone={imageCertification.status === "verified" ? "success" : "warning"}>{imageCertification.status.replaceAll("_", " ")}</StatusBadge><p>{imageCertification.message}</p><button className="button secondary" type="button" disabled={running} onClick={() => { if (window.confirm("Run one image certification request with the selected 9Router image model?")) { setRunning(true); void factoryClient.run9RouterImageCertification({ providerId: "9router", confirmation: "Run 1 image certification request" }).then((result) => { setImageCertification(result); setMessage(result.message); }).catch((error) => setMessage(error instanceof Error ? error.message : String(error))).finally(() => setRunning(false)); } }}>Run image certification</button></SectionCard>
+    <SectionCard title="Asset Acquisition review" description="This is sequential and explicit. Image URLs and provider credentials are never stored in project artifacts.">{assetEligibility.runnable ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runAssetAcquisition({ projectId: props.project.id }), "Generated assets are ready for review.")} disabled={running}>Generate approved AI images</button> : <DisabledAction reason={assetEligibility.blockingReasons[0]?.message ?? "Asset Acquisition is not runnable."}>Generate approved AI images</DisabledAction>}{assetArtifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.payloadJson.assets.map((asset) => <p key={asset.shotId}><strong>{asset.shotId}</strong>: {asset.mimeType}, {asset.width}x{asset.height}, SHA-256 {asset.sha256.slice(0, 12)}...</p>)}{artifact.status === "needs_review" ? <button className="button compact" type="button" onClick={() => void perform(() => factoryClient.approveAssetAcquisition({ projectId: props.project.id }), "Asset acquisition approved; continue to Asset Review.")} disabled={running}>Approve acquisition batch</button> : null}</div>)}</SectionCard>
+    <StageStatusHeader stageName="Asset Review" stageNumber={21} eligibility={assetReviewEligibility} dependencies={["Approved Asset Acquisition"]} purpose="Approve or reject each image, then explicitly assign it to its mapped shot. No image reaches the timeline by default." />
+    <SectionCard title="Asset Review" description="Review decisions create immutable revisions. A generated asset cannot be assigned to a different shot.">{assetReviewEligibility.runnable ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runAssetReview({ projectId: props.project.id }), "Asset Review is ready for per-asset decisions.")} disabled={running}>Start Asset Review</button> : <DisabledAction reason={assetReviewEligibility.blockingReasons[0]?.message ?? "Asset Review is not runnable."}>Start Asset Review</DisabledAction>}{assetReviewArtifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.status === "needs_review" ? props.project.shots.filter((shot) => shot.visualMode === "manual_upload").map((shot) => <button className="button secondary compact" type="button" disabled={running} key={`upload-${shot.id}`} onClick={() => void perform(() => factoryClient.selectManualAssetUpload({ projectId: props.project.id, artifactId: artifact.id, shotId: shot.id }), "Manual image imported and ready for review.")}>Upload for {shot.id}</button>) : null}{artifact.payloadJson.assets.map((item) => <div key={item.asset.sha256}><p><strong>{item.asset.shotId}</strong>: {item.reviewStatus.replaceAll("_", " ")} {item.assignedShotId ? `- assigned to ${item.assignedShotId}` : "- unassigned"}</p>{artifact.status === "needs_review" ? <div className="button-row">{item.reviewStatus === "needs_review" ? <><button className="button compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: artifact.id, assetSha256: item.asset.sha256, action: "approve" }), "Asset approved. Assign it explicitly before completing review.")}>Approve</button><button className="button danger compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: artifact.id, assetSha256: item.asset.sha256, action: "reject" }), "Asset rejected; it cannot be assigned.")}>Reject</button></> : null}{item.reviewStatus === "approved" && !item.assignedShotId ? <button className="button compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: artifact.id, assetSha256: item.asset.sha256, action: "assign", shotId: item.asset.shotId }), "Asset assigned to its mapped shot.")}>Assign to {item.asset.shotId}</button> : null}{item.assignedShotId ? <button className="button secondary compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: artifact.id, assetSha256: item.asset.sha256, action: "unassign" }), "Asset unassigned.")}>Unassign</button> : null}</div> : null}</div>)}{artifact.status === "needs_review" ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.approveAssetReview({ projectId: props.project.id }), "Asset Review approved. Voice Generation can now use only assigned approved assets.")}>Complete Asset Review</button> : null}</div>)}</SectionCard>
     <div className="shot-board">{props.project.shots.map((shot) => <article className="shot-card" key={shot.id}><div className="shot-thumb">No asset</div><div><strong>{shot.id}</strong><span>{shot.sceneId}</span></div><p>{shot.purpose}</p><StatusBadge tone="warning">{shot.visualMode}</StatusBadge></article>)}</div>
   </>;
 }
 
-function TimelineScreen(props: { project: FactoryProject }) {
+function TimelineScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void }) {
+  const [artifacts, setArtifacts] = useState<TimelineAssemblyArtifact[]>([]); const [previewArtifacts, setPreviewArtifacts] = useState<PreviewRenderArtifact[]>([]); const [running, setRunning] = useState(false); const [message, setMessage] = useState("");
+  const eligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "timeline-assembly")!;
+  const previewEligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "preview-render")!;
+  const refresh = async () => { const [timeline, previews] = await Promise.all([factoryClient.listTimelineAssemblyArtifacts({ projectId: props.project.id }), factoryClient.listPreviewRenderArtifacts({ projectId: props.project.id })]); setArtifacts(timeline); setPreviewArtifacts(previews); };
+  useEffect(() => { void refresh().catch(() => setArtifacts([])); }, [props.project.id]);
+  async function perform(action: () => Promise<FactoryProject>, success: string) { setRunning(true); try { props.setSelectedProject(await action()); await refresh(); setMessage(success); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } finally { setRunning(false); } }
   const totalFrames = Math.max(...props.project.timeline.items.map((item) => item.startFrame + item.durationFrames), 1);
   return (
     <>
-      <PageHeader title="Timeline" description="Simplified admin timeline using frame-based timing." actions={<DisabledAction reason="FFmpeg preview command is not connected to IPC.">Preview</DisabledAction>} />
+      <PageHeader title="Timeline" description="Assemble approved visuals, voice, and subtitles into an integer-frame review timeline." actions={eligibility.runnable ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runTimelineAssembly({ projectId: props.project.id }), "Timeline Assembly is ready for review.")}>Assemble timeline</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Timeline Assembly is not runnable."}>Assemble timeline</DisabledAction>} />
+      <StageStatusHeader stageName="Timeline Assembly" stageNumber={24} eligibility={eligibility} dependencies={["Approved Asset Review", "Approved Voice", "Approved Subtitles"]} purpose="Create a reviewable timeline only from approved media; it does not render or export." />
+      <SectionCard title="Timeline Assembly review">{artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge><p>{artifact.payloadJson.items.length} media items at {artifact.payloadJson.fps} fps</p>{artifact.status === "needs_review" ? <button className="button compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.approveTimelineAssembly({ projectId: props.project.id }), "Timeline Assembly approved.")}>Approve timeline</button> : null}</div>)}{message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</SectionCard>
+      <StageStatusHeader stageName="Preview Render" stageNumber={25} eligibility={previewEligibility} dependencies={["Approved Timeline Assembly"]} purpose="Render real approved visual and narration media with FFmpeg, then review the validated local preview before QA." />
+      <SectionCard title="Preview Render review" description="This runs FFmpeg only after you click it. The renderer cannot select paths or invoke a process directly.">
+        {previewEligibility.runnable ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runPreviewRender({ projectId: props.project.id }), "Preview Render is ready for review.")}>{running ? "Rendering preview..." : "Render approved preview"}</button> : <DisabledAction reason={previewEligibility.blockingReasons[0]?.message ?? "Preview Render requires an approved timeline."}>Render approved preview</DisabledAction>}
+        {previewArtifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : artifact.status === "rejected" ? "danger" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge><p>{artifact.payloadJson.width}x{artifact.payloadJson.height}, {artifact.payloadJson.durationSeconds.toFixed(2)}s</p><p>{artifact.relativeFilePath}</p><p>SHA-256: {artifact.payloadJson.sha256 ?? "Unavailable; render again before approval."}</p>{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.approvePreviewRender({ projectId: props.project.id }), "Preview Render approved.")}>Approve preview</button><button className="button danger compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.rejectPreviewRender({ projectId: props.project.id }), "Preview Render rejected. Render another approved timeline when ready.")}>Reject preview</button></div> : null}</div>)}
+      </SectionCard>
       <SectionCard>
         <div className="timeline-view">
           {props.project.timeline.items.map((item) => (
@@ -1741,6 +1785,25 @@ function TimelineScreen(props: { project: FactoryProject }) {
       </SectionCard>
     </>
   );
+}
+
+function QaScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void }) {
+  const [artifacts, setArtifacts] = useState<QaArtifact[]>([]); const [running, setRunning] = useState(false); const [message, setMessage] = useState("");
+  const eligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "qa")!;
+  const refresh = () => factoryClient.listQaArtifacts({ projectId: props.project.id }).then(setArtifacts);
+  useEffect(() => { void refresh().catch(() => setArtifacts([])); }, [props.project.id]);
+  async function perform(action: () => Promise<FactoryProject>, success: string) { setRunning(true); try { props.setSelectedProject(await action()); await refresh(); setMessage(success); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } finally { setRunning(false); } }
+  return <><PageHeader title="QA" description="Run deterministic evidence checks after an approved preview. QA never fabricates AI findings or auto-approves the project." actions={eligibility.runnable ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runQa({ projectId: props.project.id }), "QA report is ready for review.")}>Run QA</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "QA requires an approved preview."}>Run QA</DisabledAction>} /><StageStatusHeader stageName="QA" stageNumber={26} eligibility={eligibility} dependencies={["Approved Preview Render"]} purpose="Inspect persisted artifacts and local media evidence before CapCut Draft." /><SectionCard title="QA reports">{artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.payloadJson.findings.length ? artifact.payloadJson.findings.map((finding, index) => <p key={`${finding.code}-${index}`}><strong>{finding.severity}</strong> {finding.code}: {finding.message}</p>) : <p>No deterministic findings.</p>}{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" disabled={running || artifact.payloadJson.findings.some((finding) => finding.severity === "blocking")} type="button" onClick={() => void perform(() => factoryClient.approveQa({ projectId: props.project.id }), "QA approved.")}>Approve QA</button><button className="button danger compact" disabled={running} type="button" onClick={() => void perform(() => factoryClient.rejectQa({ projectId: props.project.id }), "QA rejected.")}>Reject QA</button></div> : null}</div>)}{message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</SectionCard></>;
+}
+
+function ExportScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void }) {
+  const [artifacts, setArtifacts] = useState<PackagingExportArtifact[]>([]); const [capcutArtifacts, setCapcutArtifacts] = useState<CapCutDraftArtifact[]>([]); const [running, setRunning] = useState(false); const [message, setMessage] = useState("");
+  const eligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "packaging-export")!;
+  const capcutEligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "capcut-draft")!;
+  const refresh = async () => { const [exports, drafts] = await Promise.all([factoryClient.listPackagingExportArtifacts({ projectId: props.project.id }), factoryClient.listCapCutDraftArtifacts({ projectId: props.project.id })]); setArtifacts(exports); setCapcutArtifacts(drafts); };
+  useEffect(() => { void refresh().catch(() => setArtifacts([])); }, [props.project.id]);
+  async function perform(action: () => Promise<FactoryProject>, success: string) { setRunning(true); try { props.setSelectedProject(await action()); await refresh(); setMessage(success); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } finally { setRunning(false); } }
+  return <><PageHeader title="Export" description="Create a reproducible, reviewed manifest from approved production artifacts only." actions={eligibility.runnable ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runPackagingExport({ projectId: props.project.id }), "Package manifest is ready for review.")}>Create package manifest</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Packaging requires approved CapCut Draft and QA."}>Create package manifest</DisabledAction>} /><StageStatusHeader stageName="CapCut Draft" stageNumber={27} eligibility={capcutEligibility} dependencies={["Approved QA", "Approved Timeline"]} purpose="Create a structural draft for manual CapCut desktop review; it is never auto-approved." /><SectionCard title="CapCut Draft review">{capcutEligibility.runnable ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runCapCutDraft({ projectId: props.project.id }), "CapCut draft is ready for manual desktop review.")}>Create CapCut draft</button> : <DisabledAction reason={capcutEligibility.blockingReasons[0]?.message ?? "CapCut Draft requires approved QA and runtime prerequisites."}>Create CapCut draft</DisabledAction>}{capcutArtifacts.map((artifact) => <p key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge> {artifact.payloadJson.draftName}: {artifact.payloadJson.trackCounts.video} video, {artifact.payloadJson.trackCounts.audio} audio, {artifact.payloadJson.trackCounts.text} subtitle tracks. {artifact.status === "needs_review" ? <button className="button compact" disabled={running} type="button" onClick={() => { if (window.confirm("Confirm that you opened this draft in CapCut and verified that video, audio, and subtitle tracks are editable.")) void perform(() => factoryClient.approveCapCutDraft({ projectId: props.project.id, confirmation: "I opened the draft in CapCut and verified editable tracks" }), "CapCut Draft approved after manual verification."); }}>Confirm CapCut review</button> : null}</p>)}</SectionCard><StageStatusHeader stageName="Packaging Export" stageNumber={28} eligibility={eligibility} dependencies={["Approved CapCut Draft", "Approved QA"]} purpose="Exports no credentials, signed URLs, absolute paths, or unapproved artifacts." /><SectionCard title="Package manifests">{artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge><p>{artifact.relativeFilePath}</p><p>{artifact.payloadJson.artifactIds.length} approved artifacts, SHA-256 {artifact.payloadJson.sha256.slice(0, 12)}...</p>{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" disabled={running} type="button" onClick={() => void perform(() => factoryClient.approvePackagingExport({ projectId: props.project.id }), "Package manifest approved.")}>Approve package</button><button className="button danger compact" disabled={running} type="button" onClick={() => void perform(() => factoryClient.rejectPackagingExport({ projectId: props.project.id }), "Package manifest rejected.")}>Reject package</button></div> : null}</div>)}{message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</SectionCard></>;
 }
 
 function QueueScreen(props: { queue: QueueSnapshot; selectedProject: FactoryProject | null; onRunDemo: () => Promise<void> }) {
@@ -2268,60 +2331,116 @@ function certificationTone(status: string): "default" | "success" | "warning" | 
   return "warning";
 }
 
-function VoiceScreen(props: { project: FactoryProject; localTtsSettings: LocalTtsSettings | null; onRefresh: () => Promise<void> }) {
-  const defaultText = props.project.scriptSections.map((section) => section.narration).join("\n\n");
-  const [text, setText] = useState(defaultText);
+function VoiceScreen(props: { project: FactoryProject; localTtsSettings: LocalTtsSettings | null; onRefresh: () => Promise<void>; setSelectedProject: (project: FactoryProject | null) => void }) {
+  const [artifacts, setArtifacts] = useState<VoiceGenerationArtifact[]>([]);
+  const [subtitleArtifacts, setSubtitleArtifacts] = useState<SubtitlePreparationArtifact[]>([]);
+  const [ttsJob, setTtsJob] = useState<TtsJob | null>(null);
   const [generating, setGenerating] = useState(false);
   const [message, setMessage] = useState("");
+  const available = props.localTtsSettings?.available ?? false;
+  const eligibility = resolveStageEligibilities(props.project, { localAudioAvailable: available }).find((stage) => stage.stageId === "voice-generation")!;
+  const subtitleEligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "subtitle-preparation")!;
 
+  const refresh = async () => {
+    const [voice, subtitles, job] = await Promise.all([
+      factoryClient.listVoiceGenerationArtifacts({ projectId: props.project.id }),
+      factoryClient.listSubtitlePreparationArtifacts({ projectId: props.project.id }),
+      factoryClient.getProjectTtsJob({ projectId: props.project.id })
+    ]);
+    setArtifacts(voice);
+    setSubtitleArtifacts(subtitles);
+    setTtsJob(job);
+  };
+
+  useEffect(() => { void refresh().catch(() => { setArtifacts([]); setTtsJob(null); }); }, [props.project.id]);
   useEffect(() => {
-    setText(defaultText);
-  }, [defaultText]);
+    if (!ttsJob || !["queued", "running"].includes(ttsJob.state)) return;
+    const timer = window.setInterval(() => { void refresh().catch(() => undefined); }, 1200);
+    return () => window.clearInterval(timer);
+  }, [props.project.id, ttsJob?.id, ttsJob?.state]);
+  useEffect(() => {
+    if (!ttsJob || ["queued", "running"].includes(ttsJob.state)) return;
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        await refresh();
+        const project = await factoryClient.loadProject(props.project.id);
+        if (project) props.setSelectedProject(project);
+        await props.onRefresh();
+      })().catch(() => undefined);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [props.project.id, ttsJob?.id, ttsJob?.state]);
 
-  async function generateVoice() {
+  async function perform(action: () => Promise<FactoryProject>, success: string) {
     setGenerating(true);
-    setMessage("");
     try {
-      const result = await factoryClient.generateLocalTts({
-        projectId: props.project.id,
-        text
-      });
-      setMessage(`Generated: ${result.outputPath}`);
+      const project = await action();
+      props.setSelectedProject(project);
+      await refresh();
       await props.onRefresh();
+      setMessage(success);
     } catch (error) {
-      setMessage(`TTS failed: ${error instanceof Error ? error.message : String(error)}`);
+      setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setGenerating(false);
     }
   }
 
-  const available = props.localTtsSettings?.available ?? false;
+  async function retrySegment(segmentId: string) {
+    if (!ttsJob) return;
+    setGenerating(true);
+    try {
+      const job = await factoryClient.retryTtsJobSegment({ jobId: ttsJob.id, segmentId });
+      setTtsJob(job);
+      await refresh();
+      setMessage(`Retry started for ${segmentId}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function cancelJob() {
+    if (!ttsJob) return;
+    setGenerating(true);
+    try {
+      setTtsJob(await factoryClient.cancelTtsJob({ jobId: ttsJob.id }));
+      setMessage("Voice job cancelled.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  const completedSegments = ttsJob?.segments.filter((segment) => segment.state === "success").length ?? 0;
   return (
     <>
-      <PageHeader title="Voice" description="Local OmniVoice TTS generation for the current project." />
-      <SectionCard title="OmniVoice generation">
+      <PageHeader title="Voice" description="Edge Neural is the default Vietnamese provider. Jobs remain strict by default: a failed provider is never silently replaced." />
+      <StageStatusHeader stageName="Voice Generation" stageNumber={22} eligibility={eligibility} dependencies={["Approved Script", "Approved Asset Review", "Configured TTS provider"]} purpose="Generate timestamped, FFprobe-validated voice segments and a merged voiceover track before review." />
+      <SectionCard title="Selected voice provider">
         <div className="form-grid">
-          <FormField label="OmniVoice status" htmlFor="omnivoice-status">
-            <input id="omnivoice-status" value={available ? "Detected" : "Needs setup"} disabled readOnly />
-          </FormField>
-          <FormField label="Binary path" htmlFor="omnivoice-bin-readonly">
-            <input id="omnivoice-bin-readonly" value={props.localTtsSettings?.resolvedBinPath ?? ""} disabled readOnly />
-          </FormField>
-          <FormField label="Narration text" htmlFor="voice-narration">
-            <textarea id="voice-narration" value={text} onChange={(event) => setText(event.target.value)} />
-          </FormField>
+          <FormField label="Voice provider status" htmlFor="tts-provider-status"><input id="tts-provider-status" value={available ? "Configured" : "Needs setup"} disabled readOnly /></FormField>
+          <FormField label="Configured provider" htmlFor="tts-provider-readonly"><input id="tts-provider-readonly" value={props.localTtsSettings?.ttsProvider ?? "edge-tts"} disabled readOnly /></FormField>
+          <FormField label="Configured voice" htmlFor="tts-voice-readonly"><input id="tts-voice-readonly" value={props.localTtsSettings?.ttsVoiceId ?? "vi-VN-HoaiMyNeural"} disabled readOnly /></FormField>
           <div className="button-row">
-            {available && text.trim() ? (
-              <button className="button primary" type="button" onClick={() => void generateVoice()} disabled={generating}>
-                {generating ? "Generating..." : "Generate WAV"}
-              </button>
-            ) : (
-              <DisabledAction reason="Configure OmniVoice in Settings and enter narration text first.">Generate WAV</DisabledAction>
-            )}
+            {available && eligibility.runnable ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runVoiceGeneration({ projectId: props.project.id }), "Voice job queued. Progress is shown below.")} disabled={generating || ttsJob?.state === "running" || ttsJob?.state === "queued"}>{generating ? "Starting..." : "Generate approved script voice"}</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Configure a TTS provider and approve Script plus Asset Review first."}>Generate approved script voice</DisabledAction>}
           </div>
+          {ttsJob ? <div className="settings-list">
+            <p><strong>Job</strong>: {ttsJob.state} ({completedSegments}/{ttsJob.segments.length} segments), requested provider: {ttsJob.provider}</p>
+            {ttsJob.mergedRelativeFilePath ? <p><strong>Merged voiceover</strong>: {ttsJob.mergedRelativeFilePath}</p> : null}
+            {ttsJob.errorMessage ? <p className="error-message">{ttsJob.errorMessage}</p> : null}
+            {ttsJob.segments.map((segment) => <p key={segment.segmentId}><strong>{segment.segmentId}</strong>: {segment.state}, actual provider {segment.actualProvider ?? "pending"}, attempts {segment.attemptCount}{segment.fallbackUsed ? " (explicit fallback used)" : ""}{segment.timingOverflowSeconds > 0 ? `, timing overflow ${segment.timingOverflowSeconds.toFixed(2)}s` : ""}{segment.errorMessage ? ` - ${segment.errorMessage}` : ""}{segment.state === "failed" ? <button className="button compact" type="button" disabled={generating} onClick={() => void retrySegment(segment.segmentId)}>Retry segment</button> : null}</p>)}
+            {["queued", "running"].includes(ttsJob.state) ? <button className="button compact" type="button" disabled={generating} onClick={() => void cancelJob()}>Cancel job</button> : null}
+          </div> : null}
+          {artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge><p>Requested provider: {artifact.payloadJson.requestedProvider ?? "legacy artifact"}</p>{artifact.payloadJson.mergedRelativeFilePath ? <p>Merged voiceover: {artifact.payloadJson.mergedRelativeFilePath}</p> : null}{artifact.payloadJson.timingWarnings?.map((warning) => <p className="safe-message" key={warning}>{warning}</p>)}{artifact.payloadJson.segments.map((segment) => <p key={segment.scriptSectionId}><strong>{segment.scriptSectionId}</strong>: {segment.actualProvider ?? "unknown"}, {segment.durationSeconds.toFixed(2)}s, SHA-256 {segment.sha256.slice(0, 12)}...</p>)}{artifact.status === "needs_review" ? <button className="button compact" type="button" disabled={generating} onClick={() => void perform(() => factoryClient.approveVoiceGeneration({ projectId: props.project.id }), "Voice Generation approved.")}>Approve voice segments</button> : null}</div>)}
           {message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}
         </div>
       </SectionCard>
+      <SectionCard title="Background and original audio"><p>Unavailable: this workflow has no approved audio source. The timeline contains narration only and does not synthesize placeholder BGM.</p></SectionCard>
+      <StageStatusHeader stageName="Subtitle Preparation" stageNumber={23} eligibility={subtitleEligibility} dependencies={["Approved Script", "Approved Voice Generation"]} purpose="Derive frame-based cues from the timestamped narration without changing script wording." />
+      <SectionCard title="Subtitle review">{subtitleEligibility.runnable ? <button className="button primary" type="button" disabled={generating} onClick={() => void perform(() => factoryClient.runSubtitlePreparation({ projectId: props.project.id }), "Subtitle cues are ready for review.")}>Prepare subtitles</button> : <DisabledAction reason={subtitleEligibility.blockingReasons[0]?.message ?? "Approve Voice Generation before preparing subtitles."}>Prepare subtitles</DisabledAction>}{subtitleArtifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge><p>{artifact.payloadJson.cues.length} cues at {artifact.payloadJson.fps} fps</p>{artifact.payloadJson.cues.slice(0, 5).map((cue) => <p key={cue.id}>{cue.startFrame}: {cue.text}</p>)}{artifact.status === "needs_review" ? <button className="button compact" type="button" disabled={generating} onClick={() => void perform(() => factoryClient.approveSubtitlePreparation({ projectId: props.project.id }), "Subtitle Preparation approved.")}>Approve subtitles</button> : null}</div>)}</SectionCard>
     </>
   );
 }
@@ -2342,7 +2461,7 @@ function SettingsScreen(props: {
           <DisabledAction reason="Open-folder IPC is not implemented.">Open folder</DisabledAction>
         </SectionCard>
         <SectionCard title="Appearance"><SettingsList items={[["Theme", "Dark only"], ["Density", "Comfortable"], ["Sidebar", "Expanded / collapsed"]]} /></SectionCard>
-        <SectionCard title="Generation"><SettingsList items={[["Approval policy", "Guided"], ["Paid generation", "Disabled until provider execution exists"], ["Provider concurrency", "Five-worker queue exists; provider-specific setting unavailable"]]} /></SectionCard>
+        <SectionCard title="Generation"><SettingsList items={[["Approval policy", "Guided"], ["Paid generation", "Explicit stage runs only; never automatic"], ["Provider concurrency", "Five-worker queue exists; provider-specific setting unavailable"]]} /></SectionCard>
         <OmniVoiceSettings settings={props.localTtsSettings} setSettings={props.setLocalTtsSettings} />
         <SectionCard title="CapCut"><SettingsList items={[
           ["Installation status", runtime.capcutInstalled ? "Detected" : "Unavailable"],
@@ -2354,7 +2473,7 @@ function SettingsScreen(props: {
           ["pycapcut status", runtime.pycapcutStatus],
           ["Compatibility status", runtime.capcutCompatibility]
         ]} /></SectionCard>
-        <SectionCard title="FFmpeg"><SettingsList items={[["Status", runtime.ffmpegAvailable ? "Detected" : "Needs setup"], ["Path", runtime.ffmpegPath], ["Version", runtime.ffmpegStatus], ["Preview IPC", "Unavailable"], ["Competitor video processing", runtime.ffmpegAvailable ? "Ready for future downloader/transcriber wiring" : "Blocked until FFmpeg is configured"]]} /></SectionCard>
+        <SectionCard title="FFmpeg"><SettingsList items={[["Status", runtime.ffmpegAvailable ? "Detected" : "Needs setup"], ["Path", runtime.ffmpegPath], ["Version", runtime.ffmpegStatus], ["Preview IPC", runtime.ffmpegAvailable ? "Ready for explicit approved-media renders" : "Blocked until FFmpeg is configured"], ["Competitor video processing", runtime.ffmpegAvailable ? "Ready for future downloader/transcriber wiring" : "Blocked until FFmpeg is configured"]]} /></SectionCard>
         <SectionCard title="Security"><SettingsList items={[["Credential storage", "OS keychain reference"], ["Renderer API keys", "Write-only input"], ["Log redaction", "Enabled"], ["Generic filesystem IPC", "Unavailable"]]} /></SectionCard>
         <SectionCard title="Diagnostics"><SettingsList items={[["CodeGraph", "Development index only"], ["Queue snapshot", `${props.bootstrap.queue.jobs.length} jobs`], ["Project count", `${props.bootstrap.projects.length}`]]} /></SectionCard>
       </div>
@@ -2362,64 +2481,253 @@ function SettingsScreen(props: {
   );
 }
 
+function ttsLanguageCode(value: string | undefined): string {
+  const normalized = value?.trim() ?? "";
+  const aliases: Record<string, string> = { vietnamese: "vi", english: "en", japanese: "ja", korean: "ko", chinese: "zh" };
+  return aliases[normalized.toLowerCase()] ?? (normalized || "vi");
+}
+
+function defaultIntegratedVoice(provider: LocalTtsSettings["ttsProvider"] | undefined, language: string): string {
+  if (provider === "edge-tts" && language === "vi") return "vi-VN-HoaiMyNeural";
+  if (provider === "gtts") return language;
+  if (provider === "kokoro-vietnamese" && language === "vi") return "diem_trinh";
+  return "";
+}
+
 function OmniVoiceSettings(props: { settings: LocalTtsSettings | null; setSettings: (settings: LocalTtsSettings | null) => void }) {
   const [omnivoiceBinPath, setOmnivoiceBinPath] = useState(props.settings?.omnivoiceBinPath ?? "");
   const [outputDir, setOutputDir] = useState(props.settings?.outputDir ?? "");
+  const [voiceMode, setVoiceMode] = useState<NonNullable<LocalTtsSettings["voiceMode"]>>(props.settings?.voiceMode ?? (props.settings?.ttsProvider && props.settings.ttsProvider !== "omnivoice-local" ? "integrated-voices" : "voice-design"));
+  const [ttsProvider, setTtsProvider] = useState<TtsProviderId>(() => props.settings?.ttsProvider && props.settings.ttsProvider !== "omnivoice-local" && props.settings.ttsProvider !== "capcut-experimental" ? props.settings.ttsProvider : "edge-tts");
+  const [ttsVoiceProvider, setTtsVoiceProvider] = useState<NonNullable<LocalTtsSettings["ttsVoiceProvider"]>>(props.settings?.ttsVoiceProvider ?? "edge-tts");
+  const [ttsVoiceId, setTtsVoiceId] = useState(() => props.settings?.ttsVoiceId ?? defaultIntegratedVoice(props.settings?.ttsProvider, ttsLanguageCode(props.settings?.language)));
+  const [ttsLanguage, setTtsLanguage] = useState(ttsLanguageCode(props.settings?.language));
+  const [ttsCatalog, setTtsCatalog] = useState<TtsProviderCatalog>({ providers: [], voices: [] });
+  const [ttsCatalogMessage, setTtsCatalogMessage] = useState("");
+  const [loadingTtsCatalog, setLoadingTtsCatalog] = useState(false);
+  const [healthCheckingProvider, setHealthCheckingProvider] = useState<TtsProviderId | null>(null);
+  const [ttsRate, setTtsRate] = useState(props.settings?.ttsRate ?? 1);
+  const [ttsFallbackEnabled, setTtsFallbackEnabled] = useState(props.settings?.ttsFallbackEnabled ?? false);
   const [modelPath, setModelPath] = useState(props.settings?.modelPath ?? "");
   const [language, setLanguage] = useState(props.settings?.language ?? "");
   const [instruct, setInstruct] = useState(props.settings?.instruct ?? "");
+  const [referenceAudioPath, setReferenceAudioPath] = useState(props.settings?.referenceAudioPath ?? "");
+  const [referenceTranscript, setReferenceTranscript] = useState(props.settings?.referenceTranscript ?? "");
+  const [voiceGender, setVoiceGender] = useState<LocalTtsSettings["voiceGender"]>(props.settings?.voiceGender);
+  const [voiceAge, setVoiceAge] = useState<LocalTtsSettings["voiceAge"]>(props.settings?.voiceAge);
+  const [voicePitch, setVoicePitch] = useState<LocalTtsSettings["voicePitch"]>(props.settings?.voicePitch);
+  const [voiceStyle, setVoiceStyle] = useState<LocalTtsSettings["voiceStyle"]>(props.settings?.voiceStyle);
+  const [voiceEnglishAccent, setVoiceEnglishAccent] = useState<LocalTtsSettings["voiceEnglishAccent"]>(props.settings?.voiceEnglishAccent);
+  const [voiceChineseDialect, setVoiceChineseDialect] = useState<LocalTtsSettings["voiceChineseDialect"]>(props.settings?.voiceChineseDialect);
+  const [previewText, setPreviewText] = useState("Xin chào. Đây là bản xem trước giọng tiếng Việt. Giọng đọc cần rõ dấu, tự nhiên và mạch lạc.");
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewing, setPreviewing] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
     if (!props.settings) return;
     setOmnivoiceBinPath(props.settings.omnivoiceBinPath);
     setOutputDir(props.settings.outputDir);
+    setVoiceMode(props.settings.voiceMode ?? (props.settings.ttsProvider && props.settings.ttsProvider !== "omnivoice-local" ? "integrated-voices" : "voice-design"));
+    setTtsProvider(props.settings.ttsProvider && props.settings.ttsProvider !== "omnivoice-local" && props.settings.ttsProvider !== "capcut-experimental" ? props.settings.ttsProvider : "edge-tts");
+    setTtsVoiceProvider(props.settings.ttsVoiceProvider ?? "edge-tts");
+    setTtsVoiceId(props.settings.ttsVoiceId ?? defaultIntegratedVoice(props.settings.ttsProvider, ttsLanguageCode(props.settings.language)));
+    setTtsLanguage(ttsLanguageCode(props.settings.language));
+    setTtsRate(props.settings.ttsRate ?? 1);
+    setTtsFallbackEnabled(props.settings.ttsFallbackEnabled ?? false);
     setModelPath(props.settings.modelPath ?? "");
     setLanguage(props.settings.language ?? "");
     setInstruct(props.settings.instruct ?? "");
+    setReferenceAudioPath(props.settings.referenceAudioPath ?? "");
+    setReferenceTranscript(props.settings.referenceTranscript ?? "");
+    setVoiceGender(props.settings.voiceGender);
+    setVoiceAge(props.settings.voiceAge);
+    setVoicePitch(props.settings.voicePitch);
+    setVoiceStyle(props.settings.voiceStyle);
+    setVoiceEnglishAccent(props.settings.voiceEnglishAccent);
+    setVoiceChineseDialect(props.settings.voiceChineseDialect);
   }, [props.settings]);
+
+  useEffect(() => {
+    if (voiceMode !== "integrated-voices" || ttsCatalog.providers.length || loadingTtsCatalog) return;
+    void refreshTtsCatalog();
+  }, [voiceMode, ttsProvider, ttsLanguage, ttsCatalog.providers.length, loadingTtsCatalog]);
+
+  function settingsInput(): Omit<LocalTtsSettings, "available" | "resolvedBinPath"> {
+    return {
+        omnivoiceBinPath,
+        outputDir,
+        voiceMode,
+        ...(voiceMode === "integrated-voices" ? { ttsProvider, ...(ttsProvider === "nine-router-tts" ? { ttsVoiceProvider } : {}), ...(ttsVoiceId ? { ttsVoiceId } : {}), ...(ttsLanguage.trim() ? { language: ttsLanguage.trim() } : {}), ttsRate, ttsFallbackEnabled, ...(ttsFallbackEnabled ? { ttsFallbackOrder: ["edge-tts", "gtts"] } : {}) } : {}),
+        ...(voiceMode !== "integrated-voices" && modelPath ? { modelPath } : {}),
+        ...(voiceMode !== "integrated-voices" && language ? { language } : {}),
+        ...(instruct ? { instruct } : {}),
+        ...(referenceAudioPath ? { referenceAudioPath } : {}),
+        ...(referenceTranscript ? { referenceTranscript } : {}),
+        ...(voiceGender ? { voiceGender } : {}),
+        ...(voiceAge ? { voiceAge } : {}),
+        ...(voicePitch ? { voicePitch } : {}),
+        ...(voiceStyle ? { voiceStyle } : {}),
+        ...(voiceEnglishAccent ? { voiceEnglishAccent } : {}),
+        ...(voiceChineseDialect ? { voiceChineseDialect } : {})
+    };
+  }
 
   async function saveSettings() {
     setMessage("");
     try {
-      const settings = await factoryClient.saveLocalTtsSettings({
-        omnivoiceBinPath,
-        outputDir,
-        ...(modelPath ? { modelPath } : {}),
-        ...(language ? { language } : {}),
-        ...(instruct ? { instruct } : {})
-      });
+      const settings = await factoryClient.saveLocalTtsSettings(settingsInput());
       props.setSettings(settings);
-      setMessage(settings.available ? "OmniVoice saved and detected." : "OmniVoice settings saved, but binary was not detected.");
+      setMessage(voiceMode === "integrated-voices"
+        ? (settings.available ? `${ttsProvider} voice saved and ready.` : `${ttsProvider} voice saved, but the local provider environment or credential is unavailable.`)
+        : (settings.available ? "OmniVoice saved and detected." : "OmniVoice settings saved, but binary was not detected."));
     } catch (error) {
-      setMessage(`OmniVoice save failed: ${error instanceof Error ? error.message : String(error)}`);
+      setMessage(`Voice provider save failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  async function previewVoice() {
+    setPreviewing(true); setMessage(""); setPreviewUrl("");
+    try {
+      const settings = await factoryClient.saveLocalTtsSettings(settingsInput());
+      props.setSettings(settings);
+      if (voiceMode === "integrated-voices") {
+        const preview = await factoryClient.previewTtsProvider({ provider: ttsProvider, voiceId: ttsVoiceId, language: ttsLanguageCode(ttsLanguage), text: previewText, rate: ttsRate });
+        setPreviewUrl(preview.previewUrl);
+        setMessage(`${preview.actualProvider} preview ${preview.cached ? "loaded from cache" : "generated and validated"}.`);
+      } else {
+        const preview = await factoryClient.runDevVoiceTest({ text: previewText, provider: "omnivoice-local" });
+        setPreviewUrl(preview.previewUrl);
+        setMessage(`${preview.provider} preview generated and FFprobe validated.`);
+      }
+    } catch (error) {
+      setMessage(`Voice preview failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally { setPreviewing(false); }
+  }
+
+  async function refreshTtsCatalog() {
+    const selectedLanguage = ttsLanguageCode(ttsLanguage);
+    if (!selectedLanguage) {
+      setMessage("Enter a language code before discovering voices, for example vi or en.");
+      return;
+    }
+    setTtsLanguage(selectedLanguage);
+    setLoadingTtsCatalog(true); setMessage(""); setTtsCatalogMessage("");
+    try {
+      const catalog = await factoryClient.listTtsProviders({ language: selectedLanguage, refresh: true });
+      setTtsCatalog(catalog);
+      const voices = catalog.voices.filter((voice) => voice.provider === ttsProvider && voice.enabled);
+      setTtsVoiceId((currentVoiceId) => voices.some((voice) => voice.providerVoiceId === currentVoiceId) ? currentVoiceId : voices[0]?.providerVoiceId ?? defaultIntegratedVoice(ttsProvider, selectedLanguage));
+      const status = catalog.providers.find((provider) => provider.id === ttsProvider);
+      setTtsCatalogMessage(status ? `${status.displayName}: ${status.message}` : "Provider catalog refreshed.");
+    } catch (error) {
+      setMessage(`Voice discovery failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally { setLoadingTtsCatalog(false); }
+  }
+
+  async function runProviderHealthCheck(provider: TtsProviderId) {
+    setHealthCheckingProvider(provider);
+    setMessage("");
+    try {
+      const status = await factoryClient.runTtsProviderHealthCheck({ provider });
+      setTtsCatalog((catalog) => ({ ...catalog, providers: catalog.providers.map((item) => item.id === provider ? status : item) }));
+      setTtsCatalogMessage(`${status.displayName}: ${status.message}`);
+    } catch (error) {
+      setMessage(`Provider health check failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally { setHealthCheckingProvider(null); }
+  }
+
+  async function chooseReferenceAudio() {
+    setMessage("");
+    try {
+      const selected = await factoryClient.selectLocalTtsReferenceAudio();
+      if (selected.referenceAudioPath) setReferenceAudioPath(selected.referenceAudioPath);
+    } catch (error) {
+      setMessage(`Reference audio selection failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   return (
-    <SectionCard title="OmniVoice TTS">
-      <div className="form-grid">
+       <SectionCard title="Voice Providers">
+         <div className="form-grid">
         <FormField label="Status" htmlFor="local-tts-status">
-          <input id="local-tts-status" value={props.settings?.available ? "Detected" : "Needs setup"} disabled readOnly />
+          <input id="local-tts-status" value={props.settings?.available ? (voiceMode === "integrated-voices" ? `${ttsProvider} configured` : "OmniVoice detected") : "Needs setup"} disabled readOnly />
         </FormField>
-        <FormField label="OmniVoice infer executable" htmlFor="local-tts-bin">
+        <FormField label="Voice mode" htmlFor="local-tts-mode" hint="Each mode uses only its own settings; generation never blends modes or falls back.">
+          <select id="local-tts-mode" value={voiceMode} onChange={(event) => setVoiceMode(event.target.value as NonNullable<LocalTtsSettings["voiceMode"]>)}>
+            <option value="voice-design">1. Design a voice (OmniVoice)</option>
+            <option value="integrated-voices">2. Integrated voices</option>
+            <option value="voice-clone">3. Clone a voice (OmniVoice)</option>
+          </select>
+        </FormField>
+        {voiceMode === "integrated-voices" ? <>
+        <FormField label="Provider" htmlFor="local-tts-provider" hint="Microsoft Edge Neural runs directly from the local Python worker and is the recommended Vietnamese default.">
+          <select id="local-tts-provider" value={ttsProvider} onChange={(event) => { const provider = event.target.value as TtsProviderId; setTtsProvider(provider); setTtsVoiceId(""); setTtsCatalogMessage(""); }}>
+            {(ttsCatalog.providers.length ? ttsCatalog.providers : [
+              { id: "edge-tts", displayName: "Microsoft Edge Neural", enabled: true, experimental: false },
+              { id: "kokoro-vietnamese", displayName: "Kokoro Vietnamese", enabled: true, experimental: false },
+              { id: "gtts", displayName: "Google gTTS", enabled: true, experimental: false },
+              { id: "nine-router-tts", displayName: "9Router TTS", enabled: true, experimental: false },
+              { id: "capcut-experimental", displayName: "CapCut TTS", enabled: false, experimental: true }
+            ]).map((provider) => <option key={provider.id} value={provider.id} disabled={!provider.enabled}>{provider.displayName}{provider.experimental ? " (experimental, disabled)" : ""}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Language" htmlFor="local-tts-language" hint="Use a BCP-47 code such as vi, en, ja, ko, or zh; refresh voices after changing it.">
+          <input id="local-tts-language" value={ttsLanguage} onChange={(event) => { setTtsLanguage(event.target.value); setTtsVoiceId(""); setTtsCatalogMessage(""); }} placeholder="vi" />
+        </FormField>
+        <FormField label="Voice" htmlFor="local-tts-voice" hint="The selected voice is the only voice used unless you explicitly enable fallback.">
+          <select id="local-tts-voice" value={ttsVoiceId} onChange={(event) => setTtsVoiceId(event.target.value)}>
+            {!ttsCatalog.voices.some((voice) => voice.provider === ttsProvider && voice.enabled) ? <option value={ttsVoiceId}>{ttsVoiceId ? `${ttsVoiceId} (default; catalog loading)` : "Refresh providers first"}</option> : null}
+            {ttsCatalog.voices.filter((voice) => voice.provider === ttsProvider && voice.enabled).map((voice) => <option key={voice.key} value={voice.providerVoiceId}>{voice.label} - {voice.gender}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Speech rate" htmlFor="local-tts-rate" hint="Automatic timing adjustment never exceeds 1.8x."><input id="local-tts-rate" type="number" min="0.5" max="1.8" step="0.05" value={ttsRate} onChange={(event) => setTtsRate(Number(event.target.value))} /></FormField>
+        <FormField label="Fallback" htmlFor="local-tts-fallback" hint="Disabled by default so a failed Edge segment never becomes a different voice without disclosure."><select id="local-tts-fallback" value={ttsFallbackEnabled ? "enabled" : "strict"} onChange={(event) => setTtsFallbackEnabled(event.target.value === "enabled")}><option value="strict">Strict: fail and retry manually</option><option value="enabled">Explicit fallback: Edge, then Google</option></select></FormField>
+        <div className="button-row"><button className="button compact" type="button" disabled={loadingTtsCatalog} onClick={() => void refreshTtsCatalog()}>{loadingTtsCatalog ? "Discovering voices..." : "Refresh voices"}</button></div>
+        {ttsCatalog.providers.length ? <div className="settings-list">{ttsCatalog.providers.map((provider) => <div key={provider.id}><p><strong>{provider.displayName}</strong>: {provider.providerType}, {provider.health}, {provider.voiceCount} voices{provider.experimental ? " (experimental)" : ""}{!provider.enabled ? " (disabled)" : ""}</p><p>{provider.message}</p><button className="button compact" type="button" disabled={!provider.enabled || healthCheckingProvider === provider.id} onClick={() => void runProviderHealthCheck(provider.id)}>{healthCheckingProvider === provider.id ? "Checking..." : "Run health check"}</button></div>)}</div> : null}
+        {ttsCatalogMessage ? <p className="safe-message">{ttsCatalogMessage}</p> : null}
+        </> : null}
+        {voiceMode !== "integrated-voices" ? <FormField label="OmniVoice infer executable" htmlFor="local-tts-bin">
           <input id="local-tts-bin" value={omnivoiceBinPath} onChange={(event) => setOmnivoiceBinPath(event.target.value)} placeholder="Path to omnivoice-infer.exe" />
-        </FormField>
+        </FormField> : null}
         <FormField label="Output directory" htmlFor="local-tts-output-dir">
           <input id="local-tts-output-dir" value={outputDir} onChange={(event) => setOutputDir(event.target.value)} />
         </FormField>
+        {voiceMode !== "integrated-voices" ? <>
         <FormField label="Model path" htmlFor="local-tts-model">
           <input id="local-tts-model" value={modelPath} onChange={(event) => setModelPath(event.target.value)} placeholder="Optional local checkpoint or HF id" />
         </FormField>
         <FormField label="Language" htmlFor="local-tts-language">
           <input id="local-tts-language" value={language} onChange={(event) => setLanguage(event.target.value)} placeholder="Optional, e.g. Vietnamese" />
         </FormField>
-        <FormField label="Voice instruction" htmlFor="local-tts-instruct">
-          <input id="local-tts-instruct" value={instruct} onChange={(event) => setInstruct(event.target.value)} placeholder="Optional voice design instruction" />
+        </> : null}
+        {voiceMode === "voice-design" ? <>
+        <FormField label="Gender" htmlFor="local-tts-gender"><select id="local-tts-gender" value={voiceGender ?? ""} onChange={(event) => setVoiceGender(event.target.value as LocalTtsSettings["voiceGender"])}><option value="">Auto</option><option value="male">Male</option><option value="female">Female</option></select></FormField>
+        <FormField label="Age" htmlFor="local-tts-age"><select id="local-tts-age" value={voiceAge ?? ""} onChange={(event) => setVoiceAge(event.target.value as LocalTtsSettings["voiceAge"])}><option value="">Auto</option><option value="child">Child</option><option value="teenager">Teenager</option><option value="young adult">Young adult</option><option value="middle-aged">Middle-aged</option><option value="elderly">Elderly</option></select></FormField>
+        <FormField label="Pitch" htmlFor="local-tts-pitch"><select id="local-tts-pitch" value={voicePitch ?? ""} onChange={(event) => setVoicePitch(event.target.value as LocalTtsSettings["voicePitch"])}><option value="">Auto</option><option value="very low pitch">Very low</option><option value="low pitch">Low</option><option value="moderate pitch">Moderate</option><option value="high pitch">High</option><option value="very high pitch">Very high</option></select></FormField>
+        <FormField label="Style" htmlFor="local-tts-style"><select id="local-tts-style" value={voiceStyle ?? ""} onChange={(event) => setVoiceStyle(event.target.value as LocalTtsSettings["voiceStyle"])}><option value="">Auto</option><option value="whisper">Whisper</option></select></FormField>
+        <FormField label="English accent" htmlFor="local-tts-accent" hint="Only effective when synthesizing English."><select id="local-tts-accent" value={voiceEnglishAccent ?? ""} onChange={(event) => setVoiceEnglishAccent(event.target.value as LocalTtsSettings["voiceEnglishAccent"])}><option value="">Auto</option>{["american accent", "british accent", "australian accent", "canadian accent", "indian accent", "chinese accent", "korean accent", "japanese accent", "portuguese accent", "russian accent"].map((value) => <option key={value} value={value}>{value}</option>)}</select></FormField>
+        <FormField label="Chinese dialect" htmlFor="local-tts-dialect" hint="Only effective when synthesizing Chinese."><select id="local-tts-dialect" value={voiceChineseDialect ?? ""} onChange={(event) => setVoiceChineseDialect(event.target.value as LocalTtsSettings["voiceChineseDialect"])}><option value="">Auto</option>{["河南话", "陕西话", "四川话", "贵州话", "云南话", "桂林话", "济南话", "石家庄话", "甘肃话", "宁夏话", "青岛话", "东北话"].map((value) => <option key={value} value={value}>{value}</option>)}</select></FormField>
+        <FormField label="Additional voice instruction" htmlFor="local-tts-instruct" hint="Optional supported OmniVoice attributes, comma-separated.">
+          <input id="local-tts-instruct" value={instruct} onChange={(event) => setInstruct(event.target.value)} placeholder="Optional additional voice design instruction" />
         </FormField>
+        </> : null}
+        {voiceMode === "voice-clone" ? <>
+        <FormField label="Voice clone reference audio" htmlFor="local-tts-reference-audio" hint="Use only a voice you own or have permission to clone. A clean 3-10 second clip works best.">
+          <div className="button-row"><input id="local-tts-reference-audio" value={referenceAudioPath} onChange={(event) => setReferenceAudioPath(event.target.value)} placeholder="Optional reference audio path" /><button className="button compact" type="button" onClick={() => void chooseReferenceAudio()}>Choose audio</button></div>
+        </FormField>
+        <FormField label="Reference transcript" htmlFor="local-tts-reference-transcript" hint="Optional. Leave blank to let OmniVoice transcribe the reference clip.">
+          <textarea id="local-tts-reference-transcript" value={referenceTranscript} onChange={(event) => setReferenceTranscript(event.target.value)} placeholder="Words spoken in the reference audio" />
+        </FormField>
+        </> : null}
         <div className="button-row">
-          <button className="button primary" type="button" onClick={() => void saveSettings()}>Save OmniVoice</button>
+          <button className="button primary" type="button" onClick={() => void saveSettings()}>Save voice provider</button>
         </div>
+        <FormField label="Preview text" htmlFor="local-tts-preview-text">
+          <textarea id="local-tts-preview-text" value={previewText} onChange={(event) => setPreviewText(event.target.value)} />
+        </FormField>
+        <div className="button-row"><button className="button primary" type="button" disabled={previewing || (voiceMode === "integrated-voices" && !ttsVoiceId)} onClick={() => void previewVoice()}>{previewing ? "Generating preview..." : "Preview voice"}</button></div>
+        {previewUrl ? <audio key={previewUrl} controls autoPlay src={previewUrl} onError={() => setMessage("Browser could not play this preview audio.")}>Audio preview is unavailable.</audio> : null}
         {message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}
       </div>
     </SectionCard>
@@ -2456,19 +2764,55 @@ function modelListTone(status: ModelListStatus): "default" | "success" | "warnin
 }
 
 function DiagnosticsScreen(props: { bootstrap: BootstrapData; presence: ProviderPresence }) {
+  const [voiceText, setVoiceText] = useState("Xin chao. Day la bai kiem tra giong noi doc lap.");
+  const [subtitleText, setSubtitleText] = useState("CapCut development test");
+  const [ideaTopic, setIdeaTopic] = useState("Nhung bi an trong lich su Viet Nam");
+  const [imagePrompt, setImagePrompt] = useState("A cinematic ancient library at dawn, no text, vertical composition");
+  const [stockQuery, setStockQuery] = useState("ancient library");
+  const [stockMediaType, setStockMediaType] = useState<"image" | "video">("image");
+  const [running, setRunning] = useState<"voice" | "capcut" | "idea" | "image" | "stock" | null>(null);
+  const [result, setResult] = useState<DevVoiceTestResult | DevCapcutTestResult | DevIdeaTestResult | DevImageTestResult | DevStockTestResult | null>(null);
+  const [message, setMessage] = useState("");
   const diagnostics = {
     workspaceRoot: props.bootstrap.workspaceRoot,
     databasePath: props.bootstrap.databasePath,
     projectCount: props.bootstrap.projects.length,
     queueJobs: props.bootstrap.queue.jobs.length,
-    providerStatus: props.presence.hasCredential ? "credential_saved" : "not_configured"
+    providerStatus: props.presence.hasCredential ? "credential_saved" : "not_configured",
+    devTestLabEnabled: props.bootstrap.runtime.devTestLabEnabled
   };
+  async function run(kind: "voice" | "capcut" | "idea" | "image" | "stock") {
+    setRunning(kind); setMessage(""); setResult(null);
+    try {
+      const output = kind === "voice" ? await factoryClient.runDevVoiceTest({ text: voiceText }) : kind === "capcut" ? await factoryClient.runDevCapcutTest({ subtitleText }) : kind === "idea" ? await factoryClient.runDevIdeaTest({ topic: ideaTopic }) : kind === "image" ? await factoryClient.runDevImageTest({ prompt: imagePrompt, aspectRatio: "9:16" }) : await factoryClient.runDevStockTest({ query: stockQuery, mediaType: stockMediaType });
+      setResult(output); setMessage(kind === "voice" ? "Voice provider test completed and FFprobe validated the output." : kind === "capcut" ? "CapCut test draft is structurally validated. Open it in CapCut to verify editable tracks." : kind === "idea" ? "9Router Idea Test completed; raw response was saved locally." : kind === "image" ? "9Router Image Test completed; the image was validated and saved locally." : "Pexels Stock Test completed.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally { setRunning(null); }
+  }
   return (
     <>
       <PageHeader title="Diagnostics" description="Redacted local state for troubleshooting." />
       <SectionCard>
         <pre className="diagnostics">{JSON.stringify(diagnostics, null, 2)}</pre>
       </SectionCard>
+      {props.bootstrap.runtime.devTestLabEnabled ? <SectionCard title="Dev Test Lab">
+        <p>Runs isolated integrations in <code>workspace/dev-test-lab</code>. These tests never create project artifacts or approvals.</p>
+        <div className="form-grid">
+          <FormField label="Selected voice provider test text" htmlFor="dev-voice-text"><textarea id="dev-voice-text" value={voiceText} onChange={(event) => setVoiceText(event.target.value)} /></FormField>
+          <div className="button-row"><button className="button primary" type="button" disabled={running !== null} onClick={() => void run("voice")}>{running === "voice" ? "Testing voice provider..." : "Test selected voice"}</button></div>
+          <FormField label="CapCut test subtitle" htmlFor="dev-capcut-subtitle"><input id="dev-capcut-subtitle" value={subtitleText} onChange={(event) => setSubtitleText(event.target.value)} /></FormField>
+          <div className="button-row"><button className="button primary" type="button" disabled={running !== null} onClick={() => void run("capcut")}>{running === "capcut" ? "Creating test draft..." : "Test CapCut Draft"}</button></div>
+          <FormField label="9Router idea topic" htmlFor="dev-idea-topic"><input id="dev-idea-topic" value={ideaTopic} onChange={(event) => setIdeaTopic(event.target.value)} /></FormField>
+          <div className="button-row"><button className="button primary" type="button" disabled={running !== null} onClick={() => void run("idea")}>{running === "idea" ? "Generating ideas..." : "Test 9Router Ideas"}</button></div>
+          <FormField label="9Router image prompt" htmlFor="dev-image-prompt"><textarea id="dev-image-prompt" value={imagePrompt} onChange={(event) => setImagePrompt(event.target.value)} /></FormField>
+          <div className="button-row"><button className="button primary" type="button" disabled={running !== null} onClick={() => void run("image")}>{running === "image" ? "Generating image..." : "Test 9Router Image"}</button></div>
+          <FormField label="Pexels stock query" htmlFor="dev-stock-query"><input id="dev-stock-query" value={stockQuery} onChange={(event) => setStockQuery(event.target.value)} /></FormField>
+          <div className="button-row"><select aria-label="Pexels stock type" value={stockMediaType} onChange={(event) => setStockMediaType(event.target.value as "image" | "video")}><option value="image">Image</option><option value="video">Video</option></select><button className="button primary" type="button" disabled={running !== null} onClick={() => void run("stock")}>{running === "stock" ? "Searching stock..." : "Test Pexels Stock"}</button></div>
+        </div>
+        {message ? <p className={message.includes("completed") || message.includes("validated") ? "safe-message" : "error-message"}>{message}</p> : null}
+        {result ? <pre className="diagnostics">{JSON.stringify(result, null, 2)}</pre> : null}
+      </SectionCard> : null}
     </>
   );
 }

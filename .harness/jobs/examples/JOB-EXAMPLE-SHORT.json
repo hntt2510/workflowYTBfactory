@@ -1,0 +1,18 @@
+{
+  "jobId": "JOB-EXAMPLE-SHORT",
+  "type": "short",
+  "title": "Example bounded maintenance job",
+  "status": "planned",
+  "targetBranch": "main",
+  "assignedRole": "builder",
+  "description": "Replace this example before implementation.",
+  "businessContext": "Example only; it has no product effect.",
+  "allowedPaths": ["packages/example/src/**", "packages/example/test/**"],
+  "forbiddenPaths": ["apps/desktop/**", "docs/product/**"],
+  "dependencies": [],
+  "acceptanceCriteria": ["State a measurable expected result before activation."],
+  "verificationCommands": ["pnpm test:unit -- --runInBand"],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["The requested change affects a path outside allowedPaths."]
+}
