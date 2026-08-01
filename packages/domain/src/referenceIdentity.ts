@@ -1,9 +1,13 @@
 import type { CompetitorReference, ReferenceSetState, ReferenceStatus } from "./types";
 
+export const referenceValidationVersion = "reference-validation-v2";
+
 export interface ReferenceValidationResult {
   status: ReferenceStatus;
   validationMessage: string;
   identityKey?: string;
+  errors: string[];
+  warnings: string[];
 }
 
 export function normalizeReferenceIdentity(sourceUrl?: string): string | undefined {
@@ -14,11 +18,13 @@ export function normalizeReferenceIdentity(sourceUrl?: string): string | undefin
     const host = parsed.hostname.toLowerCase().replace(/^www\./, "").replace(/^m\./, "");
     if (host === "youtu.be") {
       const videoId = parsed.pathname.split("/").filter(Boolean)[0];
-      return videoId ? `youtube:${videoId}` : canonicalUrlIdentity(parsed);
+      return videoId ? `youtube:${videoId}` : undefined;
     }
     if (host === "youtube.com") {
       const videoId = parsed.searchParams.get("v");
-      return videoId ? `youtube:${videoId}` : canonicalUrlIdentity(parsed);
+      const pathParts = parsed.pathname.split("/").filter(Boolean);
+      const pathVideoId = ["shorts", "embed"].includes(pathParts[0] ?? "") ? pathParts[1] : undefined;
+      return videoId || pathVideoId ? `youtube:${videoId ?? pathVideoId}` : undefined;
     }
     return canonicalUrlIdentity(parsed);
   } catch {
@@ -33,6 +39,8 @@ export function validateReference(reference: CompetitorReference): ReferenceVali
     return {
       status: "invalid",
       validationMessage: "Source URL must be a complete HTTP(S) URL with a video ID for YouTube sources.",
+      errors: [reference.sourceUrl.includes("youtube") ? "missing_youtube_video_id" : "malformed_url"],
+      warnings: [],
       ...(identityKey ? { identityKey } : {})
     };
   }
@@ -40,6 +48,8 @@ export function validateReference(reference: CompetitorReference): ReferenceVali
     return {
       status: "invalid",
       validationMessage: "Transcript or analysis block is required.",
+      errors: ["empty_transcript", "missing_content"],
+      warnings: [],
       ...(identityKey ? { identityKey } : {})
     };
   }
@@ -47,12 +57,16 @@ export function validateReference(reference: CompetitorReference): ReferenceVali
     return {
       status: "invalid",
       validationMessage: "Transcript is too short to analyze.",
+      errors: ["short_transcript"],
+      warnings: [],
       ...(identityKey ? { identityKey } : {})
     };
   }
   return {
     status: "valid",
     validationMessage: "Reference passed local validation.",
+    errors: [],
+    warnings: [],
     ...(identityKey ? { identityKey } : {})
   };
 }
@@ -63,7 +77,10 @@ function isValidReferenceUrl(sourceUrl: string): boolean {
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
     const host = parsed.hostname.toLowerCase().replace(/^www\./, "").replace(/^m\./, "");
     if (host === "youtu.be") return Boolean(parsed.pathname.split("/").filter(Boolean)[0]);
-    if (host === "youtube.com") return Boolean(parsed.searchParams.get("v"));
+    if (host === "youtube.com") {
+      const pathParts = parsed.pathname.split("/").filter(Boolean);
+      return Boolean(parsed.searchParams.get("v") || (["shorts", "embed"].includes(pathParts[0] ?? "") && pathParts[1]));
+    }
     return true;
   } catch {
     return false;
@@ -72,32 +89,53 @@ function isValidReferenceUrl(sourceUrl: string): boolean {
 
 export function findDuplicateReference(references: CompetitorReference[], identityKey: string | undefined): CompetitorReference | undefined {
   if (!identityKey) return undefined;
-  return references.find((reference) => (reference.identityKey ?? normalizeReferenceIdentity(reference.sourceUrl)) === identityKey);
+  return references
+    .filter((reference) => (reference.identityKey ?? normalizeReferenceIdentity(reference.sourceUrl)) === identityKey)
+    .sort((left, right) => {
+      const includedDifference = Number(right.included !== false) - Number(left.included !== false);
+      if (includedDifference !== 0) return includedDifference;
+      const versionDifference = (right.version ?? 1) - (left.version ?? 1);
+      if (versionDifference !== 0) return versionDifference;
+      return (right.updatedAt ?? right.createdAt).localeCompare(left.updatedAt ?? left.createdAt);
+    })[0];
 }
 
-export async function referenceSetFingerprint(references: CompetitorReference[]): Promise<string> {
-  const payload = references
+export async function referenceSetFingerprint(references: CompetitorReference[], options: { projectId?: string } = {}): Promise<string> {
+  const includedReferences = await Promise.all(references
     .filter((reference) => reference.included !== false)
-    .map((reference) => ({
+    .map(async (reference) => ({
       id: reference.id,
       identityKey: reference.identityKey ?? normalizeReferenceIdentity(reference.sourceUrl) ?? `manual:${reference.id}`,
-      status: reference.status ?? "draft",
+      currentVersionId: reference.id,
       version: reference.version ?? 1,
-      transcript: reference.pastedTranscript
-    }))
-    .sort((left, right) => left.id.localeCompare(right.id));
+      contentFingerprint: reference.contentFingerprint ?? await canonicalSha256(reference.pastedTranscript.trim())
+    })));
+  const payload = {
+    projectId: options.projectId ?? null,
+    validatorVersion: referenceValidationVersion,
+    references: includedReferences
+    .sort((left, right) => left.id.localeCompare(right.id))
+  };
   return canonicalSha256(payload);
 }
 
-export async function evaluateReferenceSet(references: CompetitorReference[]): Promise<ReferenceSetState> {
+export async function evaluateReferenceSet(references: CompetitorReference[], options: { projectId?: string } = {}): Promise<ReferenceSetState> {
   const included = references.filter((reference) => reference.included !== false);
+  const counts = {
+    includedCount: included.length,
+    validCount: included.filter((reference) => reference.status === "valid" || reference.status === "approved").length,
+    invalidCount: included.filter((reference) => reference.status === "invalid").length,
+    duplicateCount: included.filter((reference) => reference.status === "duplicate").length,
+    draftCount: included.filter((reference) => !reference.status || reference.status === "draft").length,
+    excludedCount: references.length - included.length
+  };
   if (!included.length) {
-    return { status: "needs_validation", currentFingerprint: await referenceSetFingerprint(references) };
+    return { status: "needs_validation", currentFingerprint: await referenceSetFingerprint(references, options), ...counts };
   }
   if (included.some((reference) => reference.status === "duplicate" || reference.status === "invalid" || !reference.status || reference.status === "draft")) {
-    return { status: "needs_validation", currentFingerprint: await referenceSetFingerprint(references) };
+    return { status: "needs_validation", currentFingerprint: await referenceSetFingerprint(references, options), ...counts };
   }
-  return { status: "valid", validationRunAt: new Date().toISOString(), currentFingerprint: await referenceSetFingerprint(references) };
+  return { status: "valid", validationRunAt: new Date().toISOString(), currentFingerprint: await referenceSetFingerprint(references, options), ...counts };
 }
 
 async function canonicalSha256(value: unknown): Promise<string> {

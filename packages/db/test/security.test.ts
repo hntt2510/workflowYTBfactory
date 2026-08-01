@@ -147,6 +147,36 @@ describe("security foundation", () => {
     db.close();
   });
 
+  it("preserves existing model configuration fields when saving a partial update", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lsf-model-config-partial-"));
+    const db = openFactoryDatabase(join(dir, "factory.sqlite"));
+    const store = new ProviderCredentialStore(db, new MemoryKeychain());
+    await store.saveProviderCredential(
+      {
+        providerId: "9router",
+        baseUrl: "http://127.0.0.1:20128/v1",
+        textModel: "model-text",
+        imageModel: "model-image",
+        videoModel: "model-video",
+        ttsModel: "model-tts",
+        sttModel: "model-stt"
+      },
+      "sk-secret"
+    );
+    store.saveProviderModelConfiguration("9router", { imageModel: "model-image-next" });
+    expect(store.loadProviderCredentialSettings("9router")).toEqual({
+      providerId: "9router",
+      baseUrl: "http://127.0.0.1:20128/v1",
+      textModel: "model-text",
+      imageModel: "model-image-next",
+      videoModel: "model-video",
+      ttsModel: "model-tts",
+      sttModel: "model-stt",
+      hasCredential: true
+    });
+    db.close();
+  });
+
   it("persists text certification records and marks stale without storing raw keys", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lsf-text-cert-"));
     const databasePath = join(dir, "factory.sqlite");

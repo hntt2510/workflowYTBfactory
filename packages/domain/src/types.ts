@@ -33,6 +33,11 @@ export interface CompetitorReference {
   status?: ReferenceStatus;
   included?: boolean;
   validationMessage?: string;
+  validationErrors?: string[];
+  validationWarnings?: string[];
+  validatedAt?: string;
+  validatorVersion?: string;
+  contentFingerprint?: string;
   version?: number;
   createdAt: string;
   updatedAt?: string;
@@ -40,10 +45,17 @@ export interface CompetitorReference {
 }
 
 export interface ReferenceSetState {
-  status: "not_started" | "needs_validation" | "valid" | "approved" | "stale";
+  status: "not_started" | "needs_validation" | "valid" | "approved" | "rejected" | "stale";
   approvedAt?: string;
+  approvalActor?: string;
   validationRunAt?: string;
   currentFingerprint?: string;
+  includedCount?: number;
+  validCount?: number;
+  invalidCount?: number;
+  duplicateCount?: number;
+  draftCount?: number;
+  excludedCount?: number;
 }
 
 export interface ChannelProfile {

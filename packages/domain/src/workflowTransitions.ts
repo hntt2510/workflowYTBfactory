@@ -8,9 +8,9 @@ const allowedTransitions: Readonly<Record<WorkflowStageStatus, readonly Workflow
   running: ["needs_review", "failed"],
   needs_review: ["approved", "rejected"],
   approved: ["stale"],
-  rejected: [],
-  failed: [],
-  stale: []
+  rejected: ["queued"],
+  failed: ["queued"],
+  stale: ["queued"]
 };
 
 export function canTransitionWorkflowStage(from: WorkflowStageStatus, to: WorkflowStageStatus): boolean {

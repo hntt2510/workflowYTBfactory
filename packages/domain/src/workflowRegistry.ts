@@ -1,5 +1,7 @@
 import type { WorkflowStageDefinition } from "./types";
 
+export const perReferenceArtifactStages: ReadonlySet<string> = new Set(["transcript-cleaning", "reference-segmentation", "competitor-dna"]);
+
 export const workflowStageDefinitions = [
   {
     id: "project-setup",
@@ -385,6 +387,27 @@ export type WorkflowStageId = (typeof workflowStageDefinitions)[number]["id"];
 
 export function getWorkflowStageDefinition(stageId: string): WorkflowStageDefinition | undefined {
   return workflowStageDefinitions.find((stage) => stage.id === stageId);
+}
+
+export function getDownstreamWorkflowStageIds(stageId: string): ReadonlySet<string> {
+  const downstreamStageIds = new Set<string>();
+  const visited = new Set<string>();
+
+  function visit(currentStageId: string): void {
+    if (visited.has(currentStageId)) return;
+    visited.add(currentStageId);
+    for (const downstreamId of getWorkflowStageDefinition(currentStageId)?.invalidates ?? []) {
+      downstreamStageIds.add(downstreamId);
+      visit(downstreamId);
+    }
+  }
+
+  visit(stageId);
+  return downstreamStageIds;
+}
+
+export function getWorkflowStageImpactIds(stageId: string): ReadonlySet<string> {
+  return new Set([stageId, ...getDownstreamWorkflowStageIds(stageId)]);
 }
 
 export function workflowStageIds(): string[] {

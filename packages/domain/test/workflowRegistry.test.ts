@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { workflowStageDefinitions } from "../src";
+import { getDownstreamWorkflowStageIds, getWorkflowStageImpactIds, perReferenceArtifactStages, workflowStageDefinitions } from "../src";
 import type { WorkflowStageDefinition } from "../src";
 
 describe("workflow registry", () => {
@@ -44,6 +44,59 @@ describe("workflow registry", () => {
       for (const dependency of stage.dependsOn) expect(ids.has(dependency)).toBe(true);
       for (const invalidated of stage.invalidates) expect(ids.has(invalidated)).toBe(true);
     }
+  });
+
+  it("declares only canonical per-reference artifact stages", () => {
+    const ids = new Set<string>(workflowStageDefinitions.map((stage) => stage.id));
+    expect([...perReferenceArtifactStages]).toEqual(["transcript-cleaning", "reference-segmentation", "competitor-dna"]);
+    for (const stageId of perReferenceArtifactStages) expect(ids.has(stageId)).toBe(true);
+  });
+
+  it("invalidates the downstream visual-production chain from scene and shot planning", () => {
+    const byId = new Map(workflowStageDefinitions.map((stage) => [stage.id, stage]));
+    expect(byId.get("scene-plan")?.invalidates).toEqual(["shot-plan"]);
+    expect(byId.get("shot-plan")?.invalidates).toEqual(["visual-routing"]);
+    expect(byId.get("visual-routing")?.invalidates).toEqual(["prompt-preparation"]);
+    expect(byId.get("prompt-preparation")?.invalidates).toEqual(["asset-acquisition"]);
+    expect(byId.get("asset-acquisition")?.invalidates).toEqual(["asset-review"]);
+    expect(byId.get("asset-review")?.invalidates).toEqual(["voice-generation"]);
+  });
+
+  it("collects transitive downstream invalidations for stage approvals", () => {
+    expect([...getDownstreamWorkflowStageIds("scene-plan")]).toEqual([
+      "shot-plan",
+      "visual-routing",
+      "prompt-preparation",
+      "asset-acquisition",
+      "asset-review",
+      "voice-generation",
+      "subtitle-preparation",
+      "timeline-assembly",
+      "preview-render",
+      "qa",
+      "capcut-draft",
+      "packaging-export"
+    ]);
+  });
+
+  it("includes the changed stage in its trusted impact set", () => {
+    expect([...getWorkflowStageImpactIds("reference-validation")]).toContain("reference-validation");
+    expect([...getWorkflowStageImpactIds("reference-validation")]).toContain("transcript-cleaning");
+  });
+
+  it("collects QA downstream invalidations through packaging export", () => {
+    expect([...getDownstreamWorkflowStageIds("qa")]).toEqual([
+      "capcut-draft",
+      "packaging-export"
+    ]);
+  });
+
+  it("collects preview downstream invalidations through packaging export", () => {
+    expect([...getDownstreamWorkflowStageIds("preview-render")]).toEqual([
+      "qa",
+      "capcut-draft",
+      "packaging-export"
+    ]);
   });
 
   it("declares the runner that creates each executable stage run", () => {

@@ -3,7 +3,7 @@ import { z } from "zod";
 const idSchema = z.string().min(1).max(160).regex(/^[A-Za-z0-9._:-]+$/);
 const modelIdSchema = z.string().min(1).max(300);
 const frameSchema = z.number().int().nonnegative();
-const safePathSchema = z.string().min(1).refine((value) => !value.includes("..") && !/[<>|?*\u0000-\u001F]/.test(value), {
+const safePathSchema = z.string().min(1).refine((value) => !value.includes("..") && !/[<>|?*\u0000-\u001F]/.test(value) && !/^(?:[A-Za-z]:[\\/]|[\\/]|[A-Za-z][A-Za-z0-9+.-]*:)/.test(value), {
   message: "Path contains unsafe characters or traversal."
 });
 const localPathSchema = z.string().max(1000).refine((value) => !/[\u0000-\u001F]/.test(value), {
@@ -207,7 +207,9 @@ export const listTtsProvidersResponseSchema = z.object({
   voices: z.array(ttsVoiceDescriptorSchema).max(1000)
 }).strict();
 
-export const runTtsProviderHealthCheckRequestSchema = z.object({ provider: ttsProviderSchema }).strict();
+export const runTtsProviderHealthCheckRequestSchema = z.object({
+  provider: ttsProviderSchema
+}).strict();
 export const runTtsProviderHealthCheckResponseSchema = ttsProviderStatusSchema;
 
 export const ttsPreviewRequestSchema = z.object({
@@ -368,6 +370,55 @@ export const replaceCompetitorReferenceRequestSchema = referenceIdRequestSchema.
 
 export const referenceSetRequestSchema = z.object({
   projectId: idSchema
+}).strict();
+
+export const referenceChangeImpactResponseSchema = z.object({
+  stageIds: z.array(idSchema),
+  stageNames: z.array(z.string().min(1))
+}).strict();
+
+const referenceValidationReferenceSchema = z.object({
+  id: idSchema,
+  identityKey: z.string().max(300).optional(),
+  sourceUrl: z.string().max(1000).optional(),
+  pastedTranscript: z.string(),
+  notes: z.string().optional(),
+  status: referenceStatusSchema,
+  included: z.boolean().optional(),
+  validationMessage: z.string(),
+  validationErrors: z.array(z.string().max(120)).optional(),
+  validationWarnings: z.array(z.string().max(120)).optional(),
+  validatedAt: z.string().optional(),
+  validatorVersion: z.string().max(80).optional(),
+  contentFingerprint: z.string().length(64).optional(),
+  version: z.number().int().positive().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string().optional(),
+  parentReferenceId: idSchema.optional()
+}).passthrough();
+
+export const referenceValidationOutputSchema = z.object({
+  referenceSet: z.object({
+    status: z.literal("valid"),
+    validationRunAt: z.string().optional(),
+    currentFingerprint: z.string().optional(),
+    includedCount: z.number().int().nonnegative().optional(),
+    validCount: z.number().int().nonnegative().optional(),
+    invalidCount: z.number().int().nonnegative().optional(),
+    duplicateCount: z.number().int().nonnegative().optional(),
+    draftCount: z.number().int().nonnegative().optional(),
+    excludedCount: z.number().int().nonnegative().optional()
+  }).passthrough(),
+  references: z.array(referenceValidationReferenceSchema).min(1).max(1000)
+}).strict();
+
+export const referenceValidationArtifactResponseSchema = z.object({
+  id: idSchema,
+  stageRunId: idSchema.optional(),
+  status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]),
+  payloadJson: referenceValidationOutputSchema,
+  createdAt: z.string(),
+  updatedAt: z.string()
 }).strict();
 
 export const runTranscriptCleaningRequestSchema = z.object({
@@ -555,11 +606,12 @@ export const scenePlanRequestSchema = z.object({ projectId: idSchema }).strict()
 export const scenePlanArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: scenePlanOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const scenePlanArtifactsResponseSchema = z.array(scenePlanArtifactResponseSchema);
 export const shotPlanShotSchema = z.object({ id: idSchema, sceneId: idSchema, order: z.number().int().nonnegative(), startFrame: z.number().int().nonnegative(), durationFrames: z.number().int().positive(), fps: z.number().int().positive().max(120), purpose: z.string().min(1).max(2000), visualMode: z.enum(["ai_image", "ai_video", "stock_image", "stock_video", "manual_upload", "uploaded", "document", "diagram", "text_card", "reuse"]), framing: z.string().min(1).max(1000), cameraAngle: z.string().min(1).max(1000), cameraMovement: z.string().min(1).max(1000), subjectAction: z.string().min(1).max(2000), startState: z.record(z.string(), z.unknown()), endState: z.record(z.string(), z.unknown()), continuityRefs: z.array(z.string().min(1).max(1000)).max(50) }).strict();
-export const shotPlanOutputSchema = z.object({ shots: z.array(shotPlanShotSchema).min(1).max(500) }).strict();
+const uniqueShotPlanShotsSchema = z.array(shotPlanShotSchema).min(1).max(500).refine((shots) => new Set(shots.map((shot) => shot.id)).size === shots.length, { message: "Shot IDs must be unique." });
+export const shotPlanOutputSchema = z.object({ shots: uniqueShotPlanShotsSchema }).strict();
 export const shotPlanRequestSchema = z.object({ projectId: idSchema }).strict();
 export const shotPlanArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: shotPlanOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const shotPlanArtifactsResponseSchema = z.array(shotPlanArtifactResponseSchema);
-export const visualRoutingOutputSchema = z.object({ shots: z.array(shotPlanShotSchema).min(1).max(500) }).strict();
+export const visualRoutingOutputSchema = z.object({ shots: uniqueShotPlanShotsSchema }).strict();
 export const visualRoutingRequestSchema = z.object({ projectId: idSchema }).strict();
 export const visualRoutingArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: visualRoutingOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const visualRoutingArtifactsResponseSchema = z.array(visualRoutingArtifactResponseSchema);
@@ -574,8 +626,13 @@ export const assetAcquisitionOutputSchema = z.object({ assets: z.array(acquiredI
 export const assetAcquisitionRequestSchema = z.object({ projectId: idSchema }).strict();
 export const assetAcquisitionArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: assetAcquisitionOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const assetAcquisitionArtifactsResponseSchema = z.array(assetAcquisitionArtifactResponseSchema);
-export const assetReviewItemSchema = z.object({ asset: acquiredImageAssetSchema, reviewStatus: z.enum(["needs_review", "approved", "rejected"]), assignedShotId: idSchema.optional() }).strict();
-export const assetReviewOutputSchema = z.object({ acquisitionArtifactId: idSchema, assets: z.array(assetReviewItemSchema).min(1).max(500) }).strict();
+export const assetReviewItemSchema = z.object({ asset: acquiredImageAssetSchema, reviewStatus: z.enum(["needs_review", "approved", "rejected"]), assignedShotId: idSchema.optional() }).strict()
+  .refine((item) => item.assignedShotId === undefined || item.assignedShotId === item.asset.shotId, { message: "Assigned shot must match the reviewed asset shot." });
+export const assetReviewOutputSchema = z.object({ acquisitionArtifactId: idSchema, assets: z.array(assetReviewItemSchema).min(1).max(500) }).strict()
+  .refine((output) => {
+    const assignedShotIds = output.assets.flatMap((item) => item.assignedShotId ? [item.assignedShotId] : []);
+    return new Set(assignedShotIds).size === assignedShotIds.length;
+  }, { message: "Each shot can have only one assigned reviewed asset." });
 export const assetReviewRequestSchema = z.object({ projectId: idSchema }).strict();
 export const assetReviewArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: assetReviewOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const assetReviewArtifactsResponseSchema = z.array(assetReviewArtifactResponseSchema);
@@ -647,7 +704,7 @@ export const capcutDraftApprovalRequestSchema = z.object({ projectId: idSchema, 
 export const capcutDraftArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: capcutDraftOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const capcutDraftArtifactsResponseSchema = z.array(capcutDraftArtifactResponseSchema);
 
-export const packagingExportOutputSchema = z.object({ relativeFilePath: safePathSchema, artifactIds: z.array(idSchema).min(6).max(12), sha256: z.string().length(64) }).strict();
+export const packagingExportOutputSchema = z.object({ relativeFilePath: safePathSchema, artifactIds: z.array(idSchema).min(6).max(12).refine((ids) => new Set(ids).size === ids.length, { message: "Package artifact IDs must be unique." }), sha256: z.string().length(64) }).strict();
 export const packagingExportRequestSchema = z.object({ projectId: idSchema }).strict();
 export const packagingExportArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: packagingExportOutputSchema, relativeFilePath: safePathSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const packagingExportArtifactsResponseSchema = z.array(packagingExportArtifactResponseSchema);
@@ -693,14 +750,7 @@ export const projectSummaryResponseSchema = z.object({
   updatedAt: z.string()
 });
 
-const timelineItemResponseSchema = z.object({
-  id: idSchema,
-  track: z.enum(["primary_visual", "overlay_visual", "narration", "music", "sfx", "subtitles", "text", "markers"]),
-  sourceId: idSchema,
-  startFrame: frameSchema,
-  durationFrames: frameSchema,
-  fps: z.number().int().positive()
-});
+const timelineItemResponseSchema = timelineItemOutputSchema;
 
 export const factoryProjectResponseSchema = z.object({
   id: idSchema,
@@ -776,6 +826,11 @@ export const competitorReferenceResponseSchema = z.object({
   status: referenceStatusSchema.optional(),
   included: z.boolean().optional(),
   validationMessage: z.string().optional(),
+  validationErrors: z.array(z.string()).optional(),
+  validationWarnings: z.array(z.string()).optional(),
+  validatedAt: z.string().optional(),
+  validatorVersion: z.string().optional(),
+  contentFingerprint: z.string().length(64).optional(),
   version: z.number().int().positive().optional(),
   createdAt: z.string(),
   updatedAt: z.string().optional(),
@@ -784,8 +839,12 @@ export const competitorReferenceResponseSchema = z.object({
 
 export const addCompetitorReferenceResponseSchema = z.object({
   status: z.enum(["saved", "duplicate"]),
+  duplicate: z.literal(true).optional(),
   project: factoryProjectResponseSchema,
   existingReference: competitorReferenceResponseSchema.optional(),
+  existingReferenceId: idSchema.optional(),
+  existingCurrentVersionId: idSchema.optional(),
+  canonicalSourceId: z.string().max(300).optional(),
   message: z.string().max(500)
 }).strict();
 

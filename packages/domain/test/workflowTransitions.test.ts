@@ -10,10 +10,18 @@ describe("workflow stage transitions", () => {
     expect(canTransitionWorkflowStage("approved", "stale")).toBe(true);
   });
 
+  it("permits reruns after terminal review states only through a new queue", () => {
+    expect(canTransitionWorkflowStage("rejected", "queued")).toBe(true);
+    expect(canTransitionWorkflowStage("failed", "queued")).toBe(true);
+    expect(canTransitionWorkflowStage("stale", "queued")).toBe(true);
+  });
+
   it("rejects approval shortcuts", () => {
     expect(() => assertWorkflowStageTransition("running", "approved")).toThrow();
     expect(() => assertWorkflowStageTransition("failed", "approved")).toThrow();
     expect(() => assertWorkflowStageTransition("rejected", "approved")).toThrow();
     expect(() => assertWorkflowStageTransition("stale", "approved")).toThrow();
+    expect(() => assertWorkflowStageTransition("rejected", "running")).toThrow();
+    expect(() => assertWorkflowStageTransition("failed", "needs_review")).toThrow();
   });
 });

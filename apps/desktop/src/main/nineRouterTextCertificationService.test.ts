@@ -158,4 +158,26 @@ describe("nineRouterTextCertificationService", () => {
     });
     expect(loaded.status).toBe("stale");
   });
+
+  it("loads certification by exact model, base URL fingerprint, and credential version", async () => {
+    const expectedFingerprint = fingerprintBaseUrl("https://example.test/v1")!;
+    const loadLatestMatchingTextCertification = vi.fn(() => null);
+    const result = await loadNineRouterTextCertification({
+      credentialStore: credentialStore({ secret: "sk-secret", textModel: "model-a", credentialVersionRef: "credential:v2" }),
+      certificationStore: {
+        ...certificationStore().item,
+        loadLatestMatchingTextCertification
+      } as unknown as TextCertificationStore
+    });
+
+    expect(result.status).toBe("not_tested");
+    expect(loadLatestMatchingTextCertification).toHaveBeenCalledWith({
+      providerId: "9router",
+      configuredModelId: "model-a",
+      baseUrlFingerprint: expectedFingerprint,
+      credentialVersionRef: "credential:v2",
+      endpointStrategy: "responses",
+      implementationVersion: "text-certification-v1"
+    });
+  });
 });

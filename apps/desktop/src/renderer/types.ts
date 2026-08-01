@@ -135,8 +135,12 @@ export interface AddCompetitorReferenceInput {
 
 export interface AddCompetitorReferenceResult {
   status: "saved" | "duplicate";
+  duplicate?: true;
   project: FactoryProject;
   existingReference?: CompetitorReference;
+  existingReferenceId?: string;
+  existingCurrentVersionId?: string;
+  canonicalSourceId?: string;
   message: string;
 }
 
@@ -221,16 +225,6 @@ export interface LocalTtsGenerated {
   ok: boolean;
   outputPath: string;
   provider: "omnivoice-local" | "nine-router-tts" | "edge-tts" | "gtts" | "kokoro-vietnamese";
-}
-
-export interface DevVoiceTestResult {
-  provider: "omnivoice-local" | "nine-router-tts" | "edge-tts" | "gtts" | "kokoro-vietnamese";
-  previewUrl: string;
-  relativeFilePath: string;
-  durationSeconds: number;
-  codec: string;
-  byteLength: number;
-  sha256: string;
 }
 
 export interface DevCapcutTestResult {
@@ -361,15 +355,12 @@ export interface LongShortFactoryApi {
   generateLocalTts: (input: GenerateLocalTtsInput) => Promise<LocalTtsGenerated>;
   listNineRouterTtsCatalog: (input: { provider: "edge-tts" | "google-tts"; language: string }) => Promise<NineRouterTtsCatalogResult>;
   listTtsProviders: (input?: { language?: string; refresh?: boolean }) => Promise<TtsProviderCatalog>;
-  runTtsProviderHealthCheck: (input: { provider: TtsProviderId }) => Promise<TtsProviderStatus>;
   previewTtsProvider: (input: { provider: TtsProviderId; voiceId: string; language: string; text: string; rate?: number }) => Promise<TtsPreviewResult>;
   createTtsJob: (input: { projectId?: string; provider: TtsProviderId; voiceId: string; language: string; rate?: number; fallbackEnabled?: boolean; fallbackOrder?: TtsProviderId[]; segments: Array<{ id: string; text: string; startSeconds: number; endSeconds?: number; rate?: number }> }) => Promise<TtsJob>;
   getTtsJob: (input: { jobId: string }) => Promise<TtsJob>;
   getProjectTtsJob: (input: { projectId: string }) => Promise<TtsJob | null>;
   retryTtsJobSegment: (input: { jobId: string; segmentId: string }) => Promise<TtsJob>;
   cancelTtsJob: (input: { jobId: string }) => Promise<TtsJob>;
-  runDevVoiceTest: (input: { text: string; provider?: "omnivoice-local" | "nine-router-tts" | "edge-tts" | "gtts" | "kokoro-vietnamese" | "capcut-experimental"; voiceId?: string }) => Promise<DevVoiceTestResult>;
-  runDevCapcutTest: (input: { subtitleText?: string }) => Promise<DevCapcutTestResult>;
   runDevIdeaTest: (input: { topic: string; language?: string }) => Promise<DevIdeaTestResult>;
   runDevImageTest: (input: { prompt: string; aspectRatio: "16:9" | "9:16" }) => Promise<DevImageTestResult>;
   runDevStockTest: (input: { query: string; mediaType: "image" | "video" }) => Promise<DevStockTestResult>;
@@ -378,74 +369,97 @@ export interface LongShortFactoryApi {
   editCompetitorReference: (input: EditCompetitorReferenceInput) => Promise<FactoryProject>;
   deleteCompetitorReference: (input: ReferenceMutationInput) => Promise<FactoryProject>;
   setReferenceIncluded: (input: SetReferenceIncludedInput) => Promise<FactoryProject>;
+  getReferenceChangeImpact: () => Promise<{ stageIds: string[]; stageNames: string[] }>;
   validateReferenceSet: (input: { projectId: string }) => Promise<FactoryProject>;
   approveReferenceSet: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectReferenceSet: (input: { projectId: string }) => Promise<FactoryProject>;
   revokeReferenceSetApproval: (input: { projectId: string }) => Promise<FactoryProject>;
   runTranscriptCleaning: (input: RunTranscriptCleaningInput) => Promise<FactoryProject>;
   listTranscriptCleaningArtifacts: (input: RunTranscriptCleaningInput) => Promise<TranscriptCleaningArtifact[]>;
   approveTranscriptCleaning: (input: RunTranscriptCleaningInput) => Promise<FactoryProject>;
+  rejectTranscriptCleaning: (input: RunTranscriptCleaningInput) => Promise<FactoryProject>;
   runReferenceSegmentation: (input: RunTranscriptCleaningInput) => Promise<FactoryProject>;
   listReferenceSegmentationArtifacts: (input: RunTranscriptCleaningInput) => Promise<ReferenceSegmentationArtifact[]>;
   approveReferenceSegmentation: (input: RunTranscriptCleaningInput) => Promise<FactoryProject>;
+  rejectReferenceSegmentation: (input: RunTranscriptCleaningInput) => Promise<FactoryProject>;
   runCompetitorDna: (input: RunTranscriptCleaningInput) => Promise<FactoryProject>;
   listCompetitorDnaArtifacts: (input: RunTranscriptCleaningInput) => Promise<CompetitorDnaArtifact[]>;
   approveCompetitorDna: (input: RunTranscriptCleaningInput) => Promise<FactoryProject>;
+  rejectCompetitorDna: (input: RunTranscriptCleaningInput) => Promise<FactoryProject>;
   runOpportunityMap: (input: { projectId: string }) => Promise<FactoryProject>;
   listOpportunityMapArtifacts: (input: { projectId: string }) => Promise<OpportunityMapArtifact[]>;
   approveOpportunityMap: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectOpportunityMap: (input: { projectId: string }) => Promise<FactoryProject>;
   runIdeaLab: (input: { projectId: string }) => Promise<FactoryProject>;
   approveIdea: (input: { projectId: string; ideaId: string }) => Promise<FactoryProject>;
+  rejectIdeaLab: (input: { projectId: string }) => Promise<FactoryProject>;
   runOriginalityReview: (input: { projectId: string }) => Promise<FactoryProject>;
   listOriginalityReviewArtifacts: (input: { projectId: string }) => Promise<OriginalityReviewArtifact[]>;
   approveOriginalityReview: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectOriginalityReview: (input: { projectId: string }) => Promise<FactoryProject>;
   saveResearchSources: (input: { projectId: string; sources: ResearchSourcesArtifact["payloadJson"]["sources"] }) => Promise<FactoryProject>;
   listResearchSourcesArtifacts: (input: { projectId: string }) => Promise<ResearchSourcesArtifact[]>;
   approveResearchSources: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectResearchSources: (input: { projectId: string }) => Promise<FactoryProject>;
   runClaimMap: (input: { projectId: string }) => Promise<FactoryProject>;
   listClaimMapArtifacts: (input: { projectId: string }) => Promise<ClaimMapArtifact[]>;
   approveClaimMap: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectClaimMap: (input: { projectId: string }) => Promise<FactoryProject>;
   runOutline: (input: { projectId: string }) => Promise<FactoryProject>;
   listOutlineArtifacts: (input: { projectId: string }) => Promise<OutlineArtifact[]>;
   approveOutline: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectOutline: (input: { projectId: string }) => Promise<FactoryProject>;
   runScript: (input: { projectId: string }) => Promise<FactoryProject>;
   listScriptArtifacts: (input: { projectId: string }) => Promise<ScriptArtifact[]>;
   approveScript: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectScript: (input: { projectId: string }) => Promise<FactoryProject>;
   runFactReview: (input: { projectId: string }) => Promise<FactoryProject>;
   listFactReviewArtifacts: (input: { projectId: string }) => Promise<FactReviewArtifact[]>;
   approveFactReview: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectFactReview: (input: { projectId: string }) => Promise<FactoryProject>;
   runRetentionReview: (input: { projectId: string }) => Promise<FactoryProject>;
   listRetentionReviewArtifacts: (input: { projectId: string }) => Promise<RetentionReviewArtifact[]>;
   approveRetentionReview: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectRetentionReview: (input: { projectId: string }) => Promise<FactoryProject>;
   runScenePlan: (input: { projectId: string }) => Promise<FactoryProject>;
   listScenePlanArtifacts: (input: { projectId: string }) => Promise<ScenePlanArtifact[]>;
   approveScenePlan: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectScenePlan: (input: { projectId: string }) => Promise<FactoryProject>;
   runShotPlan: (input: { projectId: string }) => Promise<FactoryProject>;
   listShotPlanArtifacts: (input: { projectId: string }) => Promise<ShotPlanArtifact[]>;
   approveShotPlan: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectShotPlan: (input: { projectId: string }) => Promise<FactoryProject>;
   runVisualRouting: (input: { projectId: string }) => Promise<FactoryProject>;
   listVisualRoutingArtifacts: (input: { projectId: string }) => Promise<VisualRoutingArtifact[]>;
   editVisualRouting: (input: { projectId: string; artifactId: string; shotId: string; visualMode: FactoryProject["shots"][number]["visualMode"] }) => Promise<FactoryProject>;
   approveVisualRouting: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectVisualRouting: (input: { projectId: string }) => Promise<FactoryProject>;
   runPromptPreparation: (input: { projectId: string }) => Promise<FactoryProject>;
   listPromptPreparationArtifacts: (input: { projectId: string }) => Promise<PromptPreparationArtifact[]>;
   approvePromptPreparation: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectPromptPreparation: (input: { projectId: string }) => Promise<FactoryProject>;
   runAssetAcquisition: (input: { projectId: string }) => Promise<FactoryProject>;
   listAssetAcquisitionArtifacts: (input: { projectId: string }) => Promise<AssetAcquisitionArtifact[]>;
   approveAssetAcquisition: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectAssetAcquisition: (input: { projectId: string }) => Promise<FactoryProject>;
   runAssetReview: (input: { projectId: string }) => Promise<FactoryProject>;
   listAssetReviewArtifacts: (input: { projectId: string }) => Promise<AssetReviewArtifact[]>;
   reviseAssetReview: (input: { projectId: string; artifactId: string; assetSha256: string; action: "approve" | "reject" | "assign" | "unassign"; shotId?: string }) => Promise<FactoryProject>;
   selectManualAssetUpload: (input: { projectId: string; artifactId: string; shotId: string }) => Promise<FactoryProject>;
   approveAssetReview: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectAssetReview: (input: { projectId: string }) => Promise<FactoryProject>;
   runVoiceGeneration: (input: { projectId: string }) => Promise<FactoryProject>;
   listVoiceGenerationArtifacts: (input: { projectId: string }) => Promise<VoiceGenerationArtifact[]>;
   approveVoiceGeneration: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectVoiceGeneration: (input: { projectId: string }) => Promise<FactoryProject>;
   runSubtitlePreparation: (input: { projectId: string }) => Promise<FactoryProject>;
   listSubtitlePreparationArtifacts: (input: { projectId: string }) => Promise<SubtitlePreparationArtifact[]>;
   approveSubtitlePreparation: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectSubtitlePreparation: (input: { projectId: string }) => Promise<FactoryProject>;
   runTimelineAssembly: (input: { projectId: string }) => Promise<FactoryProject>;
   listTimelineAssemblyArtifacts: (input: { projectId: string }) => Promise<TimelineAssemblyArtifact[]>;
   approveTimelineAssembly: (input: { projectId: string }) => Promise<FactoryProject>;
+  rejectTimelineAssembly: (input: { projectId: string }) => Promise<FactoryProject>;
   runPreviewRender: (input: { projectId: string }) => Promise<FactoryProject>;
   listPreviewRenderArtifacts: (input: { projectId: string }) => Promise<PreviewRenderArtifact[]>;
   approvePreviewRender: (input: { projectId: string }) => Promise<FactoryProject>;
@@ -457,6 +471,7 @@ export interface LongShortFactoryApi {
   runCapCutDraft: (input: { projectId: string }) => Promise<FactoryProject>;
   listCapCutDraftArtifacts: (input: { projectId: string }) => Promise<CapCutDraftArtifact[]>;
   approveCapCutDraft: (input: { projectId: string; confirmation: "I opened the draft in CapCut and verified editable tracks" }) => Promise<FactoryProject>;
+  rejectCapCutDraft: (input: { projectId: string }) => Promise<FactoryProject>;
   runPackagingExport: (input: { projectId: string }) => Promise<FactoryProject>;
   listPackagingExportArtifacts: (input: { projectId: string }) => Promise<PackagingExportArtifact[]>;
   approvePackagingExport: (input: { projectId: string }) => Promise<FactoryProject>;

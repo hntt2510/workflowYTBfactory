@@ -15,10 +15,13 @@ import {
   textModelCertificationRecordSchema,
   textModelCertificationResponseSchema,
   cleanedTranscriptOutputSchema,
+  referenceValidationArtifactResponseSchema,
   runTranscriptCleaningRequestSchema,
   originalityReviewOutputSchema,
   researchSourcesOutputSchema,
   editVisualRoutingRequestSchema,
+  shotPlanOutputSchema,
+  visualRoutingOutputSchema,
   assetReviewOutputSchema,
   reviseAssetReviewRequestSchema
   , voiceGenerationOutputSchema
@@ -26,14 +29,21 @@ import {
   , timelineAssemblyOutputSchema
   , previewRenderRequestSchema
   , previewRenderOutputSchema
+  , previewRenderArtifactResponseSchema
+  , previewRenderArtifactsResponseSchema
   , qaRequestSchema
   , qaOutputSchema
+  , qaArtifactResponseSchema
+  , qaArtifactsResponseSchema
   , capcutDraftRequestSchema
+  , capcutDraftApprovalRequestSchema
   , capcutDraftOutputSchema
   , packagingExportRequestSchema
   , packagingExportOutputSchema
   , devVoiceTestRequestSchema
   , devVoiceTestResponseSchema
+  , runTtsProviderHealthCheckRequestSchema
+  , runTtsProviderHealthCheckResponseSchema
   , devCapcutTestRequestSchema
   , devCapcutTestResponseSchema
   , devIdeaTestRequestSchema
@@ -72,9 +82,19 @@ describe("ipc schemas", () => {
     expect(() => localTtsSettingsSchema.parse({ omnivoiceBinPath: "D:/OmniVoice/omnivoice-infer.exe", outputDir: "D:/workspace/tts", referenceTranscript: "x".repeat(12001) })).toThrow();
   });
 
+  it("rejects absolute or protocol-based safe paths", () => {
+    expect(() => previewRenderOutputSchema.parse({ relativeFilePath: "C:/outside.mp4", durationSeconds: 1, width: 1920, height: 1080, inputArtifactIds: ["artifact-1", "artifact-2", "artifact-3"] })).toThrow();
+    expect(() => previewRenderOutputSchema.parse({ relativeFilePath: "/outside.mp4", durationSeconds: 1, width: 1920, height: 1080, inputArtifactIds: ["artifact-1", "artifact-2", "artifact-3"] })).toThrow();
+    expect(() => previewRenderOutputSchema.parse({ relativeFilePath: "file:///outside.mp4", durationSeconds: 1, width: 1920, height: 1080, inputArtifactIds: ["artifact-1", "artifact-2", "artifact-3"] })).toThrow();
+  });
+
   it("validates workflow and reference status contracts", () => {
     expect(workflowStageStatusSchema.parse("blocked")).toBe("blocked");
+    expect(workflowStageStatusSchema.parse("rejected")).toBe("rejected");
+    expect(workflowStageStatusSchema.parse("stale")).toBe("stale");
     expect(referenceStatusSchema.parse("draft")).toBe("draft");
+    expect(referenceStatusSchema.parse("rejected")).toBe("rejected");
+    expect(referenceStatusSchema.parse("stale")).toBe("stale");
     expect(editCompetitorReferenceRequestSchema.parse({
       projectId: "project-1",
       referenceId: "reference-1",
@@ -98,6 +118,11 @@ describe("ipc schemas", () => {
       targetDuration: "12-15 minutes"
     });
     expect(factoryProjectResponseSchema.parse(project).id).toBe(project.id);
+    const rejectedReferenceProject = factoryProjectResponseSchema.parse({
+      ...project,
+      referenceSet: { status: "rejected" }
+    });
+    expect((rejectedReferenceProject.referenceSet as { status: string }).status).toBe("rejected");
   });
 
   it("validates 9Router model list contracts", () => {
@@ -223,6 +248,34 @@ describe("ipc schemas", () => {
     })).toThrow();
   });
 
+  it("requires structured reference validation review artifacts", () => {
+    expect(referenceValidationArtifactResponseSchema.parse({
+      id: "artifact-reference-validation",
+      stageRunId: "run-reference-validation",
+      status: "needs_review",
+      payloadJson: {
+        referenceSet: { status: "valid", currentFingerprint: "f".repeat(64) },
+        references: [{
+          id: "reference-1",
+          pastedTranscript: "Transcript long enough to validate.",
+          status: "valid",
+          validationMessage: "Reference passed local validation.",
+          included: true,
+          createdAt: "2026-07-30T00:00:00.000Z"
+        }]
+      },
+      createdAt: "2026-07-30T00:00:00.000Z",
+      updatedAt: "2026-07-30T00:00:00.000Z"
+    }).payloadJson.references).toHaveLength(1);
+    expect(() => referenceValidationArtifactResponseSchema.parse({
+      id: "artifact-reference-validation",
+      status: "needs_review",
+      payloadJson: { valid: true },
+      createdAt: "2026-07-30T00:00:00.000Z",
+      updatedAt: "2026-07-30T00:00:00.000Z"
+    })).toThrow();
+  });
+
   it("allows only a supported visual-mode revision for a review artifact", () => {
     expect(editVisualRoutingRequestSchema.parse({ projectId: "project-1", artifactId: "artifact-1", shotId: "shot-1", visualMode: "document" }).visualMode).toBe("document");
     expect(editVisualRoutingRequestSchema.parse({ projectId: "project-1", artifactId: "artifact-1", shotId: "shot-1", visualMode: "manual_upload" }).visualMode).toBe("manual_upload");
@@ -234,6 +287,8 @@ describe("ipc schemas", () => {
     expect(assetReviewOutputSchema.parse({ acquisitionArtifactId: "artifact-1", assets: [{ asset, reviewStatus: "needs_review" }] }).assets).toHaveLength(1);
     expect(reviseAssetReviewRequestSchema.parse({ projectId: "project-1", artifactId: "artifact-2", assetSha256: "d".repeat(64), action: "assign", shotId: "shot-1" }).action).toBe("assign");
     expect(() => assetReviewOutputSchema.parse({ acquisitionArtifactId: "artifact-1", assets: [{ asset: { ...asset, signedUrl: "https://example.com" }, reviewStatus: "needs_review" }] })).toThrow();
+    expect(() => assetReviewOutputSchema.parse({ acquisitionArtifactId: "artifact-1", assets: [{ asset, reviewStatus: "approved", assignedShotId: "shot-2" }] })).toThrow();
+    expect(() => assetReviewOutputSchema.parse({ acquisitionArtifactId: "artifact-1", assets: [{ asset, reviewStatus: "approved", assignedShotId: "shot-1" }, { asset: { ...asset, sha256: "e".repeat(64) }, reviewStatus: "approved", assignedShotId: "shot-1" }] })).toThrow();
   });
 
   it("requires nonempty, portable, validated voice segment metadata", () => {
@@ -254,6 +309,20 @@ describe("ipc schemas", () => {
     expect(devStockTestResponseSchema.parse({ mediaType: "video", results: [{ id: "1", url: "https://www.pexels.com/video/1", previewUrl: "https://images.pexels.com/video.jpg" }] }).results).toHaveLength(1);
   });
 
+  it("validates the explicit TTS provider health-check contract", () => {
+    expect(runTtsProviderHealthCheckRequestSchema.parse({ provider: "edge-tts" }).provider).toBe("edge-tts");
+    expect(runTtsProviderHealthCheckResponseSchema.parse({
+      id: "edge-tts",
+      displayName: "Microsoft Edge Neural",
+      providerType: "cloud",
+      health: "ready",
+      message: "Ready",
+      experimental: false,
+      enabled: true,
+      voiceCount: 1
+    }).voiceCount).toBe(1);
+  });
+
   it("requires ordered frame-valid subtitle cues with original text", () => {
     expect(subtitlePreparationOutputSchema.parse({ fps: 30, cues: [{ id: "cue-1", scriptSectionId: "section-1", startFrame: 0, durationFrames: 15, text: "Original sentence." }] }).cues[0]?.text).toBe("Original sentence.");
     expect(() => subtitlePreparationOutputSchema.parse({ fps: 30, cues: [{ id: "cue-1", scriptSectionId: "section-1", startFrame: -1, durationFrames: 0, text: "" }] })).toThrow();
@@ -264,20 +333,37 @@ describe("ipc schemas", () => {
     expect(() => timelineAssemblyOutputSchema.parse({ fps: 30, items: [{ id: "visual-shot-1", track: "primary_visual", sourceId: "asset-1", startFrame: -1, durationFrames: 0, fps: 30 }] })).toThrow();
   });
 
+  it("rejects duplicate shot IDs in shot and visual routing outputs", () => {
+    const shot = { id: "shot-1", sceneId: "scene-1", order: 0, startFrame: 0, durationFrames: 30, fps: 30, purpose: "Open", visualMode: "ai_image" as const, framing: "wide", cameraAngle: "front", cameraMovement: "static", subjectAction: "talk", startState: {}, endState: {}, continuityRefs: [] };
+    expect(() => shotPlanOutputSchema.parse({ shots: [shot, { ...shot, sceneId: "scene-2" }] })).toThrow();
+    expect(() => visualRoutingOutputSchema.parse({ shots: [shot, { ...shot, sceneId: "scene-2" }] })).toThrow();
+  });
+
+  it("allows factory project timeline source IDs to reference workspace media paths", () => {
+    const project = createFixtureProject({ topic: "timeline path", format: "short", targetLanguage: "English" });
+    expect(factoryProjectResponseSchema.parse({ ...project, timeline: { fps: 30, items: [{ id: "voice-section-1", track: "narration", sourceId: "voice/project-1/section-1.wav", startFrame: 0, durationFrames: 30, fps: 30 }] } }).timeline.items[0]?.sourceId).toContain("/");
+  });
+
   it("keeps Preview Render output local, validated, and tied to approved inputs", () => {
     expect(previewRenderRequestSchema.parse({ projectId: "project-1" }).projectId).toBe("project-1");
     expect(previewRenderOutputSchema.parse({ relativeFilePath: "previews/project-1/run-1.mp4", durationSeconds: 3.2, width: 1080, height: 1920, sha256: "a".repeat(64), inputArtifactIds: ["artifact-timeline", "artifact-assets", "artifact-voice"] }).relativeFilePath).toContain("previews/");
     expect(() => previewRenderOutputSchema.parse({ relativeFilePath: "../outside.mp4", durationSeconds: 0, width: 0, height: 0, inputArtifactIds: [] })).toThrow();
+    expect(previewRenderArtifactResponseSchema.parse({ id: "artifact-preview", stageRunId: "stage-run-1", status: "needs_review", payloadJson: { relativeFilePath: "previews/project-1/run-1.mp4", durationSeconds: 3.2, width: 1080, height: 1920, sha256: "a".repeat(64), inputArtifactIds: ["artifact-timeline", "artifact-assets", "artifact-voice"] }, relativeFilePath: "previews/project-1/run-1.mp4", createdAt: "2026-07-30T00:00:00.000Z", updatedAt: "2026-07-30T00:00:00.000Z" }).status).toBe("needs_review");
+    expect(previewRenderArtifactsResponseSchema.parse([{ id: "artifact-preview", status: "needs_review", payloadJson: { relativeFilePath: "previews/project-1/run-1.mp4", durationSeconds: 3.2, width: 1080, height: 1920, sha256: "a".repeat(64), inputArtifactIds: ["artifact-timeline", "artifact-assets", "artifact-voice"] }, relativeFilePath: "previews/project-1/run-1.mp4", createdAt: "2026-07-30T00:00:00.000Z", updatedAt: "2026-07-30T00:00:00.000Z" }])).toHaveLength(1);
   });
 
   it("keeps deterministic QA findings bounded and reviewable", () => {
     expect(qaRequestSchema.parse({ projectId: "project-1" }).projectId).toBe("project-1");
     expect(qaOutputSchema.parse({ runner: "local_deterministic", inputArtifactIds: ["artifact-preview"], findings: [{ code: "missing_audio", severity: "blocking", message: "Narration is missing.", evidence: "timeline-assembly" }] }).findings[0]?.severity).toBe("blocking");
     expect(() => qaOutputSchema.parse({ runner: "ai", inputArtifactIds: [], findings: [] })).toThrow();
+    expect(qaArtifactResponseSchema.parse({ id: "artifact-qa", stageRunId: "stage-run-1", status: "needs_review", payloadJson: { runner: "local_deterministic", inputArtifactIds: ["artifact-preview"], findings: [{ code: "missing_audio", severity: "blocking", message: "Narration is missing.", evidence: "timeline-assembly" }] }, createdAt: "2026-07-30T00:00:00.000Z", updatedAt: "2026-07-30T00:00:00.000Z" }).payloadJson.runner).toBe("local_deterministic");
+    expect(qaArtifactsResponseSchema.parse([{ id: "artifact-qa", status: "needs_review", payloadJson: { runner: "local_deterministic", inputArtifactIds: ["artifact-preview"], findings: [{ code: "missing_audio", severity: "blocking", message: "Narration is missing.", evidence: "timeline-assembly" }] }, createdAt: "2026-07-30T00:00:00.000Z", updatedAt: "2026-07-30T00:00:00.000Z" }])).toHaveLength(1);
   });
 
   it("keeps CapCut Draft artifacts structurally validated but explicitly reviewable", () => {
     expect(capcutDraftRequestSchema.parse({ projectId: "project-1" }).projectId).toBe("project-1");
+    expect(capcutDraftApprovalRequestSchema.parse({ projectId: "project-1", confirmation: "I opened the draft in CapCut and verified editable tracks" }).confirmation).toContain("verified");
+    expect(() => capcutDraftApprovalRequestSchema.parse({ projectId: "project-1", confirmation: "looks ok" })).toThrow();
     expect(capcutDraftOutputSchema.parse({ draftName: "project-1-run-1", structurallyValidated: true, trackCounts: { video: 1, audio: 1, text: 2 }, inputArtifactIds: ["artifact-qa", "artifact-timeline", "artifact-preview"] }).trackCounts.text).toBe(2);
     expect(() => capcutDraftOutputSchema.parse({ draftName: "../draft", structurallyValidated: false, trackCounts: { video: 0, audio: 0, text: 0 }, inputArtifactIds: [] })).toThrow();
   });
@@ -285,6 +371,7 @@ describe("ipc schemas", () => {
   it("keeps package manifests portable and artifact-only", () => {
     expect(packagingExportRequestSchema.parse({ projectId: "project-1" }).projectId).toBe("project-1");
     expect(packagingExportOutputSchema.parse({ relativeFilePath: "exports/project-1/package.json", artifactIds: ["a1", "a2", "a3", "a4", "a5", "a6"], sha256: "f".repeat(64) }).artifactIds).toHaveLength(6);
+    expect(() => packagingExportOutputSchema.parse({ relativeFilePath: "exports/project-1/package.json", artifactIds: ["a1", "a1", "a3", "a4", "a5", "a6"], sha256: "f".repeat(64) })).toThrow();
     expect(() => packagingExportOutputSchema.parse({ relativeFilePath: "../secret.json", artifactIds: [], sha256: "bad" })).toThrow();
   });
 });

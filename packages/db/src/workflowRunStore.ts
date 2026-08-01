@@ -1,4 +1,4 @@
-import type { WorkflowArtifact, WorkflowStageRun } from "@lsf/domain";
+import { getWorkflowStageDefinition, perReferenceArtifactStages, type WorkflowArtifact, type WorkflowStageRun } from "@lsf/domain";
 import type { FactoryDatabase } from "./connection";
 
 interface StageRunRow {
@@ -40,6 +40,7 @@ export class WorkflowRunStore {
   constructor(private readonly db: FactoryDatabase) {}
 
   createRun(run: WorkflowStageRun): void {
+    if (this.hasPendingOrAcceptedRun(run.projectId, run.stageId, run.inputFingerprint)) throw new Error("A pending or accepted stage run already exists for this input.");
     this.db.prepare(
       `INSERT INTO workflow_stage_runs (
         id, project_id, stage_id, status, runner_id, runner_version, provider_id,
@@ -59,6 +60,7 @@ export class WorkflowRunStore {
   completeRun(run: WorkflowStageRun, artifact: WorkflowArtifact, options: { withinTransaction?: boolean } = {}): void {
     if (!options.withinTransaction) this.db.exec("BEGIN IMMEDIATE;");
     try {
+      assertArtifactMatchesRun(run, artifact);
       this.createRun(run);
       this.saveArtifact(artifact);
       if (!options.withinTransaction) this.db.exec("COMMIT;");
@@ -77,6 +79,16 @@ export class WorkflowRunStore {
     return row ? toStageRun(row) : null;
   }
 
+  private hasPendingOrAcceptedRun(projectId: string, stageId: string, inputFingerprint: string): boolean {
+    const row = this.db.prepare(
+      `SELECT 1 FROM workflow_stage_runs
+       WHERE project_id = ? AND stage_id = ? AND input_fingerprint = ?
+       AND status IN ('queued', 'running', 'needs_review', 'approved')
+       LIMIT 1`
+    ).get(projectId, stageId, inputFingerprint);
+    return Boolean(row);
+  }
+
   listRuns(projectId: string, stageId: string): WorkflowStageRun[] {
     return (this.db.prepare(
       "SELECT * FROM workflow_stage_runs WHERE project_id = ? AND stage_id = ? ORDER BY created_at DESC"
@@ -89,24 +101,19 @@ export class WorkflowRunStore {
     ).all(projectId, stageId) as unknown as ArtifactRow[]).map(toArtifact);
   }
 
-  approveReviewRun(runId: string): void {
-    const result = this.db.prepare(
-      "UPDATE workflow_stage_runs SET status = 'approved', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'needs_review'"
-    ).run(runId);
-    if (result.changes !== 1) throw new Error("Stage run is not awaiting review.");
-    this.db.prepare(
-      "UPDATE workflow_artifacts SET status = 'approved', updated_at = CURRENT_TIMESTAMP WHERE stage_run_id = ? AND status = 'needs_review'"
-    ).run(runId);
+  getArtifact(projectId: string, artifactId: string): WorkflowArtifact | null {
+    const row = this.db.prepare(
+      "SELECT * FROM workflow_artifacts WHERE project_id = ? AND id = ?"
+    ).get(projectId, artifactId) as ArtifactRow | undefined;
+    return row ? toArtifact(row) : null;
   }
 
-  rejectReviewRun(runId: string): void {
-    const result = this.db.prepare(
-      "UPDATE workflow_stage_runs SET status = 'rejected', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'needs_review'"
-    ).run(runId);
-    if (result.changes !== 1) throw new Error("Stage run is not awaiting review.");
-    this.db.prepare(
-      "UPDATE workflow_artifacts SET status = 'rejected', updated_at = CURRENT_TIMESTAMP WHERE stage_run_id = ? AND status = 'needs_review'"
-    ).run(runId);
+  approveReviewRun(runId: string, options: { withinTransaction?: boolean } = {}): void {
+    this.completeReviewRun(runId, "approved", options);
+  }
+
+  rejectReviewRun(runId: string, options: { withinTransaction?: boolean } = {}): void {
+    this.completeReviewRun(runId, "rejected", options);
   }
 
   finishRun(run: WorkflowStageRun, artifact?: WorkflowArtifact, options: { withinTransaction?: boolean } = {}): void {
@@ -122,7 +129,10 @@ export class WorkflowRunStore {
         run.safeErrorCategory ?? null, run.safeErrorMessage ?? null, run.finishedAt ?? null, run.id
       );
       if (result.changes !== 1) throw new Error("Stage run is not running.");
-      if (artifact) this.saveArtifact(artifact);
+      if (artifact) {
+        assertArtifactMatchesRun(run, artifact);
+        this.saveArtifact(artifact);
+      }
       if (!options.withinTransaction) this.db.exec("COMMIT;");
     } catch (error) {
       if (!options.withinTransaction) this.db.exec("ROLLBACK;");
@@ -135,8 +145,20 @@ export class WorkflowRunStore {
       "UPDATE workflow_artifacts SET status = 'stale', updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND status IN ('needs_review', 'approved')"
     ).run(projectId);
     this.db.prepare(
-      "UPDATE workflow_stage_runs SET status = 'stale', updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND status = 'approved'"
+      "UPDATE workflow_stage_runs SET status = 'stale', updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND status IN ('queued', 'running', 'needs_review', 'approved')"
     ).run(projectId);
+  }
+
+  markStageArtifactsStale(projectId: string, stageIds: readonly string[]): void {
+    const uniqueStageIds = [...new Set(stageIds)].filter(Boolean);
+    if (!uniqueStageIds.length) return;
+    const placeholders = uniqueStageIds.map(() => "?").join(", ");
+    this.db.prepare(
+      `UPDATE workflow_artifacts SET status = 'stale', updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND stage_id IN (${placeholders}) AND status IN ('needs_review', 'approved')`
+    ).run(projectId, ...uniqueStageIds);
+    this.db.prepare(
+      `UPDATE workflow_stage_runs SET status = 'stale', updated_at = CURRENT_TIMESTAMP WHERE project_id = ? AND stage_id IN (${placeholders}) AND status IN ('queued', 'running', 'needs_review', 'approved')`
+    ).run(projectId, ...uniqueStageIds);
   }
 
   recoverInterruptedRuns(): number {
@@ -153,6 +175,91 @@ export class WorkflowRunStore {
       artifact.type, artifact.version, artifact.status, artifact.payloadJson ? JSON.stringify(artifact.payloadJson) : null,
       artifact.relativeFilePath ?? null, artifact.createdAt, artifact.updatedAt
     );
+  }
+
+  private completeReviewRun(runId: string, status: "approved" | "rejected", options: { withinTransaction?: boolean }): void {
+    if (!options.withinTransaction) this.db.exec("BEGIN IMMEDIATE;");
+    try {
+      if (status === "approved") this.assertApprovedInputArtifactsCurrent(runId);
+      const artifactResult = this.db.prepare(
+        "UPDATE workflow_artifacts SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE stage_run_id = ? AND status = 'needs_review'"
+      ).run(status, runId);
+      if (artifactResult.changes !== 1) throw new Error("Stage run must have exactly one review artifact awaiting review.");
+      const runResult = this.db.prepare(
+        "UPDATE workflow_stage_runs SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'needs_review'"
+      ).run(status, runId);
+      if (runResult.changes !== 1) throw new Error("Stage run is not awaiting review.");
+      if (!options.withinTransaction) this.db.exec("COMMIT;");
+    } catch (error) {
+      if (!options.withinTransaction) this.db.exec("ROLLBACK;");
+      throw error;
+    }
+  }
+
+  private assertApprovedInputArtifactsCurrent(runId: string): void {
+    const row = this.db.prepare("SELECT project_id, stage_id, input_artifact_ids_json FROM workflow_stage_runs WHERE id = ? AND status = 'needs_review'").get(runId) as Pick<StageRunRow, "project_id" | "stage_id" | "input_artifact_ids_json"> | undefined;
+    if (!row) return;
+    if (row.stage_id === "reference-validation") return;
+    const inputIds = JSON.parse(row.input_artifact_ids_json) as string[];
+    const definition = getWorkflowStageDefinition(row.stage_id);
+    if (!inputIds.length && definition?.dependsOn.length) throw new Error("Stage run inputs are no longer approved.");
+    if (!inputIds.length) return;
+    if (inputIds.some((artifactId) => !this.isCurrentApprovedArtifact(row.project_id, artifactId, new Set([runId])))) throw new Error("Stage run inputs are no longer approved.");
+  }
+
+  private isCurrentApprovedArtifact(projectId: string, artifactId: string, visitedRunIds: Set<string>): boolean {
+    const artifact = this.getArtifact(projectId, artifactId);
+    if (artifact?.status !== "approved" || !artifact.stageRunId) return false;
+    const run = this.getRun(artifact.stageRunId);
+    if (!run || run.projectId !== projectId || run.status !== "approved" || !run.outputArtifactIds.includes(artifact.id)) return false;
+    if (visitedRunIds.has(run.id)) return false;
+    const nextVisitedRunIds = new Set(visitedRunIds);
+    nextVisitedRunIds.add(run.id);
+    if (run.stageId !== "reference-validation" && run.inputArtifactIds.some((inputArtifactId) => !this.isCurrentApprovedArtifact(projectId, inputArtifactId, nextVisitedRunIds))) return false;
+    return this.currentArtifactIds(projectId, artifact.stageId, visitedRunIds).includes(artifact.id);
+  }
+
+  private currentArtifactIds(projectId: string, stageId: string, visitedRunIds: Set<string>): string[] {
+    const seenReferenceIds = new Set<string>();
+    const currentIds: string[] = [];
+    const isPerReferenceStage = perReferenceArtifactStages.has(stageId);
+    for (const candidate of this.listArtifacts(projectId, stageId)) {
+      if (candidate.status !== "approved" || !candidate.stageRunId) continue;
+      const payloadReferenceId = typeof candidate.payloadJson?.referenceId === "string" ? candidate.payloadJson.referenceId : null;
+      if (isPerReferenceStage && !payloadReferenceId) continue;
+      const referenceId = isPerReferenceStage ? payloadReferenceId : null;
+      if (referenceId && seenReferenceIds.has(referenceId)) continue;
+      const run = this.getRun(candidate.stageRunId);
+      if (!run || run.projectId !== projectId || run.status !== "approved" || !run.outputArtifactIds.includes(candidate.id)) continue;
+      if (visitedRunIds.has(run.id)) continue;
+      const nextVisitedRunIds = new Set(visitedRunIds);
+      nextVisitedRunIds.add(run.id);
+      if (run.stageId !== "reference-validation" && run.inputArtifactIds.some((inputArtifactId) => !this.isCurrentApprovedArtifact(projectId, inputArtifactId, nextVisitedRunIds))) continue;
+      currentIds.push(candidate.id);
+      if (referenceId) seenReferenceIds.add(referenceId);
+      else break;
+    }
+    return currentIds;
+  }
+
+  private getRun(runId: string): WorkflowStageRun | null {
+    const row = this.db.prepare("SELECT * FROM workflow_stage_runs WHERE id = ?").get(runId) as StageRunRow | undefined;
+    return row ? toStageRun(row) : null;
+  }
+}
+
+function assertArtifactMatchesRun(run: WorkflowStageRun, artifact: WorkflowArtifact): void {
+  if (artifact.projectId !== run.projectId || artifact.stageId !== run.stageId || artifact.stageRunId !== run.id) {
+    throw new Error("Workflow artifact does not match its stage run.");
+  }
+  if (!run.outputArtifactIds.includes(artifact.id)) {
+    throw new Error("Stage run output artifact IDs must include the saved artifact.");
+  }
+  if (run.status === "needs_review" && artifact.status !== "needs_review") {
+    throw new Error("Review stage runs must create review artifacts.");
+  }
+  if (run.status === "approved" && artifact.status !== "approved") {
+    throw new Error("Approved stage runs must create approved artifacts.");
   }
 }
 

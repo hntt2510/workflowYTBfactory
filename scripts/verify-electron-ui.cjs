@@ -86,9 +86,10 @@ async function main() {
   const vite = startVite();
   try {
     await waitForHttp(baseUrl);
-    const createReport = await runElectronMode(workspaceRoot, "create");
-    const verifyReport = await runElectronMode(workspaceRoot, "verify");
-    console.log(JSON.stringify({ ok: true, workspaceRoot, createReport, verifyReport }, null, 2));
+    const modes = (process.env.LSF_UI_MODES || "workflow-contract,reference-restart,reference-invalidation,create,verify").split(",").map((mode) => mode.trim()).filter(Boolean);
+    const reports = {};
+    for (const mode of modes) reports[mode] = await runElectronMode(workspaceRoot, mode);
+    console.log(JSON.stringify({ ok: true, workspaceRoot, reports }, null, 2));
   } finally {
     vite.kill();
   }

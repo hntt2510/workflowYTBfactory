@@ -108,11 +108,11 @@ export class ProviderCredentialStore {
     const result = this.db
       .prepare(
         `UPDATE provider_credentials SET
-          text_model = ?,
-          image_model = ?,
-          video_model = ?,
-          tts_model = ?,
-          stt_model = ?,
+          text_model = COALESCE(?, text_model),
+          image_model = COALESCE(?, image_model),
+          video_model = COALESCE(?, video_model),
+          tts_model = COALESCE(?, tts_model),
+          stt_model = COALESCE(?, stt_model),
           updated_at = CURRENT_TIMESTAMP
          WHERE provider_id = ?`
       )

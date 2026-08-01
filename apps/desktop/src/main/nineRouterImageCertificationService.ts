@@ -9,7 +9,7 @@ export async function loadNineRouterImageCertification(input: { credentialStore:
   if (!settings?.imageModel) return imageModelCertificationResponseSchema.parse({ status: "not_tested", message: "No selected image model is available for certification.", errorCategory: "model_not_selected" });
   const fingerprint = fingerprintBaseUrl(settings.baseUrl); const credentialVersionRef = input.credentialStore.loadProviderCredentialVersionRef("9router");
   const matching = fingerprint ? input.certificationStore.loadMatching({ configuredModelId: settings.imageModel, baseUrlFingerprint: fingerprint, ...(credentialVersionRef ? { credentialVersionRef } : {}) }) : null;
-  if (matching) return imageModelCertificationResponseSchema.parse({ status: matching.overallStatus, record: matching, message: matching.overallStatus === "verified" ? "Image model certification verified." : "Image model certification failed." });
+  if (matching) return imageModelCertificationResponseSchema.parse({ status: matching.overallStatus, record: matching, message: imageCertificationMessage(matching.overallStatus) });
   const latest = input.certificationStore.loadLatest();
   return imageModelCertificationResponseSchema.parse(latest ? { status: "stale", record: { ...latest, overallStatus: "stale" }, message: "Previous image model certification does not match the current configuration." } : { status: "not_tested", message: "Image model has not been certified." });
 }
@@ -27,4 +27,10 @@ export async function runNineRouterImageCertification(input: { credentialStore: 
   const record = { id: `image-cert-${randomUUID()}`, providerId: "9router" as const, configuredModelId: settings.imageModel, ...(returnedModelId ? { returnedModelId } : {}), baseUrlFingerprint: fingerprint, ...(input.credentialStore.loadProviderCredentialVersionRef("9router") ? { credentialVersionRef: input.credentialStore.loadProviderCredentialVersionRef("9router") } : {}), endpointStrategy: "images-generations" as const, implementationVersion: "image-certification-v1" as const, imageResponseTest: { status: category ? "failed" as const : "passed" as const, latencyMs: Date.now() - started, ...(category ? { errorCategory: category } : {}) }, overallStatus: category ? "failed" as const : "verified" as const, testedAt: new Date().toISOString() };
   input.certificationStore.save(record); input.logger[record.overallStatus === "verified" ? "info" : "warn"]("nine_router_image_certification_completed", { providerId: "9router", modelId: settings.imageModel, status: record.overallStatus, errorCategory: category });
   return imageModelCertificationResponseSchema.parse({ status: record.overallStatus, record, message: record.overallStatus === "verified" ? "Image model certification verified." : "Image model certification failed.", ...(category ? { errorCategory: category } : {}) });
+}
+
+function imageCertificationMessage(status: "verified" | "failed" | "stale"): string {
+  if (status === "verified") return "Image model certification verified.";
+  if (status === "stale") return "Previous image model certification is stale for the current configuration.";
+  return "Image model certification failed.";
 }
