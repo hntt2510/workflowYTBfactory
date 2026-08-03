@@ -18,6 +18,7 @@ interface JobPayload extends Record<string, unknown> {
   fallbackEnabled: boolean;
   fallbackOrder: TtsProviderId[];
   mergedRelativeFilePath?: string;
+  errorCode?: string;
   errorMessage?: string;
 }
 
@@ -150,7 +151,10 @@ export class TtsJobService {
     if (!segment) throw new Error("TTS segment was not found.");
     const payload = segment.payload as SegmentPayload;
     this.input.store.updateSegment(segment.id, "queued", { ...payload, errorCode: undefined, errorMessage: undefined, timingOverflowSeconds: 0 });
-    this.input.store.updateJob(jobId, "queued", current.job.payload);
+    const jobPayload = { ...current.job.payload };
+    delete jobPayload.errorCode;
+    delete jobPayload.errorMessage;
+    this.input.store.updateJob(jobId, "queued", jobPayload);
     return this.run(jobId, segmentId);
   }
 

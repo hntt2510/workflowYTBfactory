@@ -74,7 +74,41 @@ export class TtsJobStore {
   }
 
   recoverInterruptedJobs(): number {
-    return Number(this.db.prepare("UPDATE tts_jobs SET state = 'queued', updated_at = CURRENT_TIMESTAMP WHERE state = 'running'").run().changes);
+    const jobs = this.db.prepare(
+      "SELECT id, project_id, state, payload_json, created_at, updated_at FROM tts_jobs WHERE state = 'running' ORDER BY created_at"
+    ).all() as unknown as TtsJobRow[];
+    if (!jobs.length) return 0;
+
+    const now = new Date().toISOString();
+    const updateJob = this.db.prepare("UPDATE tts_jobs SET state = 'failed', payload_json = ?, updated_at = ? WHERE id = ? AND state = 'running'");
+    const updateSegment = this.db.prepare("UPDATE tts_job_segments SET state = 'failed', payload_json = ?, updated_at = ? WHERE id = ? AND state IN ('queued', 'running')");
+    const interruptedMessage = "The previous application session ended before voice generation completed. Retry each failed segment explicitly.";
+    const interruptedSegmentMessage = "This voice segment was not completed before the previous application session ended. Retry this segment explicitly.";
+
+    this.db.exec("BEGIN IMMEDIATE;");
+    try {
+      let recovered = 0;
+      for (const job of jobs) {
+        const jobPayload = JSON.parse(job.payload_json) as Record<string, unknown>;
+        const result = updateJob.run(JSON.stringify({ ...jobPayload, errorCode: "interrupted", errorMessage: interruptedMessage }), now, job.id);
+        if (result.changes !== 1) continue;
+
+        const segments = this.db.prepare(
+          "SELECT id, job_id, segment_order, state, payload_json, created_at, updated_at FROM tts_job_segments WHERE job_id = ? AND state IN ('queued', 'running')"
+        ).all(job.id) as unknown as TtsSegmentRow[];
+        for (const segment of segments) {
+          const segmentPayload = JSON.parse(segment.payload_json) as Record<string, unknown>;
+          const segmentResult = updateSegment.run(JSON.stringify({ ...segmentPayload, errorCode: "interrupted", errorMessage: interruptedSegmentMessage }), now, segment.id);
+          if (segmentResult.changes !== 1) throw new Error("TTS segment recovery failed.");
+        }
+        recovered += 1;
+      }
+      this.db.exec("COMMIT;");
+      return recovered;
+    } catch (error) {
+      this.db.exec("ROLLBACK;");
+      throw error;
+    }
   }
 
   private readJob(id: string): StoredTtsJob | null {

@@ -799,11 +799,7 @@ app.whenReady().then(async () => {
     mergedOutputPathFor: (jobId) => join(workspaceRoot, "assets", "voice", "jobs", jobId, "voiceover.mp3")
   });
   ttsJobStore.recoverInterruptedJobs();
-  for (const job of ttsJobs.listQueued()) {
-    void ttsJobs.run(job.id)
-      .then((completed) => completeManagedVoiceGeneration(completed))
-      .catch((error) => logger.error("tts_job_resume_failed", { jobId: job.id, message: error instanceof Error ? error.message : String(error) }));
-  }
+  // Interrupted and queued jobs remain available for explicit user retry; startup never calls a TTS provider.
   if (process.env.LSF_E2E_UI_MODE === "workflow-contract") {
     const topic = "Workflow contract verification project";
     if (!projectRepository.listProjects().some((project) => project.topic === topic)) {

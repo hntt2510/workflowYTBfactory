@@ -8,16 +8,19 @@ import { TtsJobService } from "./ttsJobService";
 function createService(durationForText: (text: string) => number, failText?: string, mergeFails = false) {
   const workspaceRoot = mkdtempSync(join(tmpdir(), "lsf-tts-job-"));
   const db = openFactoryDatabase(join(workspaceRoot, "factory.sqlite"));
+  const store = new TtsJobStore(db);
   const fittedSpeeds: number[] = [];
+  const synthesizedTexts: string[] = [];
   let allowRetry = false;
   const manager = {
     synthesize: async (input: { text: string; outputPath: string; provider: "edge-tts" }) => {
+      synthesizedTexts.push(input.text);
       if (input.text === failText && !allowRetry) throw new Error("provider unavailable");
       return { requestedProvider: input.provider, actualProvider: input.provider, voiceId: "vi-VN-HoaiMyNeural", outputPath: input.outputPath, attemptCount: 1, fallbackUsed: false };
     }
   };
   const service = new TtsJobService({
-    store: new TtsJobStore(db),
+    store,
     manager: manager as never,
     workspaceRoot,
     outputPathFor: (jobId, segmentId) => join(workspaceRoot, "voice", jobId, `${segmentId}.mp3`),
@@ -26,7 +29,7 @@ function createService(durationForText: (text: string) => number, failText?: str
     fitAudio: async (_input, _output, speed) => { fittedSpeeds.push(speed); },
     mergeAudio: async () => { if (mergeFails) throw new Error("merge unavailable"); }
   });
-  return { service, db, fittedSpeeds, enableRetry: () => { allowRetry = true; } };
+  return { service, store, db, fittedSpeeds, synthesizedTexts, enableRetry: () => { allowRetry = true; } };
 }
 
 describe("TtsJobService", () => {
@@ -98,6 +101,34 @@ describe("TtsJobService", () => {
 
     expect(completed.provider).toBe("omnivoice-local");
     expect(completed.segments[0]?.requestedProvider).toBe("omnivoice-local");
+    fixture.db.close();
+  });
+
+  it("does not resume recovered work and retries only the explicitly selected segment", async () => {
+    const fixture = createService(() => 0.8);
+    const created = fixture.service.create({
+      provider: "edge-tts",
+      voiceId: "vi-VN-HoaiMyNeural",
+      language: "vi",
+      segments: [{ id: "first", text: "first", startSeconds: 0, endSeconds: 1 }]
+    });
+    const stored = fixture.store.get(created.id)!;
+    fixture.store.updateJob(created.id, "running", stored.job.payload);
+    fixture.store.updateSegment(stored.segments[0]!.id, "running", stored.segments[0]!.payload);
+
+    expect(fixture.store.recoverInterruptedJobs()).toBe(1);
+    expect(fixture.service.listQueued()).toEqual([]);
+    expect(fixture.synthesizedTexts).toEqual([]);
+    expect(fixture.service.get(created.id)).toMatchObject({
+      state: "failed",
+      errorMessage: expect.stringContaining("previous application session"),
+      segments: [{ segmentId: "first", state: "failed", errorCode: "interrupted" }]
+    });
+
+    const retried = await fixture.service.retrySegment(created.id, "first");
+    expect(retried.state).toBe("success");
+    expect(retried.errorMessage).toBeUndefined();
+    expect(fixture.synthesizedTexts).toEqual(["first"]);
     fixture.db.close();
   });
 });

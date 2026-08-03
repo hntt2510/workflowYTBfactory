@@ -13,15 +13,26 @@ function openTemp() {
 }
 
 describe("project persistence", () => {
-  it("persists TTS jobs and recovers only interrupted jobs", () => {
+  it("persists TTS jobs and marks interrupted work failed without losing segment progress", () => {
     const { db, repo } = openTemp();
     const store = new TtsJobStore(db);
     const project = createFixtureProject({ topic: "TTS persistence", format: "short", targetLanguage: "Vietnamese" });
     repo.saveProject(project);
-    store.create({ id: "tts-job-01", projectId: project.id, state: "running", payload: { provider: "edge-tts" }, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }, [{ id: "tts-segment-01", jobId: "tts-job-01", order: 0, state: "running", payload: { segmentId: "section-01" }, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }]);
+    store.create({ id: "tts-job-01", projectId: project.id, state: "running", payload: { provider: "edge-tts" }, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }, [
+      { id: "tts-segment-success", jobId: "tts-job-01", order: 0, state: "success", payload: { segmentId: "section-success", relativeFilePath: "voice/success.mp3" }, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "tts-segment-running", jobId: "tts-job-01", order: 1, state: "running", payload: { segmentId: "section-running", text: "Interrupted text" }, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "tts-segment-queued", jobId: "tts-job-01", order: 2, state: "queued", payload: { segmentId: "section-queued", text: "Queued text" }, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" }
+    ]);
+    store.create({ id: "tts-job-queued", state: "queued", payload: { provider: "edge-tts" }, createdAt: "2026-01-02T00:00:00.000Z", updatedAt: "2026-01-02T00:00:00.000Z" }, []);
 
     expect(store.recoverInterruptedJobs()).toBe(1);
-    expect(store.get("tts-job-01")?.job.state).toBe("queued");
+    expect(store.get("tts-job-01")?.job).toMatchObject({ state: "failed", payload: { errorCode: "interrupted", errorMessage: expect.stringContaining("previous application session") } });
+    expect(store.get("tts-job-01")?.segments).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "tts-segment-success", state: "success", payload: expect.objectContaining({ segmentId: "section-success", relativeFilePath: "voice/success.mp3" }) }),
+      expect.objectContaining({ id: "tts-segment-running", state: "failed", payload: expect.objectContaining({ segmentId: "section-running", text: "Interrupted text", errorCode: "interrupted" }) }),
+      expect.objectContaining({ id: "tts-segment-queued", state: "failed", payload: expect.objectContaining({ segmentId: "section-queued", text: "Queued text", errorCode: "interrupted" }) })
+    ]));
+    expect(store.get("tts-job-queued")?.job.state).toBe("queued");
     expect(store.latestForProject(project.id)?.id).toBe("tts-job-01");
     db.close();
   });
