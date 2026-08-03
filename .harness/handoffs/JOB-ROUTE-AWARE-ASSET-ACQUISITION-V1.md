@@ -1,7 +1,7 @@
 # JOB-ROUTE-AWARE-ASSET-ACQUISITION-V1 Handoff
 
 - Status: `review_required`
-- Commit: `100e31ac` (`feat: make asset acquisition route-aware`)
+- Commits: `100e31ac` (`feat: make asset acquisition route-aware`), `accc01b0` (`fix: close route planner declaration`)
 - Change: Asset Acquisition now plans selected shots by visual route, generates only exact approved AI-image prompts, preserves validated local assets for reusable/uploaded and locally-backed documentary routes, and fails closed for unavailable routes without placeholders or provider calls.
 - Tests: `corepack pnpm exec vitest run apps/desktop/src/main/assetAcquisitionService.test.ts` passed (8 tests).
 - Typecheck: `corepack pnpm typecheck` passed.
