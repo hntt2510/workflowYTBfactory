@@ -353,7 +353,7 @@ export const workflowStageDefinitions = [
     runnerId: "qa-local",
     executionKind: "local_deterministic",
     approvalRequired: true,
-    invalidates: ["capcut-draft"]
+    invalidates: ["capcut-draft", "packaging-export"]
   },
   {
     id: "capcut-draft",
@@ -366,15 +366,15 @@ export const workflowStageDefinitions = [
     runnerId: "pycapcut-bridge",
     executionKind: "export",
     approvalRequired: true,
-    invalidates: ["packaging-export"]
+    invalidates: []
   },
   {
     id: "packaging-export",
     name: "Packaging Export",
     order: 28,
     screenRoute: "export",
-    dependsOn: ["capcut-draft"],
-    requiredInputTypes: ["capcut-draft.approved"],
+    dependsOn: ["qa"],
+    requiredInputTypes: ["qa.approved", "timeline.approved"],
     outputArtifactTypes: ["package-export"],
     runnerId: "packaging-export-local",
     executionKind: "export",

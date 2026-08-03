@@ -1,6 +1,12 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-03T15:12:00.000+07:00",
-  "activeJobs": [],
-  "notes": "JOB-TTS-ATTENTION-PROPAGATION-V1 builder commit e3c4c08b is ready for independent review and QA. Prior review-required jobs and unrelated dirty changes are preserved."
+  "updatedAt": "2026-08-03T15:13:15.923+07:00",
+  "activeJobs": [
+    {
+      "jobId": "JOB-VOX-OPTIONAL-CAPCUT-EXPORT-V1",
+      "branch": "chore/setup-agent-harness",
+      "role": "builder"
+    }
+  ],
+  "notes": "JOB-VOX-OPTIONAL-CAPCUT-EXPORT-V1 is active for the bounded optional-CapCut final MP4 export fix. Prior review-required jobs and unrelated dirty changes are preserved."
 }

@@ -138,16 +138,7 @@ export function createProductionOrchestrator(dependencies: ProductionOrchestrato
     continueAfterSceneReview: startMediaGeneration,
     renderPreview: (projectId) => withLock(projectId, () => runStage(projectId, "preview-render", "run-preview-render", "approve-preview-render", { force: true }, {}, { force: true })),
     continueAfterFinalApproval: (projectId) => withLock(projectId, async () => {
-      let project = await runStage(projectId, "qa", "run-qa", "approve-qa");
-      const capcutStatus = project.stages.find((stage) => stage.id === "capcut-draft")?.status;
-      if (capcutStatus !== "approved") {
-        if (capcutStatus === "needs_review") return project;
-        project = await dependencies.invoke<FactoryProject>("run-capcut-draft", { projectId });
-        const generatedStatus = project.stages.find((stage) => stage.id === "capcut-draft")?.status;
-        if (generatedStatus === "failed" || generatedStatus === "needs_attention") throw new ProductionOrchestratorError("stage_needs_attention", "capcut-draft needs attention before production can continue.");
-        if (generatedStatus !== "needs_review" && generatedStatus !== "approved") throw new ProductionOrchestratorError("stage_not_reviewable", "capcut-draft did not produce a reviewable result.");
-        if (generatedStatus === "needs_review") return project;
-      }
+      await runStage(projectId, "qa", "run-qa", "approve-qa");
       return runStage(projectId, "packaging-export", "run-packaging-export", "approve-packaging-export");
     })
   };

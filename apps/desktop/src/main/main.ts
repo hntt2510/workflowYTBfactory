@@ -3769,7 +3769,7 @@ ipcMain.handle("reject-capcut-draft", (_event, input: unknown) => { const { proj
 ipcMain.handle("run-packaging-export", (_event, input: unknown) => {
   const { projectId } = packagingExportRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`);
   const artifacts = packagingExportRequiredStageIds.map((stageId) => currentApprovedArtifacts(project, stageId).find((item) => item.payloadJson));
-  if (artifacts.some((artifact) => !artifact)) throw new Error("Packaging Export requires approved QA, CapCut Draft, preview, timeline, script, and assets.");
+  if (artifacts.some((artifact) => !artifact)) throw new Error("Packaging Export requires approved QA, preview, timeline, script, and asset artifacts.");
   const approved = artifacts as NonNullable<(typeof artifacts)[number]>[]; const artifactIds = approved.map((artifact) => artifact.id);
   const previewArtifact = approved.find((artifact) => artifact.stageId === "preview-render");
   if (!previewArtifact?.payloadJson) throw new Error("Packaging Export requires an approved preview MP4.");

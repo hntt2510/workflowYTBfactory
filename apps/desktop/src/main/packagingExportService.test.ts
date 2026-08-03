@@ -143,7 +143,6 @@ describe("packaging export review gate", () => {
   it("requires the full reviewed handoff artifact set", () => {
     expect(packagingExportRequiredStageIds).toEqual([
       "qa",
-      "capcut-draft",
       "preview-render",
       "timeline-assembly",
       "subtitle-preparation",

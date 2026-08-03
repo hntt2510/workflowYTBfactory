@@ -6,7 +6,6 @@ const currentPackagingManifestSchemaVersion = 1;
 
 export const packagingExportRequiredStageIds = [
   "qa",
-  "capcut-draft",
   "preview-render",
   "timeline-assembly",
   "subtitle-preparation",
