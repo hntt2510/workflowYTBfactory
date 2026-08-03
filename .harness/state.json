@@ -1,12 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-03T14:52:00.000Z",
-  "activeJobs": [
-    {
-      "jobId": "JOB-TTS-RESTART-RECOVERY-V1",
-      "branch": "chore/setup-agent-harness",
-      "role": "builder"
-    }
-  ],
-  "notes": "JOB-TTS-RESTART-RECOVERY-V1 is active for the bounded TTS restart-recovery fix. Prior review-required jobs and unrelated dirty changes are preserved."
+  "updatedAt": "2026-08-03T14:59:07.340+07:00",
+  "activeJobs": [],
+  "notes": "JOB-TTS-RESTART-RECOVERY-V1 builder verification passed and is ready for independent review. Commit 18286c56. Prior review-required jobs and unrelated dirty changes are preserved."
 }

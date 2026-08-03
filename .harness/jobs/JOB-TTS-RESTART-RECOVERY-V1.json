@@ -2,7 +2,7 @@
   "jobId": "JOB-TTS-RESTART-RECOVERY-V1",
   "type": "short",
   "title": "Make TTS restart recovery explicit",
-  "status": "active",
+  "status": "review_required",
   "targetBranch": "chore/setup-agent-harness",
   "assignedRole": "builder",
   "description": "Recover interrupted persistent TTS work as a safe failed state, preserve per-segment retryability, and prevent Electron startup from automatically invoking provider-backed TTS jobs.",
