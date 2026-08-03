@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, protocol } from "electron";
+import { app, BrowserWindow, dialog, ipcMain as electronIpcMain, protocol } from "electron";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -65,6 +65,9 @@ import {
   localTtsReferenceAudioResponseSchema,
   nineRouterModelListResponseSchema,
   projectIdRequestSchema,
+  productionPreparationRequestSchema,
+  productionIdeaSelectionRequestSchema,
+  productionSceneRetryRequestSchema,
   projectListResponseSchema,
   providerCredentialDeletedResponseSchema,
   providerCredentialPresenceResponseSchema,
@@ -75,10 +78,14 @@ import {
   referenceSetRequestSchema,
   referenceChangeImpactResponseSchema,
   runTranscriptCleaningRequestSchema,
+  workflowRunListRequestSchema,
+  workflowRunsResponseSchema,
+  stageAttentionRequestSchema,
   transcriptCleaningArtifactRequestSchema,
   transcriptCleaningArtifactResponseSchema,
   transcriptCleaningArtifactsResponseSchema,
   runReferenceSegmentationRequestSchema,
+  cleanedTranscriptOutputSchema,
   referenceSegmentationOutputSchema,
   referenceSegmentationArtifactRequestSchema,
   referenceSegmentationArtifactsResponseSchema,
@@ -97,6 +104,7 @@ import {
   originalityReviewArtifactsResponseSchema,
   competitorDnaOutputSchema,
   saveResearchSourcesRequestSchema,
+  researchSourceSearchRequestSchema,
   researchSourcesRequestSchema,
   researchSourcesArtifactsResponseSchema,
   claimMapRequestSchema,
@@ -147,6 +155,8 @@ import {
   timelineAssemblyOutputSchema,
   timelineAssemblyArtifactsResponseSchema,
   previewRenderRequestSchema,
+  previewMediaRequestSchema,
+  previewMediaUrlResponseSchema,
   previewRenderOutputSchema,
   previewRenderArtifactsResponseSchema,
   qaRequestSchema,
@@ -178,19 +188,20 @@ import {
   assertWorkflowStageTransition,
   reviewOriginality,
   reviewFacts,
-  channelRouteInputSchema
+  channelRouteInputSchema,
+  prepareExistingScript
 } from "@lsf/domain";
-import type { CompetitorReference, FactoryProject, ReferenceSetState, WorkflowArtifact, WorkflowStageStatus } from "@lsf/domain";
+import type { CompetitorReference, FactoryProject, ReferenceSetState, StageAttention, WorkflowArtifact, WorkflowStageStatus } from "@lsf/domain";
 import { PersistentGenerationQueue } from "@lsf/generation-queue";
 import { NineRouterClient } from "@lsf/providers";
 import { listNineRouterModels } from "./nineRouterModelService";
 import { loadNineRouterTextCertification, runNineRouterTextCertification } from "./nineRouterTextCertificationService";
-import { runTranscriptCleaning, TranscriptCleaningError } from "./transcriptCleaningService";
+import { defaultPerChunkTimeoutMs, runTranscriptCleaning, TranscriptCleaningError, transcriptCleaningPromptTemplateId, transcriptCleaningPromptVersion, transcriptCleaningRunnerVersion } from "./transcriptCleaningService";
 import { runReferenceSegmentation, ReferenceSegmentationError } from "./referenceSegmentationService";
-import { runCompetitorDna, CompetitorDnaError } from "./competitorDnaService";
+import { competitorDnaRunnerVersion, runCompetitorDna, CompetitorDnaError } from "./competitorDnaService";
 import { runOpportunityMap, OpportunityMapError } from "./opportunityMapService";
 import { runIdeaLab, IdeaLabError } from "./ideaLabService";
-import { runClaimMap, ClaimMapError } from "./claimMapService";
+import { namespaceClaimMapOutput, runClaimMap, ClaimMapError } from "./claimMapService";
 import { runOutline, OutlineError } from "./outlineService";
 import { runScript, ScriptError } from "./scriptService";
 import { runRetentionReview, RetentionReviewError } from "./retentionReviewService";
@@ -199,6 +210,7 @@ import { runPromptPreparation, PromptPreparationError } from "./promptPreparatio
 import { runShotPlan, ShotPlanError } from "./shotPlanService";
 import { acquireImageAsset, AssetAcquisitionError, importLocalImageAsset } from "./assetAcquisitionService";
 import { loadNineRouterImageCertification, runNineRouterImageCertification } from "./nineRouterImageCertificationService";
+import { buildResearchSearchQuery, ResearchSourceSearchError, runResearchSourceSearch } from "./researchSourceSearchService";
 import { getPreviewFileSha256, PreviewRenderError, renderPreview } from "./previewRenderService";
 import { CapCutDraftError, runCapCutDraftBridge } from "./capcutDraftService";
 import { packagingExportRequiredStageIds, verifyPackagingManifest } from "./packagingExportService";
@@ -209,8 +221,21 @@ import { listNineRouterTtsCatalog as discoverNineRouterTtsCatalog } from "./nine
 import { TtsJobService, type TtsJobView } from "./ttsJobService";
 import { TtsManager, type TtsProviderId } from "./ttsManager";
 import { TtsWorkerClient } from "./ttsWorkerService";
+import { createProductionOrchestrator } from "./productionOrchestrator";
 
-protocol.registerSchemesAsPrivileged([{ scheme: "lsf-audio", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }]);
+type InternalIpcHandler = (...args: never[]) => unknown;
+const internalIpcHandlers = new Map<string, InternalIpcHandler>();
+const ipcMain = {
+  handle(channel: string, listener: InternalIpcHandler) {
+    internalIpcHandlers.set(channel, listener);
+    return electronIpcMain.handle(channel, listener as never);
+  }
+};
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: "lsf-audio", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+  { scheme: "lsf-media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } }
+]);
 
 if (process.env.ELECTRON_REMOTE_DEBUGGING_PORT) {
   app.commandLine.appendSwitch("remote-debugging-port", process.env.ELECTRON_REMOTE_DEBUGGING_PORT);
@@ -232,9 +257,29 @@ const appSettingsStore = new AppSettingsStore(db);
 const textCertificationStore = new TextCertificationStore(db);
 const imageCertificationStore = new ImageCertificationStore(db);
 const workflowRunStore = new WorkflowRunStore(db);
+const productionOrchestrator = createProductionOrchestrator({
+  loadProject: async (projectId) => projectRepository.loadProject(projectId) ?? null,
+  invoke: async <T>(channel: string, input: Record<string, unknown>) => {
+    const handler = internalIpcHandlers.get(channel);
+    if (!handler) throw new Error(`Production stage handler is unavailable: ${channel}`);
+    return await (handler as (event: unknown, input?: unknown) => unknown)(undefined, input) as T;
+  }
+});
 const generationJobStore = new GenerationJobStore(db);
 const ttsJobStore = new TtsJobStore(db);
-workflowRunStore.recoverInterruptedRuns();
+const interruptedRuns = workflowRunStore.recoverInterruptedRuns();
+for (const run of interruptedRuns) {
+  const project = projectRepository.loadProject(run.projectId);
+  const stage = project?.stages.find((item) => item.id === run.stageId);
+  if (project && stage && (stage.status === "queued" || stage.status === "running")) {
+    const route = getWorkflowStageDefinition(run.stageId)?.screenRoute;
+    projectRepository.saveProject(updateProjectStage(project, run.stageId, "failed", {
+      code: run.safeErrorCategory ?? "INTERRUPTED",
+      message: run.safeErrorMessage ?? "The previous application session ended before this run completed.",
+      actions: [{ label: "Review stage", ...(route ? { route } : {}) }]
+    }));
+  }
+}
 generationJobStore.recoverInterruptedJobs();
 const logger = new JsonLogger();
 const uiVerificationEvents: string[] = [];
@@ -454,6 +499,7 @@ async function mergeVoiceAudio(items: Array<{ inputPath: string; startSeconds: n
 }
 
 const previewAudioFiles = new Map<string, string>();
+const previewMediaFiles = new Map<string, { projectId: string; artifactId: string; outputPath: string }>();
 
 function audioPreviewUrl(outputPath: string): string {
   const token = randomUUID();
@@ -658,7 +704,7 @@ async function probeRuntimeEnvironment() {
     draftDirConfigured,
     capcutCompatibility:
       capcutInstalled && pythonExists && pycapcutStatus === "Installed" && draftDirConfigured
-        ? "Environment ready; editable draft export still not implemented"
+      ? "Environment ready; editable draft export available; installed-app editability review remains manual"
         : "Needs setup",
     devTestLabEnabled
   };
@@ -710,6 +756,7 @@ function createWindow() {
 app.whenReady().then(async () => {
   mkdirSync(workspaceRoot, { recursive: true });
   registerDevAudioProtocol();
+  registerPreviewMediaProtocol();
   credentialStore = await createCredentialStore();
   const worker = new TtsWorkerClient({
     pythonPath: defaultTtsPythonPath(),
@@ -765,6 +812,29 @@ app.whenReady().then(async () => {
         profiles: seedChannelProfiles
       }));
     }
+  } else if (process.env.LSF_E2E_UI_MODE === "semi-automatic-resume") {
+    const topic = "Semi-automatic resume verification project";
+    if (!projectRepository.listProjects().some((project) => project.topic === topic)) {
+      const fixture = createFixtureProject({
+        topic,
+        format: "long",
+        targetLanguage: "English",
+        workflowMode: "semi_automatic",
+        projectName: topic,
+        competitorReference: { pastedTranscript: "A persisted reference used to verify automatic resume after a stage attention state." },
+        profiles: seedChannelProfiles
+      });
+      projectRepository.createProject({
+        ...fixture,
+        referenceSet: { status: "approved" },
+        competitorReferences: fixture.competitorReferences.map((reference) => ({ ...reference, status: "approved" as const })),
+        stages: normalizeProjectStages(fixture.stages).map((stage) => stage.id === "reference-validation"
+          ? { ...stage, status: "approved" as const }
+          : stage.id === "transcript-cleaning"
+            ? { ...stage, status: "needs_attention" as const, attention: { code: "E2E_PROVIDER_FAILURE", message: "Provider is unavailable for this verification run.", actions: [{ label: "Retry automatic workflow", route: "project-overview" }] } }
+            : stage)
+      });
+    }
   }
   const win = createWindow();
   if (process.env.LSF_E2E_UI_REPORT_PATH) {
@@ -775,7 +845,7 @@ app.whenReady().then(async () => {
 app.on("before-quit", () => ttsManager?.dispose());
 
 async function runUiVerification(win: BrowserWindow, reportPath: string, mode: string): Promise<void> {
-  const topic = mode === "workflow-contract" || mode === "reference-restart" || mode === "reference-invalidation" ? "Workflow contract verification project" : "What did Aaron's breastpiece symbolize?";
+  const topic = mode === "workflow-contract" || mode === "reference-restart" || mode === "reference-invalidation" ? "Workflow contract verification project" : mode === "semi-automatic-resume" ? "Semi-automatic resume verification project" : "What did Aaron's breastpiece symbolize?";
   try {
     writeUiVerificationReport(reportPath, { ok: false, mode, phase: "started", workspaceRoot, databasePath });
     await waitForRenderer(win);
@@ -816,7 +886,7 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
       await assertText(win, "Reference set approved. Competitor Workflow is now available.");
       await clickText(win, "Continue to Competitor Workflow");
       await assertText(win, "Transcript Cleaning");
-      await assertText(win, "no request runs on screen load");
+      await assertText(win, "eligible chain starts automatically");
     } else if (mode === "reference-restart") {
       await clickText(win, "Projects");
       await assertText(win, topic);
@@ -837,6 +907,12 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
       await clickText(win, "Save reference edits");
       await assertText(win, "Reference edited. Validate the reference set again.");
       await assertText(win, "stale");
+    } else if (mode === "semi-automatic-resume") {
+      await clickText(win, "Projects");
+      await assertText(win, topic);
+      await clickProjectOpen(win, topic);
+      await assertText(win, "Project command center");
+      await assertText(win, "Retry automatic workflow");
     } else if (mode === "verify") {
       await clickText(win, "Projects");
       await assertText(win, topic);
@@ -926,10 +1002,16 @@ function writeUiVerificationReport(reportPath: string, data: Record<string, unkn
   writeFileSync(reportPath, JSON.stringify(data, null, 2));
 }
 
-function updateProjectStage(project: FactoryProject, stageId: string, status: WorkflowStageStatus): FactoryProject {
+function updateProjectStage(project: FactoryProject, stageId: string, status: WorkflowStageStatus, attention?: StageAttention): FactoryProject {
   return {
     ...project,
-    stages: normalizeProjectStages(project.stages).map((stage) => (stage.id === stageId ? { ...stage, status } : stage))
+    stages: normalizeProjectStages(project.stages).map((stage) => {
+      if (stage.id !== stageId) return stage;
+      const nextStage = { ...stage, status };
+      if (attention) nextStage.attention = attention;
+      else if (status !== "failed" && status !== "needs_attention") delete nextStage.attention;
+      return nextStage;
+    })
   };
 }
 
@@ -968,6 +1050,39 @@ function currentApprovedArtifacts(project: FactoryProject, stageId: string): Wor
   return backedApprovedArtifacts(project.id, stageId);
 }
 
+type ClaimMapSource = {
+  id: string;
+  sourceType: "primary" | "secondary";
+  excerpt: string;
+  title: string;
+};
+
+function buildClaimMapReferenceSources(project: FactoryProject): { sources: ClaimMapSource[]; inputArtifactIds: string[] } {
+  const originalityArtifact = currentApprovedArtifacts(project, "originality-review").find((artifact) => artifact.payloadJson);
+  if (!originalityArtifact?.payloadJson) throw new Error("Claim Map requires an approved Originality Review artifact.");
+  const references = project.competitorReferences.filter((reference) => reference.included !== false && reference.status === "approved");
+  if (!references.length) throw new Error("Claim Map requires at least one approved competitor reference.");
+  const cleanedArtifacts = currentApprovedArtifacts(project, "transcript-cleaning");
+  const cleanedByReference = new Map<string, { transcript: string; artifactId: string }>(cleanedArtifacts.flatMap((artifact) => {
+    if (!artifact.payloadJson) return [];
+    const payload = cleanedTranscriptOutputSchema.safeParse(artifact.payloadJson);
+    return payload.success ? [[payload.data.referenceId, { transcript: payload.data.cleanedTranscript, artifactId: artifact.id }] as const] : [];
+  }));
+  const sources = references.map((reference, index) => {
+    const cleaned = cleanedByReference.get(reference.id);
+    return {
+      id: `reference-source-${reference.id}`,
+      sourceType: "secondary" as const,
+      title: reference.sourceUrl?.trim() || `Competitor reference ${index + 1}`,
+      excerpt: (cleaned?.transcript ?? reference.pastedTranscript).trim()
+    };
+  });
+  return {
+    sources,
+    inputArtifactIds: [originalityArtifact.id, ...cleanedArtifacts.filter((artifact) => artifact.payloadJson).map((artifact) => artifact.id)]
+  };
+}
+
 function backedApprovedArtifacts(projectId: string, stageId: string): WorkflowArtifact[] {
   return selectCurrentBackedApprovedArtifacts(projectId, stageId, workflowRunStore, { perReferenceStages: perReferenceArtifactStages });
 }
@@ -983,6 +1098,55 @@ function markReferenceChangeStale(project: FactoryProject): FactoryProject {
         : stage
     ))
   };
+}
+
+function currentReviewableArtifacts(project: FactoryProject, stageId: string): WorkflowArtifact[] {
+  const runs = new Map(workflowRunStore.listRuns(project.id, stageId).map((run) => [run.id, run]));
+  return workflowRunStore.listArtifacts(project.id, stageId).filter((artifact) => {
+    if (artifact.status !== "needs_review" || !artifact.stageRunId) return false;
+    const run = runs.get(artifact.stageRunId);
+    return run?.status === "needs_review" && run.outputArtifactIds.includes(artifact.id);
+  });
+}
+
+function registerPreviewMediaProtocol(): void {
+  protocol.handle("lsf-media", (request) => {
+    const requestUrl = new URL(request.url);
+    const token = requestUrl.pathname.slice(1);
+    const media = previewMediaFiles.get(token);
+    if (requestUrl.hostname !== "preview" || !token || !media || !existsSync(media.outputPath)) {
+      return new Response("Not found", { status: 404 });
+    }
+    const artifact = workflowRunStore.getArtifact(media.projectId, media.artifactId);
+    const parsed = artifact?.payloadJson ? previewRenderOutputSchema.safeParse(artifact.payloadJson) : null;
+    if (!artifact || (artifact.status !== "needs_review" && artifact.status !== "approved") || !parsed || !parsed.success || artifact.relativeFilePath !== parsed.data.relativeFilePath || parsed.data.relativeFilePath !== relative(workspaceRoot, media.outputPath)) {
+      return new Response("Not found", { status: 404 });
+    }
+    const bytes = readFileSync(media.outputPath);
+    const range = request.headers.get("range");
+    let body = bytes;
+    let status = 200;
+    const headers: Record<string, string> = {
+      "Accept-Ranges": "bytes",
+      "Cache-Control": "no-store",
+      "Content-Length": String(bytes.length),
+      "Content-Type": "video/mp4"
+    };
+    if (range) {
+      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+      const start = match?.[1] ? Number(match[1]) : 0;
+      const end = match?.[2] ? Number(match[2]) : bytes.length - 1;
+      if (!match || !Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end < start || start >= bytes.length) {
+        return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${bytes.length}` } });
+      }
+      const boundedEnd = Math.min(end, bytes.length - 1);
+      body = bytes.subarray(start, boundedEnd + 1);
+      status = 206;
+      headers["Content-Length"] = String(body.length);
+      headers["Content-Range"] = `bytes ${start}-${boundedEnd}/${bytes.length}`;
+    }
+    return new Response(request.method === "HEAD" ? null : body, { status, headers });
+  });
 }
 
 function markReferenceInputChanged(project: FactoryProject): FactoryProject {
@@ -1058,6 +1222,16 @@ function isPendingOrAcceptedRun(run: { status: WorkflowStageStatus } | null | un
   return run?.status === "queued" || run?.status === "running" || run?.status === "needs_review" || run?.status === "approved";
 }
 
+function isDeterministicAttentionCategory(category: string): boolean {
+  return category === "invalid_output" || category === "output_content_invalid" || category === "invalid_json" || category === "json_schema_mismatch";
+}
+
+function currentApprovalActor(project: FactoryProject): string {
+  return project.synthetic === true && process.env.LSF_MAIN_FLOW_SYNTHETIC_APPROVALS === "1"
+    ? "main-flow-test-agent"
+    : "user";
+}
+
 function referenceValidationInputFingerprint(projectId: string, references: CompetitorReference[]): string {
   return canonicalSha256({
     projectId,
@@ -1074,6 +1248,21 @@ function referenceValidationInputFingerprint(projectId: string, references: Comp
       }))
       .sort((left, right) => left.id.localeCompare(right.id))
   });
+}
+
+function currentTextProviderExecution(): { providerId: "9router"; configuredModelId: string; providerConfigurationFingerprint: string } {
+  const settings = credentialStore.loadProviderCredentialSettings("9router");
+  const configuredModelId = settings?.textModel ?? "";
+  return {
+    providerId: "9router",
+    configuredModelId,
+    providerConfigurationFingerprint: canonicalSha256({
+      providerId: "9router",
+      baseUrl: settings?.baseUrl ?? "",
+      configuredModelId,
+      credentialVersionRef: credentialStore.loadProviderCredentialVersionRef("9router") ?? null
+    })
+  };
 }
 
 function referenceValidationPayloadFingerprint(projectId: string, references: Array<{
@@ -1239,12 +1428,21 @@ ipcMain.handle("fixture-project", (_event, input: unknown) => {
     : undefined;
   const project = createFixtureProject({
     topic: request.topic,
+    ...(request.synthetic && process.env.LSF_MAIN_FLOW_SYNTHETIC === "1" ? { synthetic: true } : {}),
     format: request.format,
     targetLanguage: request.targetLanguage,
+    ...(request.selectedProfileId ? { selectedProfileId: request.selectedProfileId } : {}),
     profiles: seedChannelProfiles,
     ...(request.targetDuration ? { targetDuration: request.targetDuration } : {}),
     ...(request.projectName ? { projectName: request.projectName } : {}),
     ...(request.workflowMode ? { workflowMode: request.workflowMode } : {}),
+    inputMode: request.inputMode === "topic" && competitorReference ? "reference" : request.inputMode,
+    ...(request.aspectRatio ? { aspectRatio: request.aspectRatio } : {}),
+    visualStyle: request.visualStyle,
+    ...(request.voiceId ? { voiceId: request.voiceId } : {}),
+    outputResolution: request.outputResolution,
+    ...(request.sourceScript ? { sourceScript: request.sourceScript } : {}),
+    ...(request.referenceUrl ? { referenceUrl: request.referenceUrl } : {}),
     ...(competitorReference ? { competitorReference } : {})
   });
   projectRepository.createProject(project);
@@ -1435,6 +1633,83 @@ ipcMain.handle("get-reference-change-impact", () => referenceChangeImpactRespons
     .map((stageId) => getWorkflowStageDefinition(stageId)?.name ?? stageId)
 }));
 
+ipcMain.handle("start-production-preparation", async (_event, input: unknown) => {
+  const { projectId } = productionPreparationRequestSchema.parse(input);
+  return factoryProjectResponseSchema.parse(await productionOrchestrator.startPreparation(projectId));
+});
+
+ipcMain.handle("continue-after-idea-selection", async (_event, input: unknown) => {
+  const request = productionIdeaSelectionRequestSchema.parse(input);
+  return factoryProjectResponseSchema.parse(await productionOrchestrator.continueAfterIdeaSelection(request.projectId, request.ideaId));
+});
+
+ipcMain.handle("start-media-generation", async (_event, input: unknown) => {
+  const { projectId } = productionPreparationRequestSchema.parse(input);
+  return factoryProjectResponseSchema.parse(await productionOrchestrator.startMediaGeneration(projectId));
+});
+
+ipcMain.handle("retry-scene", async (_event, input: unknown) => {
+  const request = productionSceneRetryRequestSchema.parse(input);
+  return factoryProjectResponseSchema.parse(await productionOrchestrator.retryScene(request.projectId, request.sceneId));
+});
+
+ipcMain.handle("continue-after-scene-review", async (_event, input: unknown) => {
+  const { projectId } = productionPreparationRequestSchema.parse(input);
+  return factoryProjectResponseSchema.parse(await productionOrchestrator.continueAfterSceneReview(projectId));
+});
+
+ipcMain.handle("render-production-preview", async (_event, input: unknown) => {
+  const { projectId } = productionPreparationRequestSchema.parse(input);
+  return factoryProjectResponseSchema.parse(await productionOrchestrator.renderPreview(projectId));
+});
+
+ipcMain.handle("continue-after-final-approval", async (_event, input: unknown) => {
+  const { projectId } = productionPreparationRequestSchema.parse(input);
+  return factoryProjectResponseSchema.parse(await productionOrchestrator.continueAfterFinalApproval(projectId));
+});
+
+ipcMain.handle("prepare-existing-script", async (_event, input: unknown) => {
+  const { projectId } = productionPreparationRequestSchema.parse(input);
+  const project = projectRepository.loadProject(projectId);
+  if (!project) throw new Error("Project not found.");
+  if (project.setup.inputMode !== "existing_script") throw new Error("Existing Script preparation is only available for Existing Script mode.");
+  if (project.stages.find((stage) => stage.id === "script")?.status === "approved") return factoryProjectResponseSchema.parse(project);
+  const sourceScript = project.setup.sourceScript?.trim();
+  if (!sourceScript) throw new Error("Existing Script input is empty.");
+  const prepared = prepareExistingScript(sourceScript);
+  const outlineOutput = outlineOutputSchema.parse({ sections: prepared.sections.map((section) => ({ id: `existing-outline-${section.id}`, purpose: section.purpose, keyPoint: section.narration.slice(0, 500), linkedClaimIds: [], estimatedSeconds: section.estimatedSeconds })) });
+  const output = scriptOutputSchema.parse({ sections: prepared.sections.map((section, index) => ({ ...section, outlineSectionId: outlineOutput.sections[index]!.id })) });
+  const inputFingerprint = canonicalSha256({ stageId: "script", sourceScript, targetDuration: project.setup.targetDuration, language: project.targetLanguage, runnerVersion: "existing-script-preparation-v1" });
+  const existing = workflowRunStore.findLatestByInput(projectId, "script", inputFingerprint);
+  if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project);
+  const outlineRunId = `stage-run-${randomUUID()}`;
+  const outlineArtifactId = `artifact-${randomUUID()}`;
+  const runId = `stage-run-${randomUUID()}`;
+  const outlineRunning = transitionProjectStage(transitionProjectStage(project, "outline", "queued"), "outline", "running");
+  const outlineReview = transitionProjectStage(outlineRunning, "outline", "needs_review");
+  const outlineApproved = transitionProjectStage(outlineReview, "outline", "approved");
+  const running = transitionProjectStage(transitionProjectStage(outlineApproved, "script", "queued"), "script", "running");
+  const preparedSections = output.sections.map(({ openLoop, ...section }) => ({ ...section, ...(openLoop ? { openLoop } : {}) }));
+  const review = transitionProjectStage({ ...running, scriptSections: preparedSections }, "script", "needs_review");
+  const approved = transitionProjectStage(review, "script", "approved");
+  const artifactId = `artifact-${randomUUID()}`;
+  const now = new Date().toISOString();
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true });
+    workflowRunStore.createRun({ id: outlineRunId, projectId, stageId: "outline", status: "running", runnerId: "existing-script-preparation-local", runnerVersion: "existing-script-preparation-v1", inputArtifactIds: [], inputFingerprint, outputArtifactIds: [], startedAt: now });
+    workflowRunStore.finishRun({ id: outlineRunId, projectId, stageId: "outline", status: "approved", runnerId: "existing-script-preparation-local", runnerVersion: "existing-script-preparation-v1", inputArtifactIds: [], inputFingerprint, outputArtifactIds: [outlineArtifactId], finishedAt: now }, { id: outlineArtifactId, projectId, stageId: "outline", stageRunId: outlineRunId, type: "outline", version: workflowRunStore.listArtifacts(projectId, "outline").length + 1, status: "approved", payloadJson: outlineOutput, createdAt: now, updatedAt: now }, { withinTransaction: true });
+    workflowRunStore.createRun({ id: runId, projectId, stageId: "script", status: "running", runnerId: "existing-script-preparation-local", runnerVersion: "existing-script-preparation-v1", inputArtifactIds: [outlineArtifactId], inputFingerprint, outputArtifactIds: [], startedAt: now });
+    workflowRunStore.finishRun({ id: runId, projectId, stageId: "script", status: "needs_review", runnerId: "existing-script-preparation-local", runnerVersion: "existing-script-preparation-v1", inputArtifactIds: [outlineArtifactId], inputFingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId, stageId: "script", stageRunId: runId, type: "script", version: workflowRunStore.listArtifacts(projectId, "script").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true });
+    workflowRunStore.approveReviewRun(runId, { approvalMode: "automatic", withinTransaction: true });
+    db.exec("COMMIT;");
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+  return factoryProjectResponseSchema.parse(approved);
+});
+
 ipcMain.handle("validate-reference-set", async (_event, input: unknown) => {
   const request = referenceSetRequestSchema.parse(input);
   const project = projectRepository.loadProject(request.projectId);
@@ -1562,7 +1837,7 @@ ipcMain.handle("approve-reference-set", (_event, input: unknown) => {
       ...(project.referenceSet ?? { status: "valid" }),
       status: "approved",
       approvedAt: now,
-      approvalActor: "user"
+      approvalActor: currentApprovalActor(project)
     },
     competitorReferences: project.competitorReferences.map((reference) =>
       reference.included === false ? reference : { ...reference, status: "approved", updatedAt: now }
@@ -1636,20 +1911,29 @@ ipcMain.handle("run-transcript-cleaning", async (_event, input: unknown) => {
   if (!referenceSetArtifact) {
     throw new Error("Transcript Cleaning requires an approved Reference Validation artifact for this reference.");
   }
+  const textProviderExecution = currentTextProviderExecution();
   const inputFingerprint = canonicalSha256({
     stageId: "transcript-cleaning",
     referenceId: reference.id,
     referenceSetArtifactId: referenceSetArtifact.id,
     transcript: reference.pastedTranscript,
-    version: reference.version ?? 1
+    version: reference.version ?? 1,
+    providerConfigurationFingerprint: textProviderExecution.providerConfigurationFingerprint,
+    selectedModel: textProviderExecution.configuredModelId,
+    promptVersion: transcriptCleaningPromptVersion,
+    runnerVersion: transcriptCleaningRunnerVersion
   });
   const existingRun = workflowRunStore.findLatestByInput(project.id, "transcript-cleaning", inputFingerprint);
-  if (isPendingOrAcceptedRun(existingRun)) {
+  const activeReferenceRun = workflowRunStore.listRuns(project.id, "transcript-cleaning")
+    .find((run) => isPendingOrAcceptedRun(run) && run.payloadJson?.referenceId === reference.id);
+  if (isPendingOrAcceptedRun(existingRun) || activeReferenceRun) {
     return factoryProjectResponseSchema.parse(project);
   }
 
   const now = new Date().toISOString();
   const runId = `stage-run-${randomUUID()}`;
+  const configuredModel = textProviderExecution.configuredModelId;
+  let persistedChunks: unknown[] = Array.isArray(existingRun?.payloadJson?.chunks) ? existingRun.payloadJson.chunks : [];
   const queuedProject = transitionProjectStage(project, "transcript-cleaning", "queued");
   const runningProject = transitionProjectStage(queuedProject, "transcript-cleaning", "running");
   db.exec("BEGIN IMMEDIATE;");
@@ -1661,10 +1945,15 @@ ipcMain.handle("run-transcript-cleaning", async (_event, input: unknown) => {
       stageId: "transcript-cleaning",
       status: "running",
       runnerId: "transcript-cleaning-9router",
-      runnerVersion: "transcript-cleaning-v1",
+      runnerVersion: transcriptCleaningRunnerVersion,
+      promptTemplateId: transcriptCleaningPromptTemplateId,
+      promptVersion: transcriptCleaningPromptVersion,
       inputArtifactIds: [referenceSetArtifact.id],
       inputFingerprint,
       outputArtifactIds: [],
+      providerId: "9router",
+      ...(configuredModel ? { configuredModelId: configuredModel } : {}),
+      payloadJson: { referenceId: reference.id, chunks: persistedChunks, chunkCount: null, completedChunkCount: persistedChunks.filter((item) => typeof item === "object" && item !== null && "status" in item && item.status === "completed").length },
       startedAt: now
     });
     db.exec("COMMIT;");
@@ -1678,8 +1967,21 @@ ipcMain.handle("run-transcript-cleaning", async (_event, input: unknown) => {
       referenceId: reference.id,
       sourceTranscriptVersionId: reference.id,
       transcript: reference.pastedTranscript,
+      model: configuredModel,
+      configuredTimeoutMs: defaultPerChunkTimeoutMs,
       credentialStore,
-      certificationStore: textCertificationStore
+      certificationStore: textCertificationStore,
+      ...(existingRun?.status === "failed" || existingRun?.status === "needs_attention" ? { resumeChunks: persistedChunks as never } : {}),
+      onChunkProgress: (progress) => {
+        const index = persistedChunks.findIndex((item) => typeof item === "object" && item !== null && "chunkIndex" in item && item.chunkIndex === progress.chunkIndex);
+        if (index >= 0) persistedChunks[index] = progress;
+        else persistedChunks.push(progress);
+        workflowRunStore.updateRunPayload(runId, {
+          chunks: persistedChunks,
+          chunkCount: progress.totalChunks,
+          completedChunkCount: persistedChunks.filter((item) => typeof item === "object" && item !== null && "status" in item && item.status === "completed").length
+        });
+      }
     });
     const artifactId = `artifact-${randomUUID()}`;
     const artifacts = workflowRunStore.listArtifacts(project.id, "transcript-cleaning");
@@ -1694,12 +1996,17 @@ ipcMain.handle("run-transcript-cleaning", async (_event, input: unknown) => {
         stageId: "transcript-cleaning",
         status: "needs_review",
         runnerId: "transcript-cleaning-9router",
-        runnerVersion: "transcript-cleaning-v1",
+        runnerVersion: transcriptCleaningRunnerVersion,
+        promptTemplateId: transcriptCleaningPromptTemplateId,
+        promptVersion: transcriptCleaningPromptVersion,
         inputArtifactIds: [referenceSetArtifact.id],
         inputFingerprint,
         outputArtifactIds: [artifactId],
         finishedAt,
-        ...(cleaned.returnedModelId ? { returnedModelId: cleaned.returnedModelId } : {})
+        ...(cleaned.returnedModelId ? { returnedModelId: cleaned.returnedModelId } : {}),
+        providerId: "9router",
+        ...(configuredModel ? { configuredModelId: configuredModel } : {}),
+        payloadJson: { referenceId: reference.id, execution: cleaned.execution, chunks: cleaned.chunks, chunkCount: cleaned.execution.chunkCount, completedChunkCount: cleaned.execution.completedChunkCount }
       }, {
         id: artifactId,
         projectId: project.id,
@@ -1722,7 +2029,8 @@ ipcMain.handle("run-transcript-cleaning", async (_event, input: unknown) => {
     const finishedAt = new Date().toISOString();
     const safeCategory = error instanceof TranscriptCleaningError ? error.category : "unexpected_failure";
     const safeMessage = error instanceof TranscriptCleaningError ? error.message : "Transcript Cleaning failed.";
-    const failedProject = transitionProjectStage(runningProject, "transcript-cleaning", "failed");
+    const attention = isDeterministicAttentionCategory(safeCategory);
+    const failedProject = transitionProjectStage(runningProject, "transcript-cleaning", attention ? "needs_attention" : "failed");
     db.exec("BEGIN IMMEDIATE;");
     try {
       saveProjectWithWorkflowInvalidation(failedProject, { withinTransaction: true });
@@ -1730,15 +2038,26 @@ ipcMain.handle("run-transcript-cleaning", async (_event, input: unknown) => {
         id: runId,
         projectId: project.id,
         stageId: "transcript-cleaning",
-        status: "failed",
+        status: attention ? "needs_attention" : "failed",
         runnerId: "transcript-cleaning-9router",
-        runnerVersion: "transcript-cleaning-v1",
+        runnerVersion: transcriptCleaningRunnerVersion,
+        promptTemplateId: transcriptCleaningPromptTemplateId,
+        promptVersion: transcriptCleaningPromptVersion,
         inputArtifactIds: [referenceSetArtifact.id],
         inputFingerprint,
         outputArtifactIds: [],
         finishedAt,
         safeErrorCategory: safeCategory,
-        safeErrorMessage: safeMessage
+        safeErrorMessage: safeMessage,
+        payloadJson: {
+          referenceId: reference.id,
+          chunks: persistedChunks,
+          chunkCount: (() => {
+            const chunk = persistedChunks.find((item) => typeof item === "object" && item !== null && "totalChunks" in item) as { totalChunks?: unknown } | undefined;
+            return typeof chunk?.totalChunks === "number" ? chunk.totalChunks : null;
+          })(),
+          completedChunkCount: persistedChunks.filter((item) => typeof item === "object" && item !== null && "status" in item && item.status === "completed").length
+        }
       }, undefined, { withinTransaction: true });
       db.exec("COMMIT;");
     } catch (persistenceError) {
@@ -1748,6 +2067,58 @@ ipcMain.handle("run-transcript-cleaning", async (_event, input: unknown) => {
     logger.warn("transcript_cleaning_failed", { projectId: project.id, referenceId: reference.id, category: safeCategory });
     throw new Error(safeMessage);
   }
+});
+
+ipcMain.handle("list-competitor-workflow-runs", (_event, input: unknown) => {
+  const request = workflowRunListRequestSchema.parse(input);
+  const runs = workflowRunStore.listRuns(request.projectId, request.stageId).map((run) => ({
+    id: run.id,
+    projectId: run.projectId,
+    stageId: run.stageId,
+    status: run.status,
+    runnerId: run.runnerId,
+    runnerVersion: run.runnerVersion,
+    ...(run.providerId ? { providerId: run.providerId } : {}),
+    ...(run.configuredModelId ? { configuredModelId: run.configuredModelId } : {}),
+    ...(run.returnedModelId ? { returnedModelId: run.returnedModelId } : {}),
+    inputArtifactIds: run.inputArtifactIds,
+    inputFingerprint: run.inputFingerprint,
+    outputArtifactIds: run.outputArtifactIds,
+    ...(run.payloadJson ? { payloadJson: run.payloadJson } : {}),
+    ...(run.startedAt ? { startedAt: run.startedAt } : {}),
+    ...(run.finishedAt ? { finishedAt: run.finishedAt } : {}),
+    ...(run.safeErrorCategory ? { safeErrorCategory: run.safeErrorCategory } : {}),
+    ...(run.safeErrorMessage ? { safeErrorMessage: run.safeErrorMessage } : {})
+  }));
+  return workflowRunsResponseSchema.parse(runs);
+});
+
+ipcMain.handle("mark-stage-attention", (_event, input: unknown) => {
+  const request = stageAttentionRequestSchema.parse(input);
+  const project = projectRepository.loadProject(request.projectId);
+  if (!project) throw new Error(`Project not found: ${request.projectId}`);
+  const definition = getWorkflowStageDefinition(request.stageId);
+  if (!definition) throw new Error(`Unknown workflow stage: ${request.stageId}`);
+  const runs = workflowRunStore.listRuns(request.projectId, request.stageId)
+    .filter((run) => run.status === "needs_review" || run.status === "failed")
+    .filter((run) => !request.referenceId || run.payloadJson?.referenceId === request.referenceId);
+  // Prefer the failed run so a late error cannot mark a concurrent review run attention.
+  const run = request.code === "AUTOMATIC_RUN_FAILED"
+    ? runs.find((candidate) => candidate.status === "failed") ?? runs[0]
+    : runs.find((candidate) => candidate.status === "needs_review") ?? runs[0];
+  if (run) {
+    workflowRunStore.markReviewAttention(run.id, request.code, request.message);
+  } else {
+    const route = definition.screenRoute;
+    projectRepository.saveProject(updateProjectStage(project, request.stageId, "needs_attention", {
+      code: request.code,
+      message: request.message,
+      actions: [{ label: "Review stage", ...(route ? { route } : {}) }]
+    }));
+  }
+  const updated = projectRepository.loadProject(request.projectId);
+  if (!updated) throw new Error(`Project not found: ${request.projectId}`);
+  return factoryProjectResponseSchema.parse(updated);
 });
 
 ipcMain.handle("list-transcript-cleaning-artifacts", (_event, input: unknown) => {
@@ -1835,7 +2206,8 @@ ipcMain.handle("run-reference-segmentation", async (_event, input: unknown) => {
     throw new Error("No approved cleaned transcript exists for this reference.");
   }
   const cleanedTranscript = cleanedArtifact.payloadJson.cleanedTranscript;
-  const inputFingerprint = canonicalSha256({ stageId: "reference-segmentation", referenceId: reference.id, cleanedArtifactId: cleanedArtifact.id, cleanedTranscript });
+  const textProviderExecution = currentTextProviderExecution();
+  const inputFingerprint = canonicalSha256({ stageId: "reference-segmentation", referenceId: reference.id, cleanedArtifactId: cleanedArtifact.id, cleanedTranscript, providerConfigurationFingerprint: textProviderExecution.providerConfigurationFingerprint, selectedModel: textProviderExecution.configuredModelId, runnerVersion: "reference-segmentation-v1" });
   const existingRun = workflowRunStore.findLatestByInput(project.id, "reference-segmentation", inputFingerprint);
   if (isPendingOrAcceptedRun(existingRun)) return factoryProjectResponseSchema.parse(project);
 
@@ -1851,6 +2223,8 @@ ipcMain.handle("run-reference-segmentation", async (_event, input: unknown) => {
     workflowRunStore.createRun({
       id: runId, projectId: project.id, stageId: "reference-segmentation", status: "running",
       runnerId: "reference-segmentation-9router", runnerVersion: "reference-segmentation-v1",
+      providerId: textProviderExecution.providerId,
+      ...(textProviderExecution.configuredModelId ? { configuredModelId: textProviderExecution.configuredModelId } : {}),
       inputArtifactIds: [cleanedArtifact.id], inputFingerprint, outputArtifactIds: [], startedAt: now
     });
     db.exec("COMMIT;");
@@ -1860,7 +2234,7 @@ ipcMain.handle("run-reference-segmentation", async (_event, input: unknown) => {
   }
 
   try {
-    const segmented = await runReferenceSegmentation({ referenceId: reference.id, cleanedTranscript, credentialStore, certificationStore: textCertificationStore });
+    const segmented = await runReferenceSegmentation({ referenceId: reference.id, cleanedTranscriptArtifactId: cleanedArtifact.id, cleanedTranscript, credentialStore, certificationStore: textCertificationStore });
     const artifactId = `artifact-${randomUUID()}`;
     const artifacts = workflowRunStore.listArtifacts(project.id, "reference-segmentation");
     const finishedAt = new Date().toISOString();
@@ -1871,6 +2245,8 @@ ipcMain.handle("run-reference-segmentation", async (_event, input: unknown) => {
       workflowRunStore.finishRun({
         id: runId, projectId: project.id, stageId: "reference-segmentation", status: "needs_review",
         runnerId: "reference-segmentation-9router", runnerVersion: "reference-segmentation-v1",
+        providerId: textProviderExecution.providerId,
+        ...(textProviderExecution.configuredModelId ? { configuredModelId: textProviderExecution.configuredModelId } : {}),
         inputArtifactIds: [cleanedArtifact.id], inputFingerprint, outputArtifactIds: [artifactId], finishedAt,
         ...(segmented.returnedModelId ? { returnedModelId: segmented.returnedModelId } : {})
       }, {
@@ -1895,6 +2271,8 @@ ipcMain.handle("run-reference-segmentation", async (_event, input: unknown) => {
       workflowRunStore.finishRun({
         id: runId, projectId: project.id, stageId: "reference-segmentation", status: "failed",
         runnerId: "reference-segmentation-9router", runnerVersion: "reference-segmentation-v1",
+        providerId: textProviderExecution.providerId,
+        ...(textProviderExecution.configuredModelId ? { configuredModelId: textProviderExecution.configuredModelId } : {}),
         inputArtifactIds: [cleanedArtifact.id], inputFingerprint, outputArtifactIds: [], finishedAt,
         safeErrorCategory: safeCategory, safeErrorMessage: safeMessage
       }, undefined, { withinTransaction: true });
@@ -1973,7 +2351,12 @@ ipcMain.handle("run-competitor-dna", async (_event, input: unknown) => {
   const cleaned = currentApprovedArtifacts(project, "transcript-cleaning").find((artifact) => artifact.payloadJson?.referenceId === reference.id);
   const segmentation = currentApprovedArtifacts(project, "reference-segmentation").find((artifact) => artifact.payloadJson?.referenceId === reference.id);
   if (!cleaned || typeof cleaned.payloadJson?.cleanedTranscript !== "string" || !segmentation || !Array.isArray(segmentation.payloadJson?.segments)) throw new Error("Competitor DNA requires approved cleaned transcript and segmentation artifacts for this reference.");
-  const inputFingerprint = canonicalSha256({ stageId: "competitor-dna", referenceId: reference.id, cleanedArtifactId: cleaned.id, segmentationArtifactId: segmentation.id });
+  const profile = seedChannelProfiles.find((item) => item.id === project.profileId);
+  if (!profile) throw new Error("Competitor DNA requires an active channel profile.");
+  const channelProfile = { id: profile.id, name: profile.name, niche: profile.niche, tone: profile.tone, avoidList: profile.avoidList, safetyRules: profile.safetyRules };
+  const originalityRules = [...profile.avoidList, ...profile.safetyRules];
+  const textProviderExecution = currentTextProviderExecution();
+  const inputFingerprint = canonicalSha256({ stageId: "competitor-dna", referenceId: reference.id, cleanedArtifactId: cleaned.id, segmentationArtifactId: segmentation.id, channelProfile, originalityRules, providerConfigurationFingerprint: textProviderExecution.providerConfigurationFingerprint, selectedModel: textProviderExecution.configuredModelId, runnerVersion: competitorDnaRunnerVersion });
   const existing = workflowRunStore.findLatestByInput(project.id, "competitor-dna", inputFingerprint);
   if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project);
   const now = new Date().toISOString();
@@ -1983,11 +2366,11 @@ ipcMain.handle("run-competitor-dna", async (_event, input: unknown) => {
   db.exec("BEGIN IMMEDIATE;");
   try {
     saveProjectWithWorkflowInvalidation(runningProject, { withinTransaction: true });
-    workflowRunStore.createRun({ id: runId, projectId: project.id, stageId: "competitor-dna", status: "running", runnerId: "competitor-dna-9router", runnerVersion: "competitor-dna-v1", inputArtifactIds: [cleaned.id, segmentation.id], inputFingerprint, outputArtifactIds: [], startedAt: now });
+      workflowRunStore.createRun({ id: runId, projectId: project.id, stageId: "competitor-dna", status: "running", runnerId: "competitor-dna-9router", providerId: textProviderExecution.providerId, ...(textProviderExecution.configuredModelId ? { configuredModelId: textProviderExecution.configuredModelId } : {}), promptTemplateId: "04_competitor_dna", promptVersion: "v5", runnerVersion: competitorDnaRunnerVersion, inputArtifactIds: [cleaned.id, segmentation.id], inputFingerprint, outputArtifactIds: [], startedAt: now });
     db.exec("COMMIT;");
   } catch (error) { db.exec("ROLLBACK;"); throw error; }
   try {
-    const result = await runCompetitorDna({ referenceId: reference.id, cleanedTranscript: cleaned.payloadJson.cleanedTranscript, segments: segmentation.payloadJson.segments as never, credentialStore, certificationStore: textCertificationStore });
+    const result = await runCompetitorDna({ referenceId: reference.id, segmentationArtifactId: segmentation.id, cleanedTranscript: cleaned.payloadJson.cleanedTranscript, segments: segmentation.payloadJson.segments as never, channelProfile, originalityRules, credentialStore, certificationStore: textCertificationStore });
     const artifactId = `artifact-${randomUUID()}`;
     const finishedAt = new Date().toISOString();
     const artifacts = workflowRunStore.listArtifacts(project.id, "competitor-dna");
@@ -1995,7 +2378,7 @@ ipcMain.handle("run-competitor-dna", async (_event, input: unknown) => {
     db.exec("BEGIN IMMEDIATE;");
     try {
       saveProjectWithWorkflowInvalidation(reviewProject, { withinTransaction: true });
-      workflowRunStore.finishRun({ id: runId, projectId: project.id, stageId: "competitor-dna", status: "needs_review", runnerId: "competitor-dna-9router", runnerVersion: "competitor-dna-v1", inputArtifactIds: [cleaned.id, segmentation.id], inputFingerprint, outputArtifactIds: [artifactId], finishedAt, ...(result.returnedModelId ? { returnedModelId: result.returnedModelId } : {}) }, { id: artifactId, projectId: project.id, stageId: "competitor-dna", stageRunId: runId, type: "competitor-dna-card", version: artifacts.length + 1, status: "needs_review", payloadJson: result.output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true });
+      workflowRunStore.finishRun({ id: runId, projectId: project.id, stageId: "competitor-dna", status: "needs_review", runnerId: "competitor-dna-9router", runnerVersion: competitorDnaRunnerVersion, providerId: textProviderExecution.providerId, ...(textProviderExecution.configuredModelId ? { configuredModelId: textProviderExecution.configuredModelId } : {}), promptTemplateId: "04_competitor_dna", promptVersion: "v5", inputArtifactIds: [cleaned.id, segmentation.id], inputFingerprint, outputArtifactIds: [artifactId], finishedAt, ...(result.returnedModelId ? { returnedModelId: result.returnedModelId } : {}) }, { id: artifactId, projectId: project.id, stageId: "competitor-dna", stageRunId: runId, type: "competitor-dna-card", version: artifacts.length + 1, status: "needs_review", payloadJson: result.output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true });
       db.exec("COMMIT;");
     } catch (error) { db.exec("ROLLBACK;"); throw error; }
     return factoryProjectResponseSchema.parse(reviewProject);
@@ -2005,7 +2388,7 @@ ipcMain.handle("run-competitor-dna", async (_event, input: unknown) => {
     const safeMessage = error instanceof CompetitorDnaError ? error.message : "Competitor DNA failed.";
     const failedProject = currentStatus === "needs_review" ? project : transitionProjectStage(runningProject, "competitor-dna", "failed");
     db.exec("BEGIN IMMEDIATE;");
-    try { saveProjectWithWorkflowInvalidation(failedProject, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId: project.id, stageId: "competitor-dna", status: "failed", runnerId: "competitor-dna-9router", runnerVersion: "competitor-dna-v1", inputArtifactIds: [cleaned.id, segmentation.id], inputFingerprint, outputArtifactIds: [], finishedAt, safeErrorCategory: safeCategory, safeErrorMessage: safeMessage }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); }
+    try { saveProjectWithWorkflowInvalidation(failedProject, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId: project.id, stageId: "competitor-dna", status: "failed", runnerId: "competitor-dna-9router", runnerVersion: competitorDnaRunnerVersion, providerId: textProviderExecution.providerId, ...(textProviderExecution.configuredModelId ? { configuredModelId: textProviderExecution.configuredModelId } : {}), promptTemplateId: "04_competitor_dna", promptVersion: "v5", inputArtifactIds: [cleaned.id, segmentation.id], inputFingerprint, outputArtifactIds: [], finishedAt, safeErrorCategory: safeCategory, safeErrorMessage: safeMessage }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); }
     catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; }
     logger.warn("competitor_dna_failed", { projectId: project.id, referenceId: reference.id, category: safeCategory });
     throw new Error(safeMessage);
@@ -2094,15 +2477,27 @@ ipcMain.handle("run-idea-lab", async (_event, input: unknown) => {
   const { projectId } = ideaLabRequestSchema.parse(input); const project = projectRepository.loadProject(projectId);
   if (!project) throw new Error(`Project not found: ${projectId}`);
   const opportunity = currentApprovedArtifacts(project, "opportunity-map")[0];
-  if (!opportunity?.payloadJson) throw new Error("Idea Lab requires an approved Opportunity Map.");
+  const topicOpportunityMap = project.setup.inputMode === "topic" && project.competitorReferences.length === 0
+    ? {
+        recommendedContentSpaces: [{ text: `Original explanatory video about ${project.topic}`, sourceReferenceIds: [], sourceArtifactIds: [], confidence: "low" }],
+        sharedPatterns: [],
+        overusedPatterns: [],
+        underservedViewerQuestions: [],
+        evidenceGaps: [],
+        differentiationDirections: [],
+        riskyDirections: []
+      }
+    : undefined;
+  if (!opportunity?.payloadJson && !topicOpportunityMap) throw new Error("Idea Lab requires an approved Opportunity Map.");
   const profile = seedChannelProfiles.find((item) => item.id === project.profileId); if (!profile) throw new Error("Active channel profile is unavailable.");
-  const fingerprint = canonicalSha256({ stageId: "idea-lab", opportunityId: opportunity.id, profileId: profile.id, format: project.format, language: project.targetLanguage, targetDuration: project.setup.targetDuration });
+  const inputArtifactIds = opportunity ? [opportunity.id] : [];
+  const fingerprint = canonicalSha256({ stageId: "idea-lab", opportunityId: opportunity?.id ?? "topic-opportunity", topic: project.topic, profileId: profile.id, format: project.format, language: project.targetLanguage, targetDuration: project.setup.targetDuration });
   const existingRun = workflowRunStore.findLatestByInput(projectId, "idea-lab", fingerprint);
   if (isPendingOrAcceptedRun(existingRun)) return factoryProjectResponseSchema.parse(project);
   const runId = `stage-run-${randomUUID()}`; const running = transitionProjectStage(transitionProjectStage(project, "idea-lab", "queued"), "idea-lab", "running"); const now = new Date().toISOString();
-  db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(running, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "idea-lab", status: "running", runnerId: "idea-lab-9router", runnerVersion: "idea-lab-v1", inputArtifactIds: [opportunity.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
-  try { const result = await runIdeaLab({ opportunityMap: opportunity.payloadJson, topic: project.topic, profile: profile as unknown as Record<string, unknown>, format: project.format, language: project.targetLanguage, targetDuration: project.setup.targetDuration, credentialStore, certificationStore: textCertificationStore }); const artifactId = `artifact-${randomUUID()}`; const finishedAt = new Date().toISOString(); const review = transitionProjectStage(running, "idea-lab", "needs_review"); const withIdeas = { ...review, ideas: result.output.candidates }; db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(withIdeas, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "idea-lab", status: "needs_review", runnerId: "idea-lab-9router", runnerVersion: "idea-lab-v1", inputArtifactIds: [opportunity.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt }, { id: artifactId, projectId, stageId: "idea-lab", stageRunId: runId, type: "idea-candidates", version: workflowRunStore.listArtifacts(projectId, "idea-lab").length + 1, status: "needs_review", payloadJson: result.output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(withIdeas); }
-  catch (error) { const failed = transitionProjectStage(running, "idea-lab", "failed"); const message = error instanceof IdeaLabError ? error.message : "Idea Lab failed."; db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "idea-lab", status: "failed", runnerId: "idea-lab-9router", runnerVersion: "idea-lab-v1", inputArtifactIds: [opportunity.id], inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof IdeaLabError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; } throw new Error(message); }
+  db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(running, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "idea-lab", status: "running", runnerId: "idea-lab-9router", runnerVersion: "idea-lab-v1", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
+  try { const result = await runIdeaLab({ opportunityMap: opportunity?.payloadJson ?? topicOpportunityMap!, topic: project.topic, profile: profile as unknown as Record<string, unknown>, format: project.format, language: project.targetLanguage, targetDuration: project.setup.targetDuration, credentialStore, certificationStore: textCertificationStore }); const artifactId = `artifact-${randomUUID()}`; const finishedAt = new Date().toISOString(); const review = transitionProjectStage(running, "idea-lab", "needs_review"); const withIdeas = { ...review, ideas: result.output.candidates }; db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(withIdeas, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "idea-lab", status: "needs_review", runnerId: "idea-lab-9router", runnerVersion: "idea-lab-v1", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt }, { id: artifactId, projectId, stageId: "idea-lab", stageRunId: runId, type: "idea-candidates", version: workflowRunStore.listArtifacts(projectId, "idea-lab").length + 1, status: "needs_review", payloadJson: result.output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(withIdeas); }
+  catch (error) { const failed = transitionProjectStage(running, "idea-lab", "failed"); const message = error instanceof IdeaLabError ? error.message : "Idea Lab failed."; db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "idea-lab", status: "failed", runnerId: "idea-lab-9router", runnerVersion: "idea-lab-v1", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof IdeaLabError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; } throw new Error(message); }
 });
 
 ipcMain.handle("approve-idea", (_event, input: unknown) => {
@@ -2138,7 +2533,7 @@ ipcMain.handle("run-originality-review", (_event, input: unknown) => {
   const idea = ideaLabOutputSchema.parse(ideaArtifact.payloadJson).candidates.find((candidate) => candidate.id === project.approvedIdeaId);
   if (!idea) throw new Error("The approved idea is not present in the approved Idea Lab artifact.");
   const dnaArtifacts = currentApprovedArtifacts(project, "competitor-dna").filter((artifact) => artifact.payloadJson);
-  if (!dnaArtifacts.length) throw new Error("Originality Review requires approved Competitor DNA artifacts.");
+  if (!dnaArtifacts.length && project.setup.inputMode !== "topic") throw new Error("Originality Review requires approved Competitor DNA artifacts.");
   const inputFingerprint = canonicalSha256({ stageId: "originality-review", ideaArtifactId: ideaArtifact.id, ideaId: idea.id, dnaArtifactIds: dnaArtifacts.map((artifact) => artifact.id) });
   const existingRun = workflowRunStore.findLatestByInput(projectId, "originality-review", inputFingerprint);
   if (isPendingOrAcceptedRun(existingRun)) return factoryProjectResponseSchema.parse(project);
@@ -2157,7 +2552,7 @@ ipcMain.handle("run-originality-review", (_event, input: unknown) => {
   try {
     const patterns = dnaArtifacts.map((artifact) => {
       const dna = competitorDnaOutputSchema.parse(artifact.payloadJson);
-      return { hookPattern: dna.hookPattern.abstraction, promisePattern: dna.promisePattern.abstraction, pacingPattern: dna.pacingPattern.description, proofPattern: dna.proofPattern.description, visualOpportunities: dna.visualOpportunities.map((item) => item.abstraction), forbiddenToCopy: dna.forbiddenToCopy.map((item) => item.element) };
+      return { hookPattern: dna.hookPattern.abstraction, promisePattern: dna.promisePattern.abstraction, pacingPattern: dna.pacingPattern.description, proofPattern: dna.proofPattern.description, visualOpportunities: [], forbiddenToCopy: dna.forbiddenToCopy.map((item) => item.element) };
     });
     const result = reviewOriginality({ idea, patterns });
     const output = originalityReviewOutputSchema.parse({ ideaId: idea.id, ...result, competitorDnaArtifactIds: dnaArtifacts.map((artifact) => artifact.id) });
@@ -2246,7 +2641,11 @@ ipcMain.handle("save-research-sources", (_event, input: unknown) => {
   const runId = `stage-run-${randomUUID()}`;
   const artifactId = `artifact-${randomUUID()}`;
   const now = new Date().toISOString();
-  const running = transitionProjectStage(transitionProjectStage(project, "research-source-intake", "queued"), "research-source-intake", "running");
+  const currentStatus = project.stages.find((stage) => stage.id === "research-source-intake")?.status ?? "not_started";
+  const resetProject = currentStatus === "approved"
+    ? transitionProjectStage(project, "research-source-intake", "stale")
+    : project;
+  const running = transitionProjectStage(transitionProjectStage(resetProject, "research-source-intake", "queued"), "research-source-intake", "running");
   const review = transitionProjectStage(running, "research-source-intake", "needs_review");
   db.exec("BEGIN IMMEDIATE;");
   try {
@@ -2256,6 +2655,64 @@ ipcMain.handle("save-research-sources", (_event, input: unknown) => {
     db.exec("COMMIT;");
   } catch (error) { db.exec("ROLLBACK;"); throw error; }
   return factoryProjectResponseSchema.parse(review);
+});
+
+ipcMain.handle("run-research-source-search", async (_event, input: unknown) => {
+  const { projectId } = researchSourceSearchRequestSchema.parse(input);
+  const project = projectRepository.loadProject(projectId);
+  if (!project) throw new Error(`Project not found: ${projectId}`);
+  const originalityArtifact = currentApprovedArtifacts(project, "originality-review").find((artifact) => artifact.payloadJson);
+  if (!originalityArtifact?.payloadJson) throw new Error("Automatic Research Source Intake requires an approved Originality Review artifact.");
+  const settings = credentialStore.loadProviderCredentialSettings("9router");
+  const query = buildResearchSearchQuery(project);
+  const inputFingerprint = canonicalSha256({ stageId: "research-source-intake", originalityArtifactId: originalityArtifact.id, query, textModel: settings?.textModel, runnerVersion: "research-source-search-v1" });
+  const existingRun = workflowRunStore.findLatestByInput(project.id, "research-source-intake", inputFingerprint);
+  if (isPendingOrAcceptedRun(existingRun)) return factoryProjectResponseSchema.parse(project);
+  const existingArtifact = workflowRunStore.listArtifacts(project.id, "research-source-intake").find((artifact) => artifact.status === "needs_review" || artifact.status === "approved");
+  if (existingArtifact) return factoryProjectResponseSchema.parse(project);
+  const runId = `stage-run-${randomUUID()}`;
+  const currentStatus = project.stages.find((stage) => stage.id === "research-source-intake")?.status ?? "not_started";
+  const resetProject = currentStatus === "approved" ? transitionProjectStage(project, "research-source-intake", "stale") : project;
+  const running = transitionProjectStage(transitionProjectStage(resetProject, "research-source-intake", "queued"), "research-source-intake", "running");
+  const runBase = { id: runId, projectId, stageId: "research-source-intake" as const, status: "running" as const, runnerId: "research-source-search-9router", runnerVersion: "research-source-search-v1", providerId: "9router" as const, ...(settings?.textModel ? { configuredModelId: settings.textModel } : {}), promptTemplateId: "research-source-search-v1", promptVersion: "v1", inputArtifactIds: [originalityArtifact.id], inputFingerprint, outputArtifactIds: [], startedAt: new Date().toISOString() };
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    saveProjectWithWorkflowInvalidation(running, { withinTransaction: true });
+    workflowRunStore.createRun(runBase);
+    db.exec("COMMIT;");
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+  try {
+    const result = await runResearchSourceSearch({ project, credentialStore, certificationStore: textCertificationStore });
+    const artifactId = `artifact-${randomUUID()}`;
+    const finishedAt = new Date().toISOString();
+    const review = transitionProjectStage(running, "research-source-intake", "needs_review");
+    db.exec("BEGIN IMMEDIATE;");
+    try {
+      saveProjectWithWorkflowInvalidation(review, { withinTransaction: true });
+      workflowRunStore.finishRun({ ...runBase, status: "needs_review", outputArtifactIds: [artifactId], finishedAt, ...(result.returnedModelId ? { returnedModelId: result.returnedModelId } : {}) }, { id: artifactId, projectId, stageId: "research-source-intake", stageRunId: runId, type: "research-sources", version: workflowRunStore.listArtifacts(projectId, "research-source-intake").length + 1, status: "needs_review", payloadJson: result.output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true });
+      db.exec("COMMIT;");
+    } catch (error) {
+      db.exec("ROLLBACK;");
+      throw error;
+    }
+    return factoryProjectResponseSchema.parse(review);
+  } catch (error) {
+    const failed = transitionProjectStage(running, "research-source-intake", "failed");
+    const message = error instanceof ResearchSourceSearchError ? error.message : "Automatic Research Source Intake failed.";
+    db.exec("BEGIN IMMEDIATE;");
+    try {
+      saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true });
+      workflowRunStore.finishRun({ ...runBase, status: "failed", finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof ResearchSourceSearchError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true });
+      db.exec("COMMIT;");
+    } catch (persistenceError) {
+      db.exec("ROLLBACK;");
+      throw persistenceError;
+    }
+    throw new Error(message);
+  }
 });
 
 ipcMain.handle("list-research-sources-artifacts", (_event, input: unknown) => {
@@ -2291,22 +2748,22 @@ ipcMain.handle("reject-research-sources", (_event, input: unknown) => {
 ipcMain.handle("run-claim-map", async (_event, input: unknown) => {
   const { projectId } = claimMapRequestSchema.parse(input); const project = projectRepository.loadProject(projectId);
   if (!project) throw new Error(`Project not found: ${projectId}`);
-  const sourceArtifact = currentApprovedArtifacts(project, "research-source-intake").find((artifact) => artifact.payloadJson);
-  if (!sourceArtifact?.payloadJson) throw new Error("Claim Map requires approved research sources.");
-  const sources = researchSourcesOutputSchema.parse(sourceArtifact.payloadJson).sources;
-  const fingerprint = canonicalSha256({ stageId: "claim-map", sourceArtifactId: sourceArtifact.id, sources });
+  const claimMapInput = buildClaimMapReferenceSources(project);
+  const { sources, inputArtifactIds } = claimMapInput;
+  const fingerprint = canonicalSha256({ stageId: "claim-map", inputArtifactIds, sources });
   const existingRun = workflowRunStore.findLatestByInput(projectId, "claim-map", fingerprint);
   if (isPendingOrAcceptedRun(existingRun)) return factoryProjectResponseSchema.parse(project);
   const runId = `stage-run-${randomUUID()}`; const now = new Date().toISOString(); const running = transitionProjectStage(transitionProjectStage(project, "claim-map", "queued"), "claim-map", "running");
-  db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(running, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "claim-map", status: "running", runnerId: "claim-map-9router", runnerVersion: "claim-map-v1", providerId: "9router", inputArtifactIds: [sourceArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
+  db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(running, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "claim-map", status: "running", runnerId: "claim-map-9router", runnerVersion: "claim-map-v1", providerId: "9router", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
   try {
     const result = await runClaimMap({ sources, credentialStore, certificationStore: textCertificationStore });
+    const output = namespaceClaimMapOutput(result.output, projectId);
     const artifactId = `artifact-${randomUUID()}`; const finishedAt = new Date().toISOString(); const review = transitionProjectStage(running, "claim-map", "needs_review");
-    db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "claim-map", status: "needs_review", runnerId: "claim-map-9router", runnerVersion: "claim-map-v1", providerId: "9router", inputArtifactIds: [sourceArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt, ...(result.returnedModelId ? { returnedModelId: result.returnedModelId } : {}) }, { id: artifactId, projectId, stageId: "claim-map", stageRunId: runId, type: "claim-map", version: workflowRunStore.listArtifacts(projectId, "claim-map").length + 1, status: "needs_review", payloadJson: result.output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
+    db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "claim-map", status: "needs_review", runnerId: "claim-map-9router", runnerVersion: "claim-map-v1", providerId: "9router", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt, ...(result.returnedModelId ? { returnedModelId: result.returnedModelId } : {}) }, { id: artifactId, projectId, stageId: "claim-map", stageRunId: runId, type: "claim-map", version: workflowRunStore.listArtifacts(projectId, "claim-map").length + 1, status: "needs_review", payloadJson: output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
     return factoryProjectResponseSchema.parse(review);
   } catch (error) {
     const failed = transitionProjectStage(running, "claim-map", "failed"); const message = error instanceof ClaimMapError ? error.message : "Claim Map failed.";
-    db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "claim-map", status: "failed", runnerId: "claim-map-9router", runnerVersion: "claim-map-v1", providerId: "9router", inputArtifactIds: [sourceArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof ClaimMapError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; }
+    db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "claim-map", status: "failed", runnerId: "claim-map-9router", runnerVersion: "claim-map-v1", providerId: "9router", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof ClaimMapError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; }
     throw new Error(message);
   }
 });
@@ -2320,11 +2777,11 @@ ipcMain.handle("reject-claim-map", (_event, input: unknown) => { const { project
 
 ipcMain.handle("run-outline", async (_event, input: unknown) => {
   const { projectId } = outlineRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); if (!project.approvedIdeaId) throw new Error("Outline requires an approved idea.");
-  const ideaArtifact = currentApprovedArtifacts(project, "idea-lab").find((artifact) => artifact.payloadJson); const claimArtifact = currentApprovedArtifacts(project, "claim-map").find((artifact) => artifact.payloadJson); const profile = seedChannelProfiles.find((item) => item.id === project.profileId); if (!ideaArtifact?.payloadJson || !claimArtifact?.payloadJson || !profile) throw new Error("Outline requires approved idea, Claim Map, and channel profile.");
-  const idea = ideaLabOutputSchema.parse(ideaArtifact.payloadJson).candidates.find((candidate) => candidate.id === project.approvedIdeaId); const claims = claimMapOutputSchema.parse(claimArtifact.payloadJson).claims; if (!idea || claims.some((claim) => claim.approvalState !== "allowed" || claim.state !== "verified")) throw new Error("Outline requires only allowed, verified claims.");
-  const fingerprint = canonicalSha256({ stageId: "outline", ideaArtifactId: ideaArtifact.id, claimArtifactId: claimArtifact.id, profileId: profile.id, duration: project.setup.targetDuration }); const existing = workflowRunStore.findLatestByInput(projectId, "outline", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project);
-  const runId = `stage-run-${randomUUID()}`; const now = new Date().toISOString(); const running = transitionProjectStage(transitionProjectStage(project, "outline", "queued"), "outline", "running"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(running, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "outline", status: "running", runnerId: "outline-9router", runnerVersion: "outline-v1", providerId: "9router", inputArtifactIds: [ideaArtifact.id, claimArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
-  try { const result = await runOutline({ idea, claims, profile: profile as unknown as Record<string, unknown>, targetDuration: project.setup.targetDuration, credentialStore, certificationStore: textCertificationStore }); const artifactId = `artifact-${randomUUID()}`; const finishedAt = new Date().toISOString(); const review = transitionProjectStage(running, "outline", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "outline", status: "needs_review", runnerId: "outline-9router", runnerVersion: "outline-v1", providerId: "9router", inputArtifactIds: [ideaArtifact.id, claimArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt }, { id: artifactId, projectId, stageId: "outline", stageRunId: runId, type: "outline", version: workflowRunStore.listArtifacts(projectId, "outline").length + 1, status: "needs_review", payloadJson: result.output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review); } catch (error) { const failed = transitionProjectStage(running, "outline", "failed"); const message = error instanceof OutlineError ? error.message : "Outline failed."; db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "outline", status: "failed", runnerId: "outline-9router", runnerVersion: "outline-v1", providerId: "9router", inputArtifactIds: [ideaArtifact.id, claimArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof OutlineError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; } throw new Error(message); }
+  const ideaArtifact = currentApprovedArtifacts(project, "idea-lab").find((artifact) => artifact.payloadJson); const profile = seedChannelProfiles.find((item) => item.id === project.profileId); if (!ideaArtifact?.payloadJson || !profile) throw new Error("Outline requires an approved idea and channel profile.");
+  const idea = ideaLabOutputSchema.parse(ideaArtifact.payloadJson).candidates.find((candidate) => candidate.id === project.approvedIdeaId); const claims: Array<{ id: string; state: string; approvalState: string }> = []; if (!idea) throw new Error("Outline requires an approved idea.");
+  const fingerprint = canonicalSha256({ stageId: "outline", ideaArtifactId: ideaArtifact.id, profileId: profile.id, duration: project.setup.targetDuration }); const existing = workflowRunStore.findLatestByInput(projectId, "outline", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project);
+  const runId = `stage-run-${randomUUID()}`; const now = new Date().toISOString(); const running = transitionProjectStage(transitionProjectStage(project, "outline", "queued"), "outline", "running"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(running, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "outline", status: "running", runnerId: "outline-9router", runnerVersion: "outline-v1", providerId: "9router", inputArtifactIds: [ideaArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
+  try { const result = await runOutline({ idea, claims, profile: profile as unknown as Record<string, unknown>, targetDuration: project.setup.targetDuration, credentialStore, certificationStore: textCertificationStore }); const artifactId = `artifact-${randomUUID()}`; const finishedAt = new Date().toISOString(); const review = transitionProjectStage(running, "outline", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "outline", status: "needs_review", runnerId: "outline-9router", runnerVersion: "outline-v1", providerId: "9router", inputArtifactIds: [ideaArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt }, { id: artifactId, projectId, stageId: "outline", stageRunId: runId, type: "outline", version: workflowRunStore.listArtifacts(projectId, "outline").length + 1, status: "needs_review", payloadJson: result.output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review); } catch (error) { const failed = transitionProjectStage(running, "outline", "failed"); const message = error instanceof OutlineError ? error.message : "Outline failed."; db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "outline", status: "failed", runnerId: "outline-9router", runnerVersion: "outline-v1", providerId: "9router", inputArtifactIds: [ideaArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof OutlineError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; } throw new Error(message); }
 });
 
 ipcMain.handle("list-outline-artifacts", (_event, input: unknown) => { const { projectId } = outlineRequestSchema.parse(input); return outlineArtifactsResponseSchema.parse(workflowRunStore.listArtifacts(projectId, "outline").map((artifact) => ({ id: artifact.id, ...(artifact.stageRunId ? { stageRunId: artifact.stageRunId } : {}), status: artifact.status, payloadJson: artifact.payloadJson, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt }))); });
@@ -2333,7 +2790,7 @@ ipcMain.handle("approve-outline", (_event, input: unknown) => { const { projectI
 ipcMain.handle("reject-outline", (_event, input: unknown) => { const { projectId } = outlineRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "outline").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId) throw new Error("No reviewable Outline exists."); const rejected = transitionProjectStage(project, "outline", "rejected"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(rejected, { withinTransaction: true }); workflowRunStore.rejectReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(rejected); });
 
 ipcMain.handle("run-script", async (_event, input: unknown) => {
-  const { projectId } = scriptRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const outlineArtifact = currentApprovedArtifacts(project, "outline").find((item) => item.payloadJson); const claimArtifact = currentApprovedArtifacts(project, "claim-map").find((item) => item.payloadJson); if (!outlineArtifact?.payloadJson || !claimArtifact?.payloadJson) throw new Error("Script requires approved Outline and Claim Map."); const outline = outlineOutputSchema.parse(outlineArtifact.payloadJson); const claims = claimMapOutputSchema.parse(claimArtifact.payloadJson).claims; const fingerprint = canonicalSha256({ stageId: "script", outlineArtifactId: outlineArtifact.id, claimArtifactId: claimArtifact.id }); const existing = workflowRunStore.findLatestByInput(projectId, "script", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project); const runId = `stage-run-${randomUUID()}`; const now = new Date().toISOString(); const running = transitionProjectStage(transitionProjectStage(project, "script", "queued"), "script", "running"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(running, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "script", status: "running", runnerId: "script-9router", runnerVersion: "script-v1", providerId: "9router", inputArtifactIds: [outlineArtifact.id, claimArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } try { const result = await runScript({ outline, claims, credentialStore, certificationStore: textCertificationStore }); const artifactId = `artifact-${randomUUID()}`; const finishedAt = new Date().toISOString(); const review = transitionProjectStage(running, "script", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "script", status: "needs_review", runnerId: "script-9router", runnerVersion: "script-v1", providerId: "9router", inputArtifactIds: [outlineArtifact.id, claimArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt }, { id: artifactId, projectId, stageId: "script", stageRunId: runId, type: "script", version: workflowRunStore.listArtifacts(projectId, "script").length + 1, status: "needs_review", payloadJson: result.output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review); } catch (error) { const failed = transitionProjectStage(running, "script", "failed"); const message = error instanceof ScriptError ? error.message : "Script failed."; db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "script", status: "failed", runnerId: "script-9router", runnerVersion: "script-v1", providerId: "9router", inputArtifactIds: [outlineArtifact.id, claimArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof ScriptError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; } throw new Error(message); }
+  const { projectId } = scriptRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const outlineArtifact = currentApprovedArtifacts(project, "outline").find((item) => item.payloadJson); if (!outlineArtifact?.payloadJson) throw new Error("Script requires an approved Outline."); const outline = outlineOutputSchema.parse(outlineArtifact.payloadJson); const claims = project.claims; const fingerprint = canonicalSha256({ stageId: "script", outlineArtifactId: outlineArtifact.id, claims }); const existing = workflowRunStore.findLatestByInput(projectId, "script", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project); const runId = `stage-run-${randomUUID()}`; const now = new Date().toISOString(); const running = transitionProjectStage(transitionProjectStage(project, "script", "queued"), "script", "running"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(running, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "script", status: "running", runnerId: "script-9router", runnerVersion: "script-v1", providerId: "9router", inputArtifactIds: [outlineArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } try { const result = await runScript({ outline, claims, credentialStore, certificationStore: textCertificationStore }); const artifactId = `artifact-${randomUUID()}`; const finishedAt = new Date().toISOString(); const review = transitionProjectStage(running, "script", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "script", status: "needs_review", runnerId: "script-9router", runnerVersion: "script-v1", providerId: "9router", inputArtifactIds: [outlineArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt }, { id: artifactId, projectId, stageId: "script", stageRunId: runId, type: "script", version: workflowRunStore.listArtifacts(projectId, "script").length + 1, status: "needs_review", payloadJson: result.output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review); } catch (error) { const failed = transitionProjectStage(running, "script", "failed"); const message = error instanceof ScriptError ? error.message : "Script failed."; db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "script", status: "failed", runnerId: "script-9router", runnerVersion: "script-v1", providerId: "9router", inputArtifactIds: [outlineArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof ScriptError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;" ); throw persistenceError; } throw new Error(message); }
 });
 
 ipcMain.handle("approve-script", (_event, input: unknown) => { const { projectId } = scriptRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "script").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Script exists."); const sections = scriptOutputSchema.parse(artifact.payloadJson).sections.map(({ openLoop, ...section }) => ({ ...section, ...(openLoop ? { openLoop } : {}) })); const approved = transitionProjectStage({ ...project, scriptSections: sections }, "script", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
@@ -2341,7 +2798,7 @@ ipcMain.handle("reject-script", (_event, input: unknown) => { const { projectId 
 
 ipcMain.handle("list-script-artifacts", (_event, input: unknown) => { const { projectId } = scriptRequestSchema.parse(input); return scriptArtifactsResponseSchema.parse(workflowRunStore.listArtifacts(projectId, "script").map((artifact) => ({ id: artifact.id, ...(artifact.stageRunId ? { stageRunId: artifact.stageRunId } : {}), status: artifact.status, payloadJson: artifact.payloadJson, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt }))); });
 
-ipcMain.handle("run-fact-review", (_event, input: unknown) => { const { projectId } = factReviewRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const scriptArtifact = currentApprovedArtifacts(project, "script").find((item) => item.payloadJson); if (!scriptArtifact?.payloadJson) throw new Error("Fact Review requires an approved Script."); const usedClaimIds = new Set(scriptOutputSchema.parse(scriptArtifact.payloadJson).sections.flatMap((section) => section.linkedClaimIds)); const claims = project.claims.filter((claim) => usedClaimIds.has(claim.id)); if (!claims.length) throw new Error("Fact Review requires script sections linked to approved claims."); const fingerprint = canonicalSha256({ stageId: "fact-review", scriptArtifactId: scriptArtifact.id, claims }); const existing = workflowRunStore.findLatestByInput(projectId, "fact-review", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project); const runId = `stage-run-${randomUUID()}`; const artifactId = `artifact-${randomUUID()}`; const now = new Date().toISOString(); const findings = reviewFacts(claims); const output = factReviewOutputSchema.parse({ reviewer: "local_deterministic", findings }); const review = transitionProjectStage(transitionProjectStage(transitionProjectStage(project, "fact-review", "queued"), "fact-review", "running"), "fact-review", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "fact-review", status: "running", runnerId: "fact-review-local", runnerVersion: "fact-review-v1", inputArtifactIds: [scriptArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "fact-review", status: "needs_review", runnerId: "fact-review-local", runnerVersion: "fact-review-v1", inputArtifactIds: [scriptArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId, stageId: "fact-review", stageRunId: runId, type: "fact-review", version: workflowRunStore.listArtifacts(projectId, "fact-review").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review); });
+ipcMain.handle("run-fact-review", (_event, input: unknown) => { const { projectId } = factReviewRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const scriptArtifact = currentApprovedArtifacts(project, "script").find((item) => item.payloadJson); if (!scriptArtifact?.payloadJson) throw new Error("Fact Review requires an approved Script."); const usedClaimIds = new Set(scriptOutputSchema.parse(scriptArtifact.payloadJson).sections.flatMap((section) => section.linkedClaimIds)); const claims = project.claims.filter((claim) => usedClaimIds.has(claim.id)); const fingerprint = canonicalSha256({ stageId: "fact-review", scriptArtifactId: scriptArtifact.id, claims }); const existing = workflowRunStore.findLatestByInput(projectId, "fact-review", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project); const runId = `stage-run-${randomUUID()}`; const artifactId = `artifact-${randomUUID()}`; const now = new Date().toISOString(); const findings = reviewFacts(claims); const output = factReviewOutputSchema.parse({ reviewer: "local_deterministic", findings }); const review = transitionProjectStage(transitionProjectStage(transitionProjectStage(project, "fact-review", "queued"), "fact-review", "running"), "fact-review", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "fact-review", status: "running", runnerId: "fact-review-local", runnerVersion: "fact-review-v1", inputArtifactIds: [scriptArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "fact-review", status: "needs_review", runnerId: "fact-review-local", runnerVersion: "fact-review-v1", inputArtifactIds: [scriptArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId, stageId: "fact-review", stageRunId: runId, type: "fact-review", version: workflowRunStore.listArtifacts(projectId, "fact-review").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review); });
 
 ipcMain.handle("list-fact-review-artifacts", (_event, input: unknown) => { const { projectId } = factReviewRequestSchema.parse(input); return factReviewArtifactsResponseSchema.parse(workflowRunStore.listArtifacts(projectId, "fact-review").map((artifact) => ({ id: artifact.id, ...(artifact.stageRunId ? { stageRunId: artifact.stageRunId } : {}), status: artifact.status, payloadJson: artifact.payloadJson, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt }))); });
 
@@ -2369,7 +2826,49 @@ ipcMain.handle("reject-shot-plan", (_event, input: unknown) => { const { project
 
 ipcMain.handle("run-visual-routing", (_event, input: unknown) => { const { projectId } = visualRoutingRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const shotArtifact = currentApprovedArtifacts(project, "shot-plan").find((item) => item.payloadJson); if (!shotArtifact?.payloadJson) throw new Error("Visual Routing requires an approved Shot Plan."); const shots = shotPlanOutputSchema.parse(shotArtifact.payloadJson).shots; const fingerprint = canonicalSha256({ stageId: "visual-routing", shotArtifactId: shotArtifact.id }); const existing = workflowRunStore.findLatestByInput(projectId, "visual-routing", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project); const runId = `stage-run-${randomUUID()}`; const artifactId = `artifact-${randomUUID()}`; const now = new Date().toISOString(); const output = visualRoutingOutputSchema.parse({ shots: applyVisualRouting(shots) }); const review = transitionProjectStage(transitionProjectStage(transitionProjectStage(project, "visual-routing", "queued"), "visual-routing", "running"), "visual-routing", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "visual-routing", status: "running", runnerId: "visual-routing-local", runnerVersion: "visual-routing-v1", inputArtifactIds: [shotArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "visual-routing", status: "needs_review", runnerId: "visual-routing-local", runnerVersion: "visual-routing-v1", inputArtifactIds: [shotArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId, stageId: "visual-routing", stageRunId: runId, type: "visual-routing", version: workflowRunStore.listArtifacts(projectId, "visual-routing").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review); });
 ipcMain.handle("list-visual-routing-artifacts", (_event, input: unknown) => { const { projectId } = visualRoutingRequestSchema.parse(input); return visualRoutingArtifactsResponseSchema.parse(workflowRunStore.listArtifacts(projectId, "visual-routing").map((artifact) => ({ id: artifact.id, ...(artifact.stageRunId ? { stageRunId: artifact.stageRunId } : {}), status: artifact.status, payloadJson: artifact.payloadJson, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt }))); });
-ipcMain.handle("edit-visual-routing", (_event, input: unknown) => { const { projectId, artifactId, shotId, visualMode } = editVisualRoutingRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const source = workflowRunStore.listArtifacts(projectId, "visual-routing").find((item) => item.id === artifactId && item.status === "needs_review"); if (!source?.stageRunId || !source.payloadJson) throw new Error("Visual Routing revision must start from a reviewable artifact."); const shotArtifact = currentApprovedArtifacts(project, "shot-plan").find((item) => item.payloadJson); if (!shotArtifact) throw new Error("Visual Routing revision requires an approved Shot Plan."); const current = visualRoutingOutputSchema.parse(source.payloadJson); if (!current.shots.some((shot) => shot.id === shotId)) throw new Error("Shot is not present in the Visual Routing artifact."); const output = visualRoutingOutputSchema.parse({ shots: current.shots.map((shot) => shot.id === shotId ? { ...shot, visualMode } : shot) }); const fingerprint = canonicalSha256({ stageId: "visual-routing", shotArtifactId: shotArtifact.id, sourceArtifactId: source.id, shotId, visualMode }); const existing = workflowRunStore.findLatestByInput(projectId, "visual-routing", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project); const runId = `stage-run-${randomUUID()}`; const nextArtifactId = `artifact-${randomUUID()}`; const now = new Date().toISOString(); const nextProject = markDownstreamStagesStale(project, "visual-routing"); db.exec("BEGIN IMMEDIATE;"); try { workflowRunStore.rejectReviewRun(source.stageRunId, { withinTransaction: true }); saveProjectWithWorkflowInvalidation(nextProject, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "visual-routing", status: "running", runnerId: "visual-routing-user-edit", runnerVersion: "visual-routing-v1", inputArtifactIds: [shotArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "visual-routing", status: "needs_review", runnerId: "visual-routing-user-edit", runnerVersion: "visual-routing-v1", inputArtifactIds: [shotArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [nextArtifactId], finishedAt: now }, { id: nextArtifactId, projectId, stageId: "visual-routing", stageRunId: runId, type: "visual-routing", version: workflowRunStore.listArtifacts(projectId, "visual-routing").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(nextProject); });
+ipcMain.handle("edit-visual-routing", (_event, input: unknown) => {
+  const { projectId, artifactId, shotId, visualMode } = editVisualRoutingRequestSchema.parse(input);
+  const project = projectRepository.loadProject(projectId);
+  if (!project) throw new Error(`Project not found: ${projectId}`);
+  const source = workflowRunStore.listArtifacts(projectId, "visual-routing").find((item) => item.id === artifactId && (item.status === "needs_review" || item.status === "approved"));
+  if (!source?.stageRunId || !source.payloadJson) throw new Error("Visual Routing revision must start from a reviewable artifact.");
+  const shotArtifact = currentApprovedArtifacts(project, "shot-plan").find((item) => item.payloadJson);
+  if (!shotArtifact) throw new Error("Visual Routing revision requires an approved Shot Plan.");
+  const current = visualRoutingOutputSchema.parse(source.payloadJson);
+  if (!current.shots.some((shot) => shot.id === shotId)) throw new Error("Shot is not present in the Visual Routing artifact.");
+  const output = visualRoutingOutputSchema.parse({ shots: current.shots.map((shot) => shot.id === shotId ? { ...shot, visualMode } : shot) });
+  const fingerprint = canonicalSha256({ stageId: "visual-routing", shotArtifactId: shotArtifact.id, sourceArtifactId: source.id, shotId, visualMode });
+  const existing = workflowRunStore.findLatestByInput(projectId, "visual-routing", fingerprint);
+  if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project);
+  const runId = `stage-run-${randomUUID()}`;
+  const nextArtifactId = `artifact-${randomUUID()}`;
+  const now = new Date().toISOString();
+  const nextProject = source.status === "approved"
+    ? transitionProjectStage(
+      transitionProjectStage(
+        transitionProjectStage(markDownstreamStagesStale(project, "visual-routing"), "visual-routing", "stale"),
+        "visual-routing",
+        "queued"
+      ),
+      "visual-routing",
+      "running"
+    )
+    : markDownstreamStagesStale(project, "visual-routing");
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    if (source.status === "approved") workflowRunStore.markStageArtifactsStale(projectId, ["visual-routing"]);
+    else workflowRunStore.rejectReviewRun(source.stageRunId, { withinTransaction: true });
+    const reviewProject = source.status === "approved" ? transitionProjectStage(nextProject, "visual-routing", "needs_review") : nextProject;
+    saveProjectWithWorkflowInvalidation(reviewProject, { withinTransaction: true });
+    workflowRunStore.createRun({ id: runId, projectId, stageId: "visual-routing", status: "running", runnerId: "visual-routing-user-edit", runnerVersion: "visual-routing-v1", inputArtifactIds: [shotArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now });
+    workflowRunStore.finishRun({ id: runId, projectId, stageId: "visual-routing", status: "needs_review", runnerId: "visual-routing-user-edit", runnerVersion: "visual-routing-v1", inputArtifactIds: [shotArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [nextArtifactId], finishedAt: now }, { id: nextArtifactId, projectId, stageId: "visual-routing", stageRunId: runId, type: "visual-routing", version: workflowRunStore.listArtifacts(projectId, "visual-routing").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true });
+    db.exec("COMMIT;");
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+  return factoryProjectResponseSchema.parse(source.status === "approved" ? transitionProjectStage(nextProject, "visual-routing", "needs_review") : nextProject);
+});
 ipcMain.handle("approve-visual-routing", (_event, input: unknown) => { const { projectId } = visualRoutingRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "visual-routing").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Visual Routing exists."); const shots = visualRoutingOutputSchema.parse(artifact.payloadJson).shots; const approved = transitionProjectStage(markDownstreamStagesStale({ ...project, shots }, "visual-routing"), "visual-routing", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
 ipcMain.handle("reject-visual-routing", (_event, input: unknown) => { const { projectId } = visualRoutingRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "visual-routing").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId) throw new Error("No reviewable Visual Routing exists."); const rejected = transitionProjectStage(project, "visual-routing", "rejected"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(rejected, { withinTransaction: true }); workflowRunStore.rejectReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(rejected); });
 
@@ -2385,18 +2884,22 @@ ipcMain.handle("run-9router-image-certification", async (_event, input: unknown)
   return runNineRouterImageCertification({ credentialStore, certificationStore: imageCertificationStore, logger });
 });
 ipcMain.handle("run-asset-acquisition", async (_event, input: unknown) => {
-  const { projectId } = assetAcquisitionRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`);
+  const { projectId, sceneId } = assetAcquisitionRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`);
+  if (sceneId && !project.scenes.some((scene) => scene.id === sceneId)) throw new Error("The selected scene was not found.");
   const promptArtifact = currentApprovedArtifacts(project, "prompt-preparation").find((item) => item.payloadJson); if (!promptArtifact?.payloadJson) throw new Error("Asset Acquisition requires approved Prompt Preparation.");
-  const prompts = promptPreparationOutputSchema.parse(promptArtifact.payloadJson).prompts; const imagePrompts = prompts.filter((prompt) => project.shots.some((shot) => shot.id === prompt.shotId && shot.visualMode === "ai_image" && shot.promptVersionId === prompt.promptVersionId));
+  const prompts = promptPreparationOutputSchema.parse(promptArtifact.payloadJson).prompts; const imagePrompts = prompts.filter((prompt) => project.shots.some((shot) => shot.id === prompt.shotId && shot.visualMode === "ai_image" && shot.promptVersionId === prompt.promptVersionId && (!sceneId || shot.sceneId === sceneId)));
   if (imagePrompts.length === 0) throw new Error("Asset Acquisition requires at least one approved AI image prompt.");
   const certification = await loadNineRouterImageCertification({ credentialStore, certificationStore: imageCertificationStore }); if (certification.status !== "verified") throw new Error("A verified image-model certification is required before Asset Acquisition can run.");
-  const fingerprint = canonicalSha256({ stageId: "asset-acquisition", promptArtifactId: promptArtifact.id, imageCertificationId: certification.record?.id, promptIds: imagePrompts.map((prompt) => prompt.promptVersionId) }); const existing = workflowRunStore.findLatestByInput(projectId, "asset-acquisition", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project);
-  const settings = credentialStore.loadProviderCredentialSettings("9router"); const apiKey = await credentialStore.resolveProviderSecret("9router"); if (!settings?.imageModel || !apiKey) throw new Error("The selected image model or credential is unavailable."); const imageModel = settings.imageModel; const imageBaseUrl = settings.baseUrl; const runId = `stage-run-${randomUUID()}`; const running = transitionProjectStage(transitionProjectStage(project, "asset-acquisition", "queued"), "asset-acquisition", "running");
+  const retryGenerationVersion = sceneId ? workflowRunStore.listArtifacts(projectId, "asset-acquisition").length : 0; const fingerprint = canonicalSha256({ stageId: "asset-acquisition", promptArtifactId: promptArtifact.id, imageCertificationId: certification.record?.id, sceneId, retryGenerationVersion, promptIds: imagePrompts.map((prompt) => prompt.promptVersionId) }); const existing = workflowRunStore.findLatestByInput(projectId, "asset-acquisition", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project);
+  const settings = credentialStore.loadProviderCredentialSettings("9router"); const apiKey = await credentialStore.resolveProviderSecret("9router"); if (!settings?.imageModel || !apiKey) throw new Error("The selected image model or credential is unavailable."); const imageModel = settings.imageModel; const imageBaseUrl = settings.baseUrl; const runId = `stage-run-${randomUUID()}`; const retryBase = sceneId ? markDownstreamStagesStale(project, "asset-acquisition") : project; const rerunBase = sceneId && project.stages.find((stage) => stage.id === "asset-acquisition")?.status === "approved" ? transitionProjectStage(retryBase, "asset-acquisition", "stale") : retryBase; const running = transitionProjectStage(transitionProjectStage(rerunBase, "asset-acquisition", "queued"), "asset-acquisition", "running");
   db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(running, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "asset-acquisition", status: "running", runnerId: "asset-acquisition-9router", runnerVersion: "asset-acquisition-v1", providerId: "9router", configuredModelId: imageModel, inputArtifactIds: [promptArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: new Date().toISOString() }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
   try {
-    const assets = [];
+    const priorAcquisition = sceneId ? currentApprovedArtifacts(project, "asset-acquisition").find((item) => item.payloadJson) : undefined;
+    const priorAssets = priorAcquisition?.payloadJson ? assetAcquisitionOutputSchema.parse(priorAcquisition.payloadJson).assets : [];
+    const regeneratedShotIds = new Set(imagePrompts.map((prompt) => prompt.shotId));
+    const assets = sceneId ? priorAssets.filter((asset) => !regeneratedShotIds.has(asset.shotId)) : [];
     for (const prompt of imagePrompts) {
-      const jobKey = canonicalSha256({ stageId: "asset-acquisition", projectId, shotId: prompt.shotId, promptVersionId: prompt.promptVersionId, imageModel, aspectRatio: prompt.aspectRatio });
+      const jobKey = canonicalSha256({ stageId: "asset-acquisition", projectId, sceneId, retryGenerationVersion, shotId: prompt.shotId, promptVersionId: prompt.promptVersionId, imageModel, aspectRatio: prompt.aspectRatio });
       const savedJob = generationJobStore.findByIdempotencyKey(jobKey);
       const priorAsset = savedJob?.state === "succeeded" ? acquiredImageAssetSchema.safeParse(savedJob.payload.asset) : null;
       if (priorAsset?.success) { assets.push(priorAsset.data); continue; }
@@ -2416,7 +2919,43 @@ ipcMain.handle("list-asset-acquisition-artifacts", (_event, input: unknown) => {
 ipcMain.handle("approve-asset-acquisition", (_event, input: unknown) => { const { projectId } = assetAcquisitionRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "asset-acquisition").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Asset Acquisition output exists."); assetAcquisitionOutputSchema.parse(artifact.payloadJson); const approved = transitionProjectStage(markDownstreamStagesStale(project, "asset-acquisition"), "asset-acquisition", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
 ipcMain.handle("reject-asset-acquisition", (_event, input: unknown) => { const { projectId } = assetAcquisitionRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "asset-acquisition").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId) throw new Error("No reviewable Asset Acquisition output exists."); const rejected = transitionProjectStage(project, "asset-acquisition", "rejected"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(rejected, { withinTransaction: true }); workflowRunStore.rejectReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(rejected); });
 
-ipcMain.handle("run-asset-review", (_event, input: unknown) => { const { projectId } = assetReviewRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const acquisition = currentApprovedArtifacts(project, "asset-acquisition").find((item) => item.payloadJson); if (!acquisition?.payloadJson) throw new Error("Asset Review requires approved Asset Acquisition."); const assets = assetAcquisitionOutputSchema.parse(acquisition.payloadJson).assets; const fingerprint = canonicalSha256({ stageId: "asset-review", acquisitionArtifactId: acquisition.id }); const existing = workflowRunStore.findLatestByInput(projectId, "asset-review", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project); const runId = `stage-run-${randomUUID()}`; const artifactId = `artifact-${randomUUID()}`; const now = new Date().toISOString(); const output = assetReviewOutputSchema.parse({ acquisitionArtifactId: acquisition.id, assets: assets.map((asset) => ({ asset, reviewStatus: "needs_review" })) }); const review = transitionProjectStage(transitionProjectStage(transitionProjectStage(project, "asset-review", "queued"), "asset-review", "running"), "asset-review", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "asset-review", status: "running", runnerId: "asset-review-local", runnerVersion: "asset-review-v1", inputArtifactIds: [acquisition.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-review", status: "needs_review", runnerId: "asset-review-local", runnerVersion: "asset-review-v1", inputArtifactIds: [acquisition.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId, stageId: "asset-review", stageRunId: runId, type: "asset-review", version: workflowRunStore.listArtifacts(projectId, "asset-review").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review); });
+ipcMain.handle("run-asset-review", (_event, input: unknown) => {
+  const { projectId, sceneId } = assetReviewRequestSchema.parse(input);
+  const project = projectRepository.loadProject(projectId);
+  if (!project) throw new Error(`Project not found: ${projectId}`);
+  const acquisition = currentApprovedArtifacts(project, "asset-acquisition").find((item) => item.payloadJson);
+  if (!acquisition?.payloadJson) throw new Error("Asset Review requires approved Asset Acquisition.");
+  const assets = assetAcquisitionOutputSchema.parse(acquisition.payloadJson).assets;
+  const previous = sceneId ? workflowRunStore.listArtifacts(projectId, "asset-review").find((item) => (item.status === "approved" || item.status === "stale") && item.payloadJson) : undefined;
+  const previousItems = previous?.payloadJson ? assetReviewOutputSchema.parse(previous.payloadJson).assets : [];
+  const previousByShot = new Map(previousItems.map((item) => [item.asset.shotId, item]));
+  const currentShotIds = new Set(assets.map((asset) => asset.shotId));
+  const reviewItems = sceneId
+    ? [...assets.map((asset) => {
+        const prior = previousByShot.get(asset.shotId);
+        return prior?.asset.sha256 === asset.sha256 ? prior : { asset, reviewStatus: "needs_review" as const };
+      }), ...previousItems.filter((item) => !currentShotIds.has(item.asset.shotId))]
+    : assets.map((asset) => ({ asset, reviewStatus: "needs_review" as const }));
+  const fingerprint = canonicalSha256({ stageId: "asset-review", acquisitionArtifactId: acquisition.id, previousArtifactId: previous?.id, sceneId });
+  const existing = workflowRunStore.findLatestByInput(projectId, "asset-review", fingerprint);
+  if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project);
+  const runId = `stage-run-${randomUUID()}`;
+  const artifactId = `artifact-${randomUUID()}`;
+  const now = new Date().toISOString();
+  const output = assetReviewOutputSchema.parse({ acquisitionArtifactId: acquisition.id, assets: reviewItems });
+  const review = transitionProjectStage(transitionProjectStage(transitionProjectStage(project, "asset-review", "queued"), "asset-review", "running"), "asset-review", "needs_review");
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    saveProjectWithWorkflowInvalidation(review, { withinTransaction: true });
+    workflowRunStore.createRun({ id: runId, projectId, stageId: "asset-review", status: "running", runnerId: "asset-review-local", runnerVersion: "asset-review-v1", inputArtifactIds: [acquisition.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now });
+    workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-review", status: "needs_review", runnerId: "asset-review-local", runnerVersion: "asset-review-v1", inputArtifactIds: [acquisition.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId, stageId: "asset-review", stageRunId: runId, type: "asset-review", version: workflowRunStore.listArtifacts(projectId, "asset-review").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true });
+    db.exec("COMMIT;");
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+  return factoryProjectResponseSchema.parse(review);
+});
 ipcMain.handle("list-asset-review-artifacts", (_event, input: unknown) => { const { projectId } = assetReviewRequestSchema.parse(input); return assetReviewArtifactsResponseSchema.parse(workflowRunStore.listArtifacts(projectId, "asset-review").map((artifact) => ({ id: artifact.id, ...(artifact.stageRunId ? { stageRunId: artifact.stageRunId } : {}), status: artifact.status, payloadJson: artifact.payloadJson, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt }))); });
 ipcMain.handle("revise-asset-review", (_event, input: unknown) => { const request = reviseAssetReviewRequestSchema.parse(input); const project = projectRepository.loadProject(request.projectId); if (!project) throw new Error(`Project not found: ${request.projectId}`); const source = workflowRunStore.listArtifacts(request.projectId, "asset-review").find((item) => item.id === request.artifactId && item.status === "needs_review"); if (!source?.stageRunId || !source.payloadJson) throw new Error("Asset Review revision must start from a reviewable artifact."); const current = assetReviewOutputSchema.parse(source.payloadJson); const inputArtifactIds = [current.acquisitionArtifactId]; const selected = current.assets.find((item) => item.asset.sha256 === request.assetSha256); if (!selected) throw new Error("Asset is not present in the review artifact."); if (request.action === "assign" && (!request.shotId || request.shotId !== selected.asset.shotId)) throw new Error("An asset can only be assigned to its explicitly mapped shot."); if (request.action === "assign" && selected.reviewStatus !== "approved") throw new Error("Approve an asset before assigning it."); const assets = current.assets.map((item) => { if (item.asset.sha256 !== request.assetSha256) return item; if (request.action === "approve") return { ...item, reviewStatus: "approved" as const }; if (request.action === "reject") return { ...item, reviewStatus: "rejected" as const, assignedShotId: undefined }; if (request.action === "assign") return { ...item, assignedShotId: request.shotId! }; return { ...item, assignedShotId: undefined }; }); const output = assetReviewOutputSchema.parse({ ...current, assets }); const fingerprint = canonicalSha256({ stageId: "asset-review", sourceArtifactId: source.id, assetSha256: request.assetSha256, action: request.action, ...(request.shotId ? { shotId: request.shotId } : {}) }); const runId = `stage-run-${randomUUID()}`; const artifactId = `artifact-${randomUUID()}`; const now = new Date().toISOString(); db.exec("BEGIN IMMEDIATE;"); try { workflowRunStore.rejectReviewRun(source.stageRunId, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId: request.projectId, stageId: "asset-review", status: "running", runnerId: "asset-review-user-action", runnerVersion: "asset-review-v1", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); workflowRunStore.finishRun({ id: runId, projectId: request.projectId, stageId: "asset-review", status: "needs_review", runnerId: "asset-review-user-action", runnerVersion: "asset-review-v1", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId: request.projectId, stageId: "asset-review", stageRunId: runId, type: "asset-review", version: workflowRunStore.listArtifacts(request.projectId, "asset-review").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(project); });
 ipcMain.handle("approve-asset-review", (_event, input: unknown) => { const { projectId } = assetReviewRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "asset-review").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Asset Review exists."); const output = assetReviewOutputSchema.parse(artifact.payloadJson); if (output.assets.some((item) => item.reviewStatus !== "approved" || !item.assignedShotId)) throw new Error("Approve and explicitly assign every generated asset before completing Asset Review."); const shotIds = new Set(project.shots.map((shot) => shot.id)); if (output.assets.some((item) => !shotIds.has(item.assignedShotId!))) throw new Error("Assigned asset shot does not exist in the current project."); const assignments = new Map(output.assets.map((item) => [item.assignedShotId!, `asset-${item.asset.sha256}`])); const approved = transitionProjectStage(markDownstreamStagesStale({ ...project, shots: project.shots.map((shot) => assignments.has(shot.id) ? { ...shot, approvedAssetId: assignments.get(shot.id)! } : shot) }, "asset-review"), "asset-review", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
@@ -2705,20 +3244,59 @@ function resolveWorkspaceArtifactPath(relativeFilePath: string): string {
   return resolvedPath;
 }
 
+function frameRangeToMicroseconds(startFrame: number, durationFrames: number, fps: number): { startUs: number; durationUs: number } {
+  const startUs = Math.round(startFrame * 1_000_000 / fps);
+  const endUs = Math.round((startFrame + durationFrames) * 1_000_000 / fps);
+  return { startUs, durationUs: Math.max(1, endUs - startUs) };
+}
+
+function subtitleTimestamp(frame: number, fps: number): string {
+  const milliseconds = Math.max(0, Math.round(frame * 1000 / fps));
+  const hours = Math.floor(milliseconds / 3_600_000);
+  const minutes = Math.floor((milliseconds % 3_600_000) / 60_000);
+  const seconds = Math.floor((milliseconds % 60_000) / 1000);
+  const remainder = milliseconds % 1000;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")},${String(remainder).padStart(3, "0")}`;
+}
+
+function writeSubtitleFile(outputPath: string, output: { fps: number; cues: Array<{ startFrame: number; durationFrames: number; text: string }> }): void {
+  const content = output.cues.map((cue, index) => [
+    String(index + 1),
+    `${subtitleTimestamp(cue.startFrame, output.fps)} --> ${subtitleTimestamp(cue.startFrame + cue.durationFrames, output.fps)}`,
+    cue.text.trim(),
+    ""
+  ].join("\r\n")).join("\r\n");
+  writeFileSync(outputPath, content, "utf8");
+}
+
+function invalidatePreviewAndDownstream(project: FactoryProject): FactoryProject {
+  const downstream = markDownstreamStagesStale(project, "preview-render");
+  return {
+    ...downstream,
+    stages: normalizeProjectStages(downstream.stages).map((stage) => (
+      stage.id === "preview-render" && (stage.status === "queued" || stage.status === "running" || stage.status === "needs_review" || stage.status === "needs_attention" || stage.status === "approved" || stage.status === "ready")
+        ? { ...stage, status: "stale" }
+        : stage
+    ))
+  };
+}
+
 ipcMain.handle("run-preview-render", async (_event, input: unknown) => {
-  const { projectId } = previewRenderRequestSchema.parse(input);
+  const { projectId, force = false } = previewRenderRequestSchema.parse(input);
   const project = projectRepository.loadProject(projectId);
   if (!project) throw new Error(`Project not found: ${projectId}`);
   const timelineArtifact = currentApprovedArtifacts(project, "timeline-assembly").find((item) => item.payloadJson);
   const assetReviewArtifact = currentApprovedArtifacts(project, "asset-review").find((item) => item.payloadJson);
   const voiceArtifact = currentApprovedArtifacts(project, "voice-generation").find((item) => item.payloadJson);
-  if (!timelineArtifact?.payloadJson || !assetReviewArtifact?.payloadJson || !voiceArtifact?.payloadJson) {
-    throw new Error("Preview Render requires approved Timeline Assembly, Asset Review, and Voice Generation.");
+  const subtitleArtifact = currentApprovedArtifacts(project, "subtitle-preparation").find((item) => item.payloadJson);
+  if (!timelineArtifact?.payloadJson || !assetReviewArtifact?.payloadJson || !voiceArtifact?.payloadJson || !subtitleArtifact?.payloadJson) {
+    throw new Error("Preview Render requires approved Timeline Assembly, Asset Review, Voice Generation, and Subtitle Preparation.");
   }
 
   const timeline = timelineAssemblyOutputSchema.parse(timelineArtifact.payloadJson);
   const reviewedAssets = assetReviewOutputSchema.parse(assetReviewArtifact.payloadJson);
   const voiceOutput = voiceGenerationOutputSchema.parse(voiceArtifact.payloadJson);
+  const subtitleOutput = subtitlePreparationOutputSchema.parse(subtitleArtifact.payloadJson);
   const assetsByShot = new Map(reviewedAssets.assets
     .filter((item) => item.reviewStatus === "approved" && item.assignedShotId)
     .map((item) => [item.assignedShotId!, item.asset]));
@@ -2737,12 +3315,12 @@ ipcMain.handle("run-preview-render", async (_event, input: unknown) => {
     .sort((a, b) => a.startFrame - b.startFrame)
     .map((item) => {
       if (!voicesByPath.has(item.sourceId)) throw new Error("The approved timeline has narration outside the approved Voice Generation artifact.");
-      return { filePath: resolveWorkspaceArtifactPath(item.sourceId) };
+      return { filePath: resolveWorkspaceArtifactPath(item.sourceId), startFrame: item.startFrame };
     });
   if (!visualInputs.length || !audioInputs.length) throw new Error("Preview Render requires approved visual and narration media.");
 
-  const inputArtifactIds = [timelineArtifact.id, assetReviewArtifact.id, voiceArtifact.id];
-  const inputFingerprint = canonicalSha256({ stageId: "preview-render", inputArtifactIds, timeline });
+  const inputArtifactIds = [timelineArtifact.id, assetReviewArtifact.id, voiceArtifact.id, subtitleArtifact.id];
+  const inputFingerprint = canonicalSha256({ stageId: "preview-render", inputArtifactIds, timeline, subtitles: subtitleOutput });
   const runId = `stage-run-${randomUUID()}`;
   const now = new Date().toISOString();
   let running: FactoryProject;
@@ -2750,13 +3328,15 @@ ipcMain.handle("run-preview-render", async (_event, input: unknown) => {
   try {
     // Recheck while holding the write lock so concurrent IPC requests cannot start duplicate renders.
     const existingRun = workflowRunStore.findLatestByInput(projectId, "preview-render", inputFingerprint);
-    if (isPendingOrAcceptedRun(existingRun)) {
+    if (existingRun && (existingRun.status === "queued" || existingRun.status === "running" || (!force && (existingRun.status === "needs_review" || existingRun.status === "approved")))) {
       db.exec("COMMIT;");
       const currentProject = projectRepository.loadProject(projectId);
       if (!currentProject) throw new Error(`Project not found: ${projectId}`);
       return factoryProjectResponseSchema.parse(currentProject);
     }
-    running = transitionProjectStage(transitionProjectStage(project, "preview-render", "queued"), "preview-render", "running");
+    const renderBase = force ? invalidatePreviewAndDownstream(project) : project;
+    if (force) saveProjectWithWorkflowInvalidation(renderBase, { withinTransaction: true });
+    running = transitionProjectStage(transitionProjectStage(renderBase, "preview-render", "queued"), "preview-render", "running");
     saveProjectWithWorkflowInvalidation(running, { withinTransaction: true });
     workflowRunStore.createRun({ id: runId, projectId, stageId: "preview-render", status: "running", runnerId: "ffmpeg-preview", runnerVersion: "preview-render-v1", inputArtifactIds, inputFingerprint, outputArtifactIds: [], startedAt: now });
     db.exec("COMMIT;");
@@ -2766,13 +3346,16 @@ ipcMain.handle("run-preview-render", async (_event, input: unknown) => {
   }
 
   const relativeFilePath = join("previews", projectId, `${runId}.mp4`);
+  const subtitleRelativeFilePath = join("previews", projectId, `${runId}.srt`);
   const outputPath = resolveWorkspaceArtifactPath(relativeFilePath);
+  const subtitlePath = resolveWorkspaceArtifactPath(subtitleRelativeFilePath);
   mkdirSync(dirname(outputPath), { recursive: true });
   try {
-    const result = await renderPreview({ timeline, outputPath, resolution: project.format === "short" ? "1080p-vertical" : "1080p-horizontal", visualInputs, audioInputs, ...(process.env.FFMPEG_PATH ? { ffmpegPath: process.env.FFMPEG_PATH } : {}), ...(process.env.FFPROBE_PATH ? { ffprobePath: process.env.FFPROBE_PATH } : {}) });
+    writeSubtitleFile(subtitlePath, subtitleOutput);
+    const result = await renderPreview({ timeline, outputPath, resolution: project.format === "short" ? "1080p-vertical" : "1080p-horizontal", visualInputs, audioInputs, subtitleFilePath: subtitlePath, ...(process.env.FFMPEG_PATH ? { ffmpegPath: process.env.FFMPEG_PATH } : {}), ...(process.env.FFPROBE_PATH ? { ffprobePath: process.env.FFPROBE_PATH } : {}) });
     const artifactId = `artifact-${randomUUID()}`;
     const finishedAt = new Date().toISOString();
-    const output = previewRenderOutputSchema.parse({ relativeFilePath, durationSeconds: result.durationSeconds, width: result.width, height: result.height, sha256: result.sha256, inputArtifactIds });
+    const output = previewRenderOutputSchema.parse({ relativeFilePath, subtitleRelativeFilePath, durationSeconds: result.durationSeconds, width: result.width, height: result.height, sha256: result.sha256, inputArtifactIds });
     const review = transitionProjectStage(running, "preview-render", "needs_review");
     db.exec("BEGIN IMMEDIATE;");
     try {
@@ -2806,6 +3389,19 @@ ipcMain.handle("list-preview-render-artifacts", (_event, input: unknown) => {
   return previewRenderArtifactsResponseSchema.parse(workflowRunStore.listArtifacts(projectId, "preview-render").map((artifact) => ({ id: artifact.id, ...(artifact.stageRunId ? { stageRunId: artifact.stageRunId } : {}), status: artifact.status, payloadJson: artifact.payloadJson, relativeFilePath: artifact.relativeFilePath, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt })));
 });
 
+ipcMain.handle("get-preview-video-url", (_event, input: unknown) => {
+  const { projectId, artifactId } = previewMediaRequestSchema.parse(input);
+  const artifact = workflowRunStore.getArtifact(projectId, artifactId);
+  if (!artifact?.payloadJson || (artifact.status !== "needs_review" && artifact.status !== "approved")) throw new Error("Preview artifact is not reviewable.");
+  const output = previewRenderOutputSchema.parse(artifact.payloadJson);
+  if (artifact.relativeFilePath !== output.relativeFilePath) throw new Error("Preview artifact path is invalid.");
+  const outputPath = resolveWorkspaceArtifactPath(output.relativeFilePath);
+  if (!existsSync(outputPath)) throw new Error("Preview output is missing.");
+  const token = randomUUID();
+  previewMediaFiles.set(token, { projectId, artifactId, outputPath });
+  return previewMediaUrlResponseSchema.parse({ url: `lsf-media://preview/${token}` });
+});
+
 ipcMain.handle("approve-preview-render", async (_event, input: unknown) => {
   const { projectId } = previewRenderRequestSchema.parse(input);
   const project = projectRepository.loadProject(projectId);
@@ -2816,7 +3412,12 @@ ipcMain.handle("approve-preview-render", async (_event, input: unknown) => {
   const previewPath = resolveWorkspaceArtifactPath(output.relativeFilePath);
   if (artifact.relativeFilePath !== output.relativeFilePath || !existsSync(previewPath)) throw new Error("Preview output is missing or invalid.");
   if (!output.sha256 || await getPreviewFileSha256(previewPath) !== output.sha256) throw new Error("Preview output changed after validation and must be rendered again.");
-  const approved = transitionProjectStage(project, "preview-render", "approved");
+  // Preview approval is the final human checkpoint. QA already validated this
+  // exact render, so approving it must not invalidate the approved QA report.
+  const currentStage = project.stages.find((stage) => stage.id === "preview-render");
+  if (!currentStage) throw new Error("Preview Render stage is missing.");
+  assertWorkflowStageTransition(currentStage.status, "approved");
+  const approved = updateProjectStage(project, "preview-render", "approved");
   db.exec("BEGIN IMMEDIATE;");
   try {
     saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true });
@@ -2852,9 +3453,10 @@ ipcMain.handle("run-qa", async (_event, input: unknown) => {
   const { projectId } = qaRequestSchema.parse(input);
   const project = projectRepository.loadProject(projectId);
   if (!project) throw new Error(`Project not found: ${projectId}`);
-  const preview = currentApprovedArtifacts(project, "preview-render").find((item) => item.payloadJson);
+  const preview = currentApprovedArtifacts(project, "preview-render").find((item) => item.payloadJson)
+    ?? currentReviewableArtifacts(project, "preview-render").find((item) => item.payloadJson);
   const timeline = currentApprovedArtifacts(project, "timeline-assembly").find((item) => item.payloadJson);
-  if (!preview?.payloadJson || !timeline?.payloadJson) throw new Error("QA requires approved Preview Render and Timeline Assembly.");
+  if (!preview?.payloadJson || !timeline?.payloadJson) throw new Error("QA requires a current Preview Render and approved Timeline Assembly.");
   const assets = currentApprovedArtifacts(project, "asset-review").find((item) => item.payloadJson);
   const voice = currentApprovedArtifacts(project, "voice-generation").find((item) => item.payloadJson);
   const subtitles = currentApprovedArtifacts(project, "subtitle-preparation").find((item) => item.payloadJson);
@@ -2901,21 +3503,30 @@ ipcMain.handle("run-capcut-draft", async (_event, input: unknown) => {
   const qa = currentApprovedArtifacts(project, "qa").find((item) => item.payloadJson);
   const timelineArtifact = currentApprovedArtifacts(project, "timeline-assembly").find((item) => item.payloadJson);
   const assets = currentApprovedArtifacts(project, "asset-review").find((item) => item.payloadJson);
+  const voice = currentApprovedArtifacts(project, "voice-generation").find((item) => item.payloadJson);
   const subtitles = currentApprovedArtifacts(project, "subtitle-preparation").find((item) => item.payloadJson);
-  if (!qa?.payloadJson || !timelineArtifact?.payloadJson || !assets?.payloadJson || !subtitles?.payloadJson) throw new Error("CapCut Draft requires approved QA, Timeline Assembly, Asset Review, and Subtitle Preparation.");
+  if (!qa?.payloadJson || !timelineArtifact?.payloadJson || !assets?.payloadJson || !voice?.payloadJson || !subtitles?.payloadJson) throw new Error("CapCut Draft requires approved QA, Timeline Assembly, Asset Review, Voice Generation, and Subtitle Preparation.");
   const runtime = await probeRuntimeEnvironment();
   if (!runtime.pythonExists || !runtime.capcutInstalled || runtime.pycapcutStatus !== "Installed" || !runtime.draftDirConfigured) throw new Error("CapCut Draft prerequisites are not configured.");
   const timeline = timelineAssemblyOutputSchema.parse(timelineArtifact.payloadJson);
   const reviewed = assetReviewOutputSchema.parse(assets.payloadJson);
+  const voiceOutput = voiceGenerationOutputSchema.parse(voice.payloadJson);
   const subtitleOutput = subtitlePreparationOutputSchema.parse(subtitles.payloadJson);
   const assetsById = new Map(reviewed.assets.filter((item) => item.reviewStatus === "approved" && item.assignedShotId).map((item) => [item.asset.sha256, item.asset]));
   const visuals = timeline.items.filter((item) => item.track === "primary_visual").map((item) => {
     const asset = [...assetsById.values()].find((candidate) => project.shots.some((shot) => shot.approvedAssetId === item.sourceId && shot.id === candidate.shotId));
     if (!asset) throw new Error("Timeline visual is not backed by an approved assigned asset.");
-    return { filePath: resolveWorkspaceArtifactPath(asset.relativeFilePath), startUs: Math.round(item.startFrame * 1_000_000 / item.fps), durationUs: Math.round(item.durationFrames * 1_000_000 / item.fps) };
+     return { filePath: resolveWorkspaceArtifactPath(asset.relativeFilePath), ...frameRangeToMicroseconds(item.startFrame, item.durationFrames, item.fps) };
+   });
+  const voiceByPath = new Map(voiceOutput.segments.map((segment) => [segment.relativeFilePath, segment]));
+  const audio = timeline.items.filter((item) => item.track === "narration").map((item) => {
+    const segment = voiceByPath.get(item.sourceId);
+    if (!segment) throw new Error("Timeline narration is not backed by approved Voice Generation output.");
+    const timelineRange = frameRangeToMicroseconds(item.startFrame, item.durationFrames, item.fps);
+    const sourceDurationUs = Math.floor(segment.durationSeconds * 1_000_000);
+    return { filePath: resolveWorkspaceArtifactPath(item.sourceId), startUs: timelineRange.startUs, durationUs: Math.max(1, Math.min(timelineRange.durationUs, sourceDurationUs)) };
   });
-  const audio = timeline.items.filter((item) => item.track === "narration").map((item) => ({ filePath: resolveWorkspaceArtifactPath(item.sourceId), startUs: Math.round(item.startFrame * 1_000_000 / item.fps), durationUs: Math.round(item.durationFrames * 1_000_000 / item.fps) }));
-  const inputArtifactIds = [qa.id, timelineArtifact.id, assets.id, subtitles.id];
+  const inputArtifactIds = [qa.id, timelineArtifact.id, assets.id, voice.id, subtitles.id];
   const fingerprint = canonicalSha256({ stageId: "capcut-draft", inputArtifactIds, timeline });
   const existing = workflowRunStore.findLatestByInput(projectId, "capcut-draft", fingerprint);
   if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project);
@@ -2924,7 +3535,7 @@ ipcMain.handle("run-capcut-draft", async (_event, input: unknown) => {
   const running = transitionProjectStage(transitionProjectStage(project, "capcut-draft", "queued"), "capcut-draft", "running");
   db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(running, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "capcut-draft", status: "running", runnerId: "pycapcut-bridge", runnerVersion: "capcut-bridge-v2", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: new Date().toISOString() }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
   try {
-    const bridge = await runCapCutDraftBridge({ pythonPath: runtime.sidecarPythonPath, bridgePath: join(repoRoot, "python", "capcut_bridge", "bridge.py"), payload: { draftDirectory: join(runtime.capcutDraftDir, draftName), canvas: { width: project.format === "short" ? 1080 : 1920, height: project.format === "short" ? 1920 : 1080, fps: timeline.fps }, timeline: { visuals, audio, subtitles: subtitleOutput.cues.map((cue) => ({ text: cue.text, startUs: Math.round(cue.startFrame * 1_000_000 / subtitleOutput.fps), durationUs: Math.round(cue.durationFrames * 1_000_000 / subtitleOutput.fps) })) } } });
+     const bridge = await runCapCutDraftBridge({ pythonPath: runtime.sidecarPythonPath, bridgePath: join(repoRoot, "python", "capcut_bridge", "bridge.py"), payload: { draftDirectory: join(runtime.capcutDraftDir, draftName), canvas: { width: project.format === "short" ? 1080 : 1920, height: project.format === "short" ? 1920 : 1080, fps: timeline.fps }, timeline: { visuals, audio, subtitles: subtitleOutput.cues.map((cue) => ({ text: cue.text, ...frameRangeToMicroseconds(cue.startFrame, cue.durationFrames, subtitleOutput.fps) })) } } });
     const output = capcutDraftOutputSchema.parse({ draftName, structurallyValidated: true, trackCounts: bridge.trackCounts, inputArtifactIds }); const artifactId = `artifact-${randomUUID()}`; const review = transitionProjectStage(running, "capcut-draft", "needs_review"); const now = new Date().toISOString();
     db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "capcut-draft", status: "needs_review", runnerId: "pycapcut-bridge", runnerVersion: "capcut-bridge-v2", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId, stageId: "capcut-draft", stageRunId: runId, type: "capcut-draft", version: workflowRunStore.listArtifacts(projectId, "capcut-draft").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
     return factoryProjectResponseSchema.parse(review);

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-07-30T00:00:00.000Z",
+  "updatedAt": "2026-08-03T13:50:00.000Z",
   "activeJobs": [],
-  "notes": "Preview IPC, QA Stage, and TTS preview UX cleanup are ready for independent review."
+  "notes": "JOB-OUTPUT-V1 builder verification passed: focused preview/media/schema/orchestrator tests, typecheck, and diff check. FFmpeg subtitles filter is installed. Ready for independent review and QA."
 }

@@ -1,4 +1,4 @@
-import type { ChannelProfile, ChannelRouteDecision, CompetitorReference, FactoryProject, StageEligibility, WorkflowStageStatus } from "@lsf/domain";
+import type { ChannelProfile, ChannelRouteDecision, CompetitorDnaOutput, CompetitorReference, FactoryProject, CleanedTranscriptOutput, ReferenceSegmentationOutput, StageEligibility, WorkflowStageStatus } from "@lsf/domain";
 
 export interface ProjectSummary {
   id: string;
@@ -31,6 +31,26 @@ export interface QueueSnapshot {
   concurrency: number;
   running: number;
   jobs: QueueJob[];
+}
+
+export interface CompetitorWorkflowRun {
+  id: string;
+  projectId: string;
+  stageId: "transcript-cleaning" | "reference-segmentation" | "competitor-dna";
+  status: WorkflowStageStatus;
+  runnerId: string;
+  runnerVersion: string;
+  providerId?: string;
+  configuredModelId?: string;
+  returnedModelId?: string;
+  inputArtifactIds: string[];
+  inputFingerprint: string;
+  outputArtifactIds: string[];
+  payloadJson?: Record<string, unknown>;
+  startedAt?: string;
+  finishedAt?: string;
+  safeErrorCategory?: string;
+  safeErrorMessage?: string;
 }
 
 export interface BootstrapData {
@@ -154,17 +174,8 @@ export interface RunTranscriptCleaningInput extends ReferenceMutationInput {}
 export interface TranscriptCleaningArtifact {
   id: string;
   stageRunId?: string;
-  status: "draft" | "needs_review" | "approved" | "rejected" | "stale";
-  payloadJson: {
-    referenceId: string;
-    sourceTranscriptVersionId: string;
-    cleanedTranscript: string;
-    removedSegments: Array<{ text: string; reason: string }>;
-    flaggedSegments: Array<{ text: string; reason: string }>;
-    sourceCharacterCount: number;
-    cleanedCharacterCount: number;
-    warnings: Array<"excessive_content_loss" | "content_expansion">;
-  };
+  status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale";
+  payloadJson: CleanedTranscriptOutput & { warnings: Array<"excessive_content_loss" | "content_expansion"> };
   createdAt: string;
   updatedAt: string;
 }
@@ -172,11 +183,8 @@ export interface TranscriptCleaningArtifact {
 export interface ReferenceSegmentationArtifact {
   id: string;
   stageRunId?: string;
-  status: "draft" | "needs_review" | "approved" | "rejected" | "stale";
-  payloadJson: {
-    referenceId: string;
-    segments: Array<{ id: string; order: number; startCharacter: number; endCharacter: number; type: string; text: string; function: string }>;
-  };
+  status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale";
+  payloadJson: ReferenceSegmentationOutput;
   createdAt: string;
   updatedAt: string;
 }
@@ -184,32 +192,32 @@ export interface ReferenceSegmentationArtifact {
 export interface CompetitorDnaArtifact {
   id: string;
   stageRunId?: string;
-  status: "draft" | "needs_review" | "approved" | "rejected" | "stale";
-  payloadJson: { referenceId: string; hookPattern: { abstraction: string; evidenceSegmentIds: string[] }; promisePattern: { abstraction: string; evidenceSegmentIds: string[] }; reusablePrinciples: string[]; uncertainties: string[] };
+  status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale";
+  payloadJson: CompetitorDnaOutput;
   createdAt: string;
   updatedAt: string;
 }
-export interface OpportunityMapArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { recommendedContentSpaces: Array<{ text: string; confidence: "low" | "medium" | "high" }> }; createdAt: string; updatedAt: string; }
-export interface OriginalityReviewArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { ideaId: string; reviewer: "local_deterministic"; phraseOverlapRisk: number; structuralOverlapRisk: number; thumbnailOverlapRisk: number; conceptOverlapRisk: number; flaggedMatches: string[]; requiredChanges: string[]; status: "pass" | "needs_changes" | "blocked"; competitorDnaArtifactIds: string[] }; createdAt: string; updatedAt: string; }
-export interface ResearchSourcesArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { sources: Array<{ id: string; title: string; url: string; publisher: string; excerpt: string; sourceType: "primary" | "secondary"; publishedAt?: string; notes?: string; localSnapshotReference?: string }> }; createdAt: string; updatedAt: string; }
-export interface ClaimMapArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { claims: Array<{ id: string; text: string; state: string; approvalState: "allowed" | "blocked"; sourceIds: string[] }> }; createdAt: string; updatedAt: string; }
-export interface OutlineArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { sections: Array<{ id: string; purpose: string; keyPoint: string; linkedClaimIds: string[]; estimatedSeconds: number }> }; createdAt: string; updatedAt: string; }
-export interface ScriptArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { sections: Array<{ id: string; outlineSectionId: string; purpose: string; narration: string; estimatedWords: number; estimatedSeconds: number; linkedClaimIds: string[]; dramaticFunction: string; visualOpportunities: string[]; proofObjects: string[]; retentionRisk: "low" | "medium" | "high" }> }; createdAt: string; updatedAt: string; }
-export interface FactReviewArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { reviewer: "local_deterministic"; findings: Array<{ claimId: string; verdict: "supported" | "needs_qualification" | "blocked"; reason: string }> }; createdAt: string; updatedAt: string; }
-export interface RetentionReviewArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { overallVerdict: "pass" | "needs_changes" | "blocked"; findings: Array<{ sectionId: string; severity: "low" | "medium" | "high"; reason: string; recommendedChange: string }> }; createdAt: string; updatedAt: string; }
-export interface ScenePlanArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { fps: number; scenes: Array<{ id: string; scriptSectionId: string; narration: string; purpose: string; startFrame: number; durationFrames: number; visualMode: string; emotionalState: string; requiredAssets: string[]; continuityRefs: string[] }> }; createdAt: string; updatedAt: string; }
-export interface ShotPlanArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { shots: Array<{ id: string; sceneId: string; order: number; startFrame: number; durationFrames: number; fps: number; purpose: string; visualMode: string; framing: string; cameraAngle: string; cameraMovement: string; subjectAction: string }> }; createdAt: string; updatedAt: string; }
-export interface VisualRoutingArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: ShotPlanArtifact["payloadJson"]; createdAt: string; updatedAt: string; }
-export interface PromptPreparationArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { prompts: Array<{ shotId: string; promptVersionId: string; positivePrompt: string; negativePrompt: string; aspectRatio: "16:9" | "9:16"; continuityConstraints: string[]; prohibitedElements: string[] }> }; createdAt: string; updatedAt: string; }
-export interface AssetAcquisitionArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { assets: Array<{ shotId: string; promptVersionId: string; relativeFilePath: string; sha256: string; mimeType: "image/png" | "image/jpeg" | "image/webp"; byteLength: number; width: number; height: number }> }; createdAt: string; updatedAt: string; }
-export interface AssetReviewArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { acquisitionArtifactId: string; assets: Array<{ asset: AssetAcquisitionArtifact["payloadJson"]["assets"][number]; reviewStatus: "needs_review" | "approved" | "rejected"; assignedShotId?: string }> }; createdAt: string; updatedAt: string; }
-export interface VoiceGenerationArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { ttsJobId?: string; requestedProvider?: TtsJobProviderId; mergedRelativeFilePath?: string; timingWarnings?: string[]; segments: Array<{ scriptSectionId: string; relativeFilePath: string; durationSeconds: number; codec: string; byteLength: number; sha256: string; startSeconds?: number; requestedProvider?: TtsJobProviderId; actualProvider?: TtsJobProviderId; voiceId?: string; attemptCount?: number; fallbackUsed?: boolean; fallbackReason?: string; timingOverflowSeconds?: number }> }; createdAt: string; updatedAt: string; }
-export interface SubtitlePreparationArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { fps: number; cues: Array<{ id: string; scriptSectionId: string; startFrame: number; durationFrames: number; text: string }> }; createdAt: string; updatedAt: string; }
-export interface TimelineAssemblyArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: FactoryProject["timeline"]; createdAt: string; updatedAt: string; }
-export interface PreviewRenderArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; relativeFilePath: string; payloadJson: { relativeFilePath: string; durationSeconds: number; width: number; height: number; sha256?: string; inputArtifactIds: string[] }; createdAt: string; updatedAt: string; }
-export interface QaArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { runner: "local_deterministic"; findings: Array<{ code: string; severity: "blocking" | "warning"; message: string; evidence: string }>; inputArtifactIds: string[] }; createdAt: string; updatedAt: string; }
-export interface CapCutDraftArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; payloadJson: { draftName: string; structurallyValidated: true; trackCounts: { video: number; audio: number; text: number }; inputArtifactIds: string[] }; createdAt: string; updatedAt: string; }
-export interface PackagingExportArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "approved" | "rejected" | "stale"; relativeFilePath: string; payloadJson: { relativeFilePath: string; artifactIds: string[]; sha256: string }; createdAt: string; updatedAt: string; }
+export interface OpportunityMapArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { recommendedContentSpaces: Array<{ text: string; confidence: "low" | "medium" | "high" }> }; createdAt: string; updatedAt: string; }
+export interface OriginalityReviewArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { ideaId: string; reviewer: "local_deterministic"; phraseOverlapRisk: number; structuralOverlapRisk: number; thumbnailOverlapRisk: number; conceptOverlapRisk: number; flaggedMatches: string[]; requiredChanges: string[]; status: "pass" | "needs_changes" | "blocked"; competitorDnaArtifactIds: string[] }; createdAt: string; updatedAt: string; }
+export interface ResearchSourcesArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { sources: Array<{ id: string; title: string; url: string; publisher: string; excerpt: string; sourceType: "primary" | "secondary"; publishedAt?: string; notes?: string; localSnapshotReference?: string }> }; createdAt: string; updatedAt: string; }
+export interface ClaimMapArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { claims: Array<{ id: string; text: string; state: string; approvalState: "allowed" | "blocked"; sourceIds: string[] }> }; createdAt: string; updatedAt: string; }
+export interface OutlineArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { sections: Array<{ id: string; purpose: string; keyPoint: string; linkedClaimIds: string[]; estimatedSeconds: number }> }; createdAt: string; updatedAt: string; }
+export interface ScriptArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { sections: Array<{ id: string; outlineSectionId: string; purpose: string; narration: string; estimatedWords: number; estimatedSeconds: number; linkedClaimIds: string[]; dramaticFunction: string; visualOpportunities: string[]; proofObjects: string[]; retentionRisk: "low" | "medium" | "high" }> }; createdAt: string; updatedAt: string; }
+export interface FactReviewArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { reviewer: "local_deterministic"; findings: Array<{ claimId: string; verdict: "supported" | "needs_qualification" | "blocked"; reason: string }> }; createdAt: string; updatedAt: string; }
+export interface RetentionReviewArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { overallVerdict: "pass" | "needs_changes" | "blocked"; findings: Array<{ sectionId: string; severity: "low" | "medium" | "high"; reason: string; recommendedChange: string }> }; createdAt: string; updatedAt: string; }
+export interface ScenePlanArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { fps: number; scenes: Array<{ id: string; scriptSectionId: string; narration: string; purpose: string; startFrame: number; durationFrames: number; visualMode: string; emotionalState: string; requiredAssets: string[]; continuityRefs: string[] }> }; createdAt: string; updatedAt: string; }
+export interface ShotPlanArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { shots: Array<{ id: string; sceneId: string; order: number; startFrame: number; durationFrames: number; fps: number; purpose: string; visualMode: string; framing: string; cameraAngle: string; cameraMovement: string; subjectAction: string }> }; createdAt: string; updatedAt: string; }
+export interface VisualRoutingArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: ShotPlanArtifact["payloadJson"]; createdAt: string; updatedAt: string; }
+export interface PromptPreparationArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { prompts: Array<{ shotId: string; promptVersionId: string; positivePrompt: string; negativePrompt: string; aspectRatio: "16:9" | "9:16"; continuityConstraints: string[]; prohibitedElements: string[] }> }; createdAt: string; updatedAt: string; }
+export interface AssetAcquisitionArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { assets: Array<{ shotId: string; promptVersionId: string; relativeFilePath: string; sha256: string; mimeType: "image/png" | "image/jpeg" | "image/webp"; byteLength: number; width: number; height: number }> }; createdAt: string; updatedAt: string; }
+export interface AssetReviewArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { acquisitionArtifactId: string; assets: Array<{ asset: AssetAcquisitionArtifact["payloadJson"]["assets"][number]; reviewStatus: "needs_review" | "approved" | "rejected"; assignedShotId?: string }> }; createdAt: string; updatedAt: string; }
+export interface VoiceGenerationArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { ttsJobId?: string; requestedProvider?: TtsJobProviderId; mergedRelativeFilePath?: string; timingWarnings?: string[]; segments: Array<{ scriptSectionId: string; relativeFilePath: string; durationSeconds: number; codec: string; byteLength: number; sha256: string; startSeconds?: number; requestedProvider?: TtsJobProviderId; actualProvider?: TtsJobProviderId; voiceId?: string; attemptCount?: number; fallbackUsed?: boolean; fallbackReason?: string; timingOverflowSeconds?: number }> }; createdAt: string; updatedAt: string; }
+export interface SubtitlePreparationArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { fps: number; cues: Array<{ id: string; scriptSectionId: string; startFrame: number; durationFrames: number; text: string }> }; createdAt: string; updatedAt: string; }
+export interface TimelineAssemblyArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: FactoryProject["timeline"]; createdAt: string; updatedAt: string; }
+export interface PreviewRenderArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; relativeFilePath: string; payloadJson: { relativeFilePath: string; subtitleRelativeFilePath?: string; durationSeconds: number; width: number; height: number; sha256?: string; inputArtifactIds: string[] }; createdAt: string; updatedAt: string; }
+export interface QaArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { runner: "local_deterministic"; findings: Array<{ code: string; severity: "blocking" | "warning"; message: string; evidence: string }>; inputArtifactIds: string[] }; createdAt: string; updatedAt: string; }
+export interface CapCutDraftArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { draftName: string; structurallyValidated: true; trackCounts: { video: number; audio: number; text: number }; inputArtifactIds: string[] }; createdAt: string; updatedAt: string; }
+export interface PackagingExportArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; relativeFilePath: string; payloadJson: { relativeFilePath: string; artifactIds: string[]; sha256: string }; createdAt: string; updatedAt: string; }
 
 export interface EditCompetitorReferenceInput extends ReferenceMutationInput {
   sourceUrl?: string;
@@ -315,6 +323,13 @@ export interface ImageModelCertificationResponse { status: "not_tested" | "verif
 
 export interface LongShortFactoryApi {
   bootstrap: () => Promise<BootstrapData>;
+  startProductionPreparation: (input: { projectId: string }) => Promise<FactoryProject>;
+  continueAfterIdeaSelection: (input: { projectId: string; ideaId: string }) => Promise<FactoryProject>;
+  startMediaGeneration: (input: { projectId: string }) => Promise<FactoryProject>;
+  retryScene: (input: { projectId: string; sceneId: string }) => Promise<FactoryProject>;
+  continueAfterSceneReview: (input: { projectId: string }) => Promise<FactoryProject>;
+  renderProductionPreview: (input: { projectId: string }) => Promise<FactoryProject>;
+  continueAfterFinalApproval: (input: { projectId: string }) => Promise<FactoryProject>;
   routeTopic: (input: {
     topic: string;
     description?: string;
@@ -324,11 +339,20 @@ export interface LongShortFactoryApi {
   }) => Promise<ChannelRouteDecision>;
   fixtureProject: (input: {
     topic: string;
+    synthetic?: boolean;
     format: "long" | "short";
     targetLanguage: string;
+    selectedProfileId?: string;
     targetDuration?: string;
     projectName?: string;
     workflowMode?: "guided" | "semi_automatic" | "full_automatic";
+    inputMode?: "topic" | "existing_script" | "reference";
+    aspectRatio?: "16:9" | "9:16" | "1:1";
+    visualStyle?: "vox-documentary";
+    voiceId?: string;
+    outputResolution?: "1080p" | "720p";
+    sourceScript?: string;
+    referenceUrl?: string;
     competitorReference?: {
       sourceUrl?: string;
       pastedTranscript: string;
@@ -375,6 +399,8 @@ export interface LongShortFactoryApi {
   rejectReferenceSet: (input: { projectId: string }) => Promise<FactoryProject>;
   revokeReferenceSetApproval: (input: { projectId: string }) => Promise<FactoryProject>;
   runTranscriptCleaning: (input: RunTranscriptCleaningInput) => Promise<FactoryProject>;
+  listCompetitorWorkflowRuns: (input: { projectId: string; stageId: CompetitorWorkflowRun["stageId"] }) => Promise<CompetitorWorkflowRun[]>;
+  markStageAttention: (input: { projectId: string; stageId: string; referenceId?: string; code: string; message: string }) => Promise<FactoryProject>;
   listTranscriptCleaningArtifacts: (input: RunTranscriptCleaningInput) => Promise<TranscriptCleaningArtifact[]>;
   approveTranscriptCleaning: (input: RunTranscriptCleaningInput) => Promise<FactoryProject>;
   rejectTranscriptCleaning: (input: RunTranscriptCleaningInput) => Promise<FactoryProject>;
@@ -398,6 +424,7 @@ export interface LongShortFactoryApi {
   approveOriginalityReview: (input: { projectId: string }) => Promise<FactoryProject>;
   rejectOriginalityReview: (input: { projectId: string }) => Promise<FactoryProject>;
   saveResearchSources: (input: { projectId: string; sources: ResearchSourcesArtifact["payloadJson"]["sources"] }) => Promise<FactoryProject>;
+  runResearchSourceSearch: (input: { projectId: string }) => Promise<FactoryProject>;
   listResearchSourcesArtifacts: (input: { projectId: string }) => Promise<ResearchSourcesArtifact[]>;
   approveResearchSources: (input: { projectId: string }) => Promise<FactoryProject>;
   rejectResearchSources: (input: { projectId: string }) => Promise<FactoryProject>;
@@ -460,8 +487,9 @@ export interface LongShortFactoryApi {
   listTimelineAssemblyArtifacts: (input: { projectId: string }) => Promise<TimelineAssemblyArtifact[]>;
   approveTimelineAssembly: (input: { projectId: string }) => Promise<FactoryProject>;
   rejectTimelineAssembly: (input: { projectId: string }) => Promise<FactoryProject>;
-  runPreviewRender: (input: { projectId: string }) => Promise<FactoryProject>;
+  runPreviewRender: (input: { projectId: string; force?: boolean }) => Promise<FactoryProject>;
   listPreviewRenderArtifacts: (input: { projectId: string }) => Promise<PreviewRenderArtifact[]>;
+  getPreviewVideoUrl: (input: { projectId: string; artifactId: string }) => Promise<{ url: string }>;
   approvePreviewRender: (input: { projectId: string }) => Promise<FactoryProject>;
   rejectPreviewRender: (input: { projectId: string }) => Promise<FactoryProject>;
   runQa: (input: { projectId: string }) => Promise<FactoryProject>;

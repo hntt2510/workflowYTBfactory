@@ -22,10 +22,11 @@ export async function renderPreview(input: {
   resolution: "1080p-horizontal" | "1080p-vertical";
   visualInputs: Array<{ filePath: string; startFrame: number; durationFrames: number }>;
   audioInputs: Array<{ filePath: string }>;
+  subtitleFilePath?: string;
   ffmpegPath?: string;
   ffprobePath?: string;
 }) {
-  if ([...input.visualInputs, ...input.audioInputs].some((item) => !existsSync(item.filePath))) throw new PreviewRenderError("missing_media", "An approved preview input file is missing.");
+  if ([...input.visualInputs, ...input.audioInputs, ...(input.subtitleFilePath ? [{ filePath: input.subtitleFilePath }] : [])].some((item) => !existsSync(item.filePath))) throw new PreviewRenderError("missing_media", "An approved preview input file is missing.");
   const command = planFfmpegPreviewCommand(input);
   try { await execFileAsync(command[0]!, command.slice(1), { encoding: "utf8", timeout: 10 * 60_000, windowsHide: true }); }
   catch { throw new PreviewRenderError("ffmpeg_failed", "FFmpeg preview render failed."); }

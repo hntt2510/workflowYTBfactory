@@ -60,6 +60,13 @@ function webFallback(): LongShortFactoryApi {
         runtime: browserRuntime
       };
     },
+    async startProductionPreparation(): Promise<FactoryProject> { throw new Error("Production orchestration requires Electron main process."); },
+    async continueAfterIdeaSelection(): Promise<FactoryProject> { throw new Error("Production orchestration requires Electron main process."); },
+    async startMediaGeneration(): Promise<FactoryProject> { throw new Error("Production orchestration requires Electron main process."); },
+    async retryScene(): Promise<FactoryProject> { throw new Error("Production orchestration requires Electron main process."); },
+    async continueAfterSceneReview(): Promise<FactoryProject> { throw new Error("Production orchestration requires Electron main process."); },
+    async renderProductionPreview(): Promise<FactoryProject> { throw new Error("Production orchestration requires Electron main process."); },
+    async continueAfterFinalApproval(): Promise<FactoryProject> { throw new Error("Production orchestration requires Electron main process."); },
     async routeTopic(input): Promise<ChannelRouteDecision> {
       return routeChannelProfile(seedChannelProfiles, input);
     },
@@ -215,6 +222,23 @@ function webFallback(): LongShortFactoryApi {
     async runTranscriptCleaning(): Promise<FactoryProject> {
       throw new Error("Electron main process unavailable.");
     },
+    async listCompetitorWorkflowRuns() {
+      return [];
+    },
+    async markStageAttention(input): Promise<FactoryProject> {
+      const project = projects.find((item) => item.id === input.projectId);
+      if (!project) throw new Error("Project not found.");
+      const updated = {
+        ...project,
+        stages: project.stages.map((stage) => stage.id === input.stageId ? {
+          ...stage,
+          status: "needs_attention" as const,
+          attention: { code: input.code, message: input.message, actions: [] }
+        } : stage)
+      };
+      projects = projects.map((item) => item.id === updated.id ? updated : item);
+      return updated;
+    },
     async listTranscriptCleaningArtifacts() {
       return [];
     },
@@ -282,6 +306,7 @@ function webFallback(): LongShortFactoryApi {
       throw new Error("Electron main process unavailable.");
     },
     async saveResearchSources(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async runResearchSourceSearch(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async listResearchSourcesArtifacts() { return []; },
     async approveResearchSources(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async rejectResearchSources(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
@@ -346,6 +371,7 @@ function webFallback(): LongShortFactoryApi {
     async rejectTimelineAssembly(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async runPreviewRender(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async listPreviewRenderArtifacts() { return []; },
+    async getPreviewVideoUrl(): Promise<{ url: string }> { throw new Error("Electron main process unavailable."); },
     async approvePreviewRender(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async rejectPreviewRender(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async runQa(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },

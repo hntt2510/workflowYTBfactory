@@ -28,6 +28,8 @@ import {
   , subtitlePreparationOutputSchema
   , timelineAssemblyOutputSchema
   , previewRenderRequestSchema
+  , previewMediaRequestSchema
+  , previewMediaUrlResponseSchema
   , previewRenderOutputSchema
   , previewRenderArtifactResponseSchema
   , previewRenderArtifactsResponseSchema
@@ -86,6 +88,20 @@ describe("ipc schemas", () => {
     expect(() => previewRenderOutputSchema.parse({ relativeFilePath: "C:/outside.mp4", durationSeconds: 1, width: 1920, height: 1080, inputArtifactIds: ["artifact-1", "artifact-2", "artifact-3"] })).toThrow();
     expect(() => previewRenderOutputSchema.parse({ relativeFilePath: "/outside.mp4", durationSeconds: 1, width: 1920, height: 1080, inputArtifactIds: ["artifact-1", "artifact-2", "artifact-3"] })).toThrow();
     expect(() => previewRenderOutputSchema.parse({ relativeFilePath: "file:///outside.mp4", durationSeconds: 1, width: 1920, height: 1080, inputArtifactIds: ["artifact-1", "artifact-2", "artifact-3"] })).toThrow();
+  });
+
+  it("accepts subtitle-backed preview renders and safe media requests", () => {
+    expect(previewRenderRequestSchema.parse({ projectId: "project-1", force: true }).force).toBe(true);
+    expect(previewRenderOutputSchema.parse({
+      relativeFilePath: "previews/project-1/render.mp4",
+      subtitleRelativeFilePath: "previews/project-1/render.srt",
+      durationSeconds: 2,
+      width: 1920,
+      height: 1080,
+      inputArtifactIds: ["artifact-1", "artifact-2", "artifact-3", "artifact-4"]
+    }).subtitleRelativeFilePath).toContain("render.srt");
+    expect(previewMediaRequestSchema.parse({ projectId: "project-1", artifactId: "artifact-1" }).artifactId).toBe("artifact-1");
+    expect(previewMediaUrlResponseSchema.parse({ url: "lsf-media://preview/token" }).url).toContain("lsf-media://");
   });
 
   it("validates workflow and reference status contracts", () => {
@@ -230,20 +246,42 @@ describe("ipc schemas", () => {
     expect(cleanedTranscriptOutputSchema.parse({
       referenceId: "reference-1",
       sourceTranscriptVersionId: "reference-1",
-      cleanedTranscript: transcript,
-      removedSegments: [],
-      flaggedSegments: [],
-      sourceCharacterCount: transcript.length,
-      cleanedCharacterCount: transcript.length
-    }).cleanedTranscript).toBe(transcript);
-    expect(() => cleanedTranscriptOutputSchema.parse({
-      referenceId: "reference-1",
-      sourceTranscriptVersionId: "reference-1",
+      rawTranscript: transcript,
       cleanedTranscript: transcript,
       removedSegments: [],
       flaggedSegments: [],
       sourceCharacterCount: transcript.length,
       cleanedCharacterCount: transcript.length,
+      execution: {
+        mode: "single_request",
+        chunkCount: 1,
+        completedChunkCount: 1,
+        estimatedInputTokens: 4,
+        selectedModel: "cleaner-v1",
+        configuredTimeoutMs: 120000,
+        removedNoise: 0,
+        flaggedSegmentCount: 0
+      }
+    }).cleanedTranscript).toBe(transcript);
+    expect(() => cleanedTranscriptOutputSchema.parse({
+      referenceId: "reference-1",
+      sourceTranscriptVersionId: "reference-1",
+      rawTranscript: transcript,
+      cleanedTranscript: transcript,
+      removedSegments: [],
+      flaggedSegments: [],
+      sourceCharacterCount: transcript.length,
+      cleanedCharacterCount: transcript.length,
+      execution: {
+        mode: "single_request",
+        chunkCount: 1,
+        completedChunkCount: 1,
+        estimatedInputTokens: 4,
+        selectedModel: "cleaner-v1",
+        configuredTimeoutMs: 120000,
+        removedNoise: 0,
+        flaggedSegmentCount: 0
+      },
       unexpected: true
     })).toThrow();
   });

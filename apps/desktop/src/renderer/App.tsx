@@ -1,8 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Plus, Sparkles, Trash2 } from "lucide-react";
-import type { ChannelProfile, ChannelRouteDecision, FactoryProject, StageEligibility, WorkflowStageStatus } from "@lsf/domain";
-import { resolveStageEligibilities, seedChannelProfiles, workflowStageDefinitions } from "@lsf/domain";
+import type { ChannelProfile, ChannelRouteDecision, FactoryProject, ProductionStatus, StageEligibility, WorkflowStageStatus } from "@lsf/domain";
+import { productionStatusLabel, resolveProductionStatus, resolveStageEligibilities, seedChannelProfiles, workflowStageDefinitions } from "@lsf/domain";
 import { factoryClient } from "./services/factoryClient";
 import { allRoutes, type RouteId } from "./navigation";
 import { DataTable, DisabledAction, EmptyState, FormField, MetricCard, PageHeader, ScoreBar, SectionCard, StatusBadge, TagList } from "./components/ui";
@@ -18,8 +18,6 @@ import type {
   TextModelCertificationResponse,
   TextModelCertificationStatus,
   OriginalityReviewArtifact,
-  ResearchSourcesArtifact,
-  ClaimMapArtifact,
   OutlineArtifact,
   ScriptArtifact,
   FactReviewArtifact,
@@ -41,13 +39,42 @@ import type {
   TranscriptCleaningArtifact,
   ReferenceSegmentationArtifact,
   CompetitorDnaArtifact,
+  CompetitorWorkflowRun,
   OpportunityMapArtifact
   , TtsProviderCatalog, TtsProviderId, TtsJob
 } from "./types";
 import { currentStage, estimatedDuration, formatDate, formatTimecode, projectProgress, queueCounts, stageTone } from "./utils";
 import { certificationTone, imageCertificationLabel, textCertificationLabel } from "./certificationLabels";
+import { hasSemiAutomaticAttention, nextSemiAutomaticChain, type SemiAutomaticChain, type SemiAutomaticProgress } from "./semiAutomaticWorkflow";
 import { AppShell, LoadingScreen } from "./layouts/AppShell";
 import "./styles.css";
+
+const competitorWorkflowStageIds: CompetitorWorkflowRun["stageId"][] = ["transcript-cleaning", "reference-segmentation", "competitor-dna"];
+
+async function loadCompetitorWorkflowRuns(projectId: string): Promise<CompetitorWorkflowRun[]> {
+  const runs = await Promise.all(competitorWorkflowStageIds.map((stageId) => factoryClient.listCompetitorWorkflowRuns({ projectId, stageId })));
+  return runs.flat().sort((left, right) => (right.startedAt ?? "").localeCompare(left.startedAt ?? ""));
+}
+
+function chunkProgressLabel(run: CompetitorWorkflowRun): string {
+  const chunks = run.payloadJson?.chunks;
+  const persistedTotal = run.payloadJson?.chunkCount;
+  const firstChunk = Array.isArray(chunks) ? chunks.find((chunk) => typeof chunk === "object" && chunk !== null && "totalChunks" in chunk) : undefined;
+  const total = typeof persistedTotal === "number" && persistedTotal > 0
+    ? persistedTotal
+    : typeof firstChunk === "object" && firstChunk !== null && "totalChunks" in firstChunk && typeof firstChunk.totalChunks === "number"
+      ? firstChunk.totalChunks
+      : Array.isArray(chunks) && chunks.length > 0 ? chunks.length : 0;
+  if (!total) return "-";
+  const completed = Array.isArray(chunks) ? chunks.filter((chunk) => typeof chunk === "object" && chunk !== null && "status" in chunk && chunk.status === "completed").length : 0;
+  const failed = Array.isArray(chunks) ? chunks.filter((chunk) => typeof chunk === "object" && chunk !== null && "status" in chunk && chunk.status === "failed") : [];
+  const failedLabel = failed.length ? `, failed chunk ${(failed[0] as { chunkIndex?: unknown }).chunkIndex ?? "?"}` : "";
+  return `${completed}/${total} chunks completed${failedLabel}`;
+}
+
+function workflowStageLabel(stageId: CompetitorWorkflowRun["stageId"]): string {
+  return stageId === "transcript-cleaning" ? "Transcript Cleaning" : stageId === "reference-segmentation" ? "Reference Segmentation" : "Competitor DNA";
+}
 
 const fallbackBootstrap: BootstrapData = {
   profiles: seedChannelProfiles,
@@ -93,9 +120,9 @@ const languageOptions = [
 ];
 
 const workflowModeOptions: Array<{ value: "guided" | "semi_automatic" | "full_automatic"; label: string; detail: string }> = [
-  { value: "guided", label: "Guided", detail: "Approval required at every stage." },
-  { value: "semi_automatic", label: "Semi-automatic", detail: "Automatic drafts; paid/media actions require approval." },
-  { value: "full_automatic", label: "Full automatic", detail: "Uses configured providers and approval policy." }
+  { value: "guided", label: "Advanced guided", detail: "Expose every internal stage for debugging." },
+  { value: "semi_automatic", label: "Simple production", detail: "Runs valid internal stages automatically and pauses only at user checkpoints." },
+  { value: "full_automatic", label: "Full automatic", detail: "Not implemented yet; use Guided mode for manual execution." }
 ];
 
 function defaultTargetDuration(format: "long" | "short"): string {
@@ -121,6 +148,11 @@ function App() {
   const [localTtsSettings, setLocalTtsSettings] = useState<LocalTtsSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [semiAutomaticProgress, setSemiAutomaticProgress] = useState<SemiAutomaticProgress | null>(null);
+  const [semiAutomaticError, setSemiAutomaticError] = useState<string | null>(null);
+  const [semiAutomaticRunning, setSemiAutomaticRunning] = useState(false);
+  const semiAutomaticRunLock = useRef(false);
+  const automaticResumeAttemptedProjects = useRef(new Set<string>());
 
   async function refresh() {
     const data = await factoryClient.bootstrap();
@@ -158,10 +190,38 @@ function App() {
   }, [route]);
 
   async function openProject(projectId: string) {
+    setSemiAutomaticError(null);
+    setSemiAutomaticProgress(null);
     const project = await factoryClient.loadProject(projectId);
     setSelectedProject(project);
-    setRoute(project ? "project-overview" : "projects");
+    if (!project) {
+      setRoute("projects");
+      return;
+    }
+    automaticResumeAttemptedProjects.current.delete(project.id);
+    const nextChain = nextSemiAutomaticChain(project);
+    if (nextChain && !hasSemiAutomaticAttention(project)) {
+      automaticResumeAttemptedProjects.current.add(project.id);
+      setRoute("production");
+      void startSemiAutomatic(nextChain, project);
+      return;
+    }
+    const attentionStage = project.stages.find((stage) => stage.status === "needs_attention" || stage.status === "failed");
+    if (attentionStage) {
+      setRoute(nextChain ? "project-overview" : stageRoute(attentionStage.id));
+      return;
+    }
+    const checkpointRoute = project.stages.find((stage) => stage.status === "needs_review")?.id;
+    setRoute(checkpointRoute === "asset-review" ? "scene-review" : checkpointRoute === "preview-render" || checkpointRoute === "qa" ? "final-preview" : "production");
   }
+
+  useEffect(() => {
+    if (loading || !selectedProject || selectedProject.setup.workflowMode !== "semi_automatic" || semiAutomaticRunLock.current) return;
+    const nextChain = nextSemiAutomaticChain(selectedProject);
+    if (!nextChain || hasSemiAutomaticAttention(selectedProject) || automaticResumeAttemptedProjects.current.has(selectedProject.id)) return;
+    automaticResumeAttemptedProjects.current.add(selectedProject.id);
+    void startSemiAutomatic(nextChain, selectedProject);
+  }, [loading, selectedProject]);
 
   async function deleteProject(projectId: string) {
     if (!window.confirm("Delete this project from SQLite? Workspace files are not removed.")) return;
@@ -174,9 +234,17 @@ function App() {
     topic: string;
     format: "long" | "short";
     targetLanguage: string;
+    selectedProfileId?: string;
     targetDuration?: string;
     projectName?: string;
     workflowMode?: "guided" | "semi_automatic" | "full_automatic";
+    inputMode?: "topic" | "existing_script" | "reference";
+    aspectRatio?: "16:9" | "9:16" | "1:1";
+    visualStyle?: "vox-documentary";
+    voiceId?: string;
+    outputResolution?: "1080p" | "720p";
+    sourceScript?: string;
+    referenceUrl?: string;
     competitorReference?: {
       sourceUrl?: string;
       pastedTranscript: string;
@@ -186,7 +254,48 @@ function App() {
     const project = await factoryClient.fixtureProject(input);
     setSelectedProject(project);
     await refresh();
-    setRoute("reference-intake");
+    setRoute("production");
+  }
+
+  async function startSemiAutomatic(chain: SemiAutomaticChain, project: FactoryProject): Promise<void> {
+    if (project.setup.workflowMode !== "semi_automatic" || semiAutomaticRunning || semiAutomaticRunLock.current) return;
+    semiAutomaticRunLock.current = true;
+    setSemiAutomaticRunning(true);
+    setSemiAutomaticError(null);
+    try {
+      setSemiAutomaticProgress({ chain, completed: 0, total: 1, stageId: "production-orchestrator", message: "Running trusted production orchestration." });
+      let result = chain === "reference"
+        ? await factoryClient.startProductionPreparation({ projectId: project.id })
+        : chain === "idea"
+          ? project.approvedIdeaId
+            ? await factoryClient.continueAfterIdeaSelection({ projectId: project.id, ideaId: project.approvedIdeaId })
+            : project.setup.inputMode === "existing_script"
+              ? await factoryClient.continueAfterIdeaSelection({ projectId: project.id, ideaId: "existing-script" })
+              : await factoryClient.startProductionPreparation({ projectId: project.id })
+          : chain === "assets"
+            ? await factoryClient.startMediaGeneration({ projectId: project.id })
+            : await factoryClient.continueAfterFinalApproval({ projectId: project.id });
+      if (chain === "reference" && result.setup.inputMode === "existing_script") {
+        result = await factoryClient.continueAfterIdeaSelection({ projectId: project.id, ideaId: "existing-script" });
+      }
+      setSemiAutomaticProgress({ chain, completed: 1, total: 1, stageId: "production-orchestrator", message: "Production orchestration completed this phase." });
+      setSelectedProject(result);
+      const checkpoint = result.stages.find((stage) => stage.status === "needs_review");
+      setRoute(checkpoint ? stageRoute(checkpoint.id) : chain === "reference" ? "idea-lab" : chain === "idea" ? "visuals" : chain === "assets" ? "timeline" : "export");
+    } catch (reason) {
+      setSemiAutomaticError(reason instanceof Error ? reason.message : String(reason));
+      const persisted = await factoryClient.loadProject(project.id).catch(() => null);
+      if (persisted) {
+        setSelectedProject(persisted);
+        const attentionStage = persisted.stages.find((stage) => stage.status === "needs_attention" || stage.status === "failed");
+        const retryChain = nextSemiAutomaticChain(persisted);
+        if (retryChain && !hasSemiAutomaticAttention(persisted)) setRoute("project-overview");
+        else if (attentionStage) setRoute(stageRoute(attentionStage.id));
+      }
+    } finally {
+      semiAutomaticRunLock.current = false;
+      setSemiAutomaticRunning(false);
+    }
   }
 
   const profiles = bootstrap.profiles;
@@ -211,6 +320,13 @@ function App() {
             <strong>Application bootstrap failed</strong>
             <p>{error}</p>
           </div>
+        </SectionCard>
+      ) : null}
+      {semiAutomaticProgress ? (
+        <SectionCard title="Semi-automatic workflow" description="Intermediate stages run sequentially and stop at the next human checkpoint or the first blocking finding.">
+          <p>{semiAutomaticProgress.message}</p>
+          <p className="muted">{semiAutomaticProgress.completed}/{semiAutomaticProgress.total} stages completed · {semiAutomaticProgress.stageId}</p>
+          {semiAutomaticError ? <p className="error-message">{semiAutomaticError}</p> : null}
         </SectionCard>
       ) : null}
       {loading ? <LoadingScreen /> : null}
@@ -240,6 +356,7 @@ function App() {
           setTextCertification={setTextCertification}
           setImageCertification={setImageCertification}
           setLocalTtsSettings={setLocalTtsSettings}
+          startSemiAutomatic={startSemiAutomatic}
         />
       ) : null}
     </AppShell>
@@ -266,9 +383,17 @@ function RouteScreen(props: {
     topic: string;
     format: "long" | "short";
     targetLanguage: string;
+    selectedProfileId?: string;
     targetDuration?: string;
     projectName?: string;
     workflowMode?: "guided" | "semi_automatic" | "full_automatic";
+    inputMode?: "topic" | "existing_script" | "reference";
+    aspectRatio?: "16:9" | "9:16" | "1:1";
+    visualStyle?: "vox-documentary";
+    voiceId?: string;
+    outputResolution?: "1080p" | "720p";
+    sourceScript?: string;
+    referenceUrl?: string;
     competitorReference?: {
       sourceUrl?: string;
       pastedTranscript: string;
@@ -283,10 +408,11 @@ function RouteScreen(props: {
   setTextCertification: (certification: TextModelCertificationResponse) => void;
   setImageCertification: (certification: ImageModelCertificationResponse) => void;
   setLocalTtsSettings: (settings: LocalTtsSettings | null) => void;
+  startSemiAutomatic: (chain: SemiAutomaticChain, project: FactoryProject) => Promise<void>;
 }) {
   if (props.route === "dashboard") return <Dashboard {...props} />;
   if (props.route === "projects") return <ProjectsScreen {...props} />;
-  if (props.route === "new-project") return <NewProjectWizard {...props} />;
+  if (props.route === "create" || props.route === "new-project") return props.route === "create" ? <SimpleCreateScreen {...props} /> : <NewProjectWizard {...props} />;
   if (props.route === "channel-profiles") return <ChannelProfilesScreen profiles={props.profiles} />;
   if (props.route === "production-queue") return <QueueScreen queue={props.bootstrap.queue} selectedProject={props.selectedProject} onRunDemo={props.onRefresh} />;
   if (props.route === "asset-library") return <AssetLibraryScreen selectedProject={props.selectedProject} />;
@@ -302,17 +428,20 @@ function RouteScreen(props: {
       />
     );
   }
+  if (props.route === "production") return <ProductionScreen project={props.selectedProject} setRoute={props.setRoute} startSemiAutomatic={props.startSemiAutomatic} />;
+  if (props.route === "scene-review") return <SceneReviewScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} />;
+  if (props.route === "final-preview") return <FinalPreviewScreen project={props.selectedProject} localTtsSettings={props.localTtsSettings} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} startSemiAutomatic={props.startSemiAutomatic} />;
+  if (props.route === "advanced-pipeline") return <AdvancedPipelineScreen project={props.selectedProject} setRoute={props.setRoute} />;
   if (props.route === "project-overview") return <ProjectOverview {...props} selectedProject={props.selectedProject} />;
-  if (props.route === "reference-intake") return <ReferenceIntakeScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} />;
-  if (props.route === "competitor-dna") return <CompetitorDnaScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} textCertification={props.textCertification} />;
-  if (props.route === "idea-lab") return <IdeaLabScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} textCertification={props.textCertification} />;
-  if (props.route === "research-claims") return <ClaimsScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} textCertification={props.textCertification} />;
+  if (props.route === "reference-intake") return <ReferenceIntakeScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} startSemiAutomatic={props.startSemiAutomatic} />;
+  if (props.route === "competitor-dna") return <CompetitorDnaScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} textCertification={props.textCertification} startSemiAutomatic={props.startSemiAutomatic} />;
+  if (props.route === "idea-lab") return <IdeaLabScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} textCertification={props.textCertification} startSemiAutomatic={props.startSemiAutomatic} />;
   if (props.route === "script") return <ScriptScreen project={props.selectedProject} selectedProfile={props.selectedProfile} setSelectedProject={props.setSelectedProject} textCertification={props.textCertification} />;
   if (props.route === "scenes") return <ScenesScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} textCertification={props.textCertification} />;
   if (props.route === "shots") return <ShotsScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} textCertification={props.textCertification} />;
-  if (props.route === "visuals") return <VisualsScreen project={props.selectedProject} imageCertification={props.imageCertification} setSelectedProject={props.setSelectedProject} setImageCertification={props.setImageCertification} />;
+  if (props.route === "visuals") return <VisualsScreen project={props.selectedProject} textCertification={props.textCertification} imageCertification={props.imageCertification} setSelectedProject={props.setSelectedProject} setImageCertification={props.setImageCertification} startSemiAutomatic={props.startSemiAutomatic} />;
   if (props.route === "voice") return <VoiceScreen project={props.selectedProject} localTtsSettings={props.localTtsSettings} onRefresh={props.onRefresh} setSelectedProject={props.setSelectedProject} />;
-  if (props.route === "timeline") return <TimelineScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} />;
+  if (props.route === "timeline") return <TimelineScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} startSemiAutomatic={props.startSemiAutomatic} />;
   if (props.route === "qa") return <QaScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} />;
   return <ExportScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} />;
 }
@@ -333,8 +462,8 @@ function Dashboard(props: {
         description="Local AI-assisted YouTube production workspace."
         actions={
           <>
-            <button className="button primary" type="button" onClick={() => props.setRoute("new-project")}>
-              <Plus size={16} /> New Project
+            <button className="button primary" type="button" onClick={() => props.setRoute("create")}>
+              <Plus size={16} /> Create Video Project
             </button>
             <button className="button secondary" type="button" onClick={() => props.setRoute("projects")}>Open Project</button>
             <DisabledAction reason="Project ZIP import is not implemented.">Import Project</DisabledAction>
@@ -448,7 +577,7 @@ function ProjectsScreen(props: {
       <PageHeader
         title="Projects"
         description="Create, open, and manage SQLite-backed local projects."
-        actions={<button className="button primary" type="button" onClick={() => props.setRoute("new-project")}><Plus size={16} /> New Project</button>}
+        actions={<button className="button primary" type="button" onClick={() => props.setRoute("create")}><Plus size={16} /> Create Video Project</button>}
       />
       <SectionCard>
         {props.projectSummaries.length === 0 ? (
@@ -491,6 +620,307 @@ function ProjectsScreen(props: {
       </SectionCard>
     </>
   );
+}
+
+function SimpleCreateScreen(props: {
+  profiles: ChannelProfile[];
+  localTtsSettings: LocalTtsSettings | null;
+  setRoute: (route: RouteId) => void;
+  onCreateProject: (input: {
+    topic: string;
+    format: "long" | "short";
+    targetLanguage: string;
+    selectedProfileId?: string;
+    targetDuration?: string;
+    projectName?: string;
+    workflowMode?: "guided" | "semi_automatic" | "full_automatic";
+    inputMode?: "topic" | "existing_script" | "reference";
+    aspectRatio?: "16:9" | "9:16" | "1:1";
+    visualStyle?: "vox-documentary";
+    voiceId?: string;
+    outputResolution?: "1080p" | "720p";
+    sourceScript?: string;
+    referenceUrl?: string;
+    competitorReference?: { sourceUrl?: string; pastedTranscript: string; notes?: string };
+  }) => Promise<void>;
+}) {
+  const [inputMode, setInputMode] = useState<"topic" | "existing_script" | "reference">("topic");
+  const [topic, setTopic] = useState("");
+  const [script, setScript] = useState("");
+  const [referenceUrl, setReferenceUrl] = useState("");
+  const [referenceTranscript, setReferenceTranscript] = useState("");
+  const [notes, setNotes] = useState("");
+  const [profileId, setProfileId] = useState(props.profiles[0]?.id ?? "");
+  const [language, setLanguage] = useState(props.profiles[0]?.language ?? "Vietnamese");
+  const [duration, setDuration] = useState("45-60 seconds");
+  const [aspectRatio, setAspectRatio] = useState<"16:9" | "9:16" | "1:1">("16:9");
+  const [voiceId, setVoiceId] = useState("");
+  const [resolution, setResolution] = useState<"1080p" | "720p">("1080p");
+  const [workflowMode, setWorkflowMode] = useState<"guided" | "semi_automatic">("semi_automatic");
+  const [catalog, setCatalog] = useState<TtsProviderCatalog | null>(null);
+  const [message, setMessage] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void factoryClient.listTtsProviders({ language })
+      .then((result) => { if (!cancelled) setCatalog(result); })
+      .catch(() => { if (!cancelled) setCatalog(null); });
+    return () => { cancelled = true; };
+  }, [language]);
+
+  const voices = (catalog?.voices ?? []).filter((voice) => voice.enabled && !voice.experimental);
+  const configuredVoice = props.localTtsSettings?.available && props.localTtsSettings.ttsVoiceId
+    ? [{ key: `configured:${props.localTtsSettings.ttsVoiceId}`, label: `Configured voice (${props.localTtsSettings.ttsVoiceId})` }]
+    : [];
+  const voiceOptions = voices.length ? voices.map((voice) => ({ key: voice.key, label: voice.label })) : configuredVoice;
+  const contentReady = inputMode === "topic" ? topic.trim().length > 0 : inputMode === "existing_script" ? script.trim().length > 0 : referenceTranscript.trim().length > 0;
+
+  async function create(): Promise<void> {
+    setMessage("");
+    if (!contentReady) {
+      setMessage(inputMode === "topic" ? "Enter a topic to continue." : inputMode === "existing_script" ? "Paste an existing script to continue." : "Paste a reference transcript to continue.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const title = inputMode === "topic" ? topic.trim() : inputMode === "existing_script" ? "Existing script project" : "Reference project";
+      await props.onCreateProject({
+        topic: title,
+        projectName: title.slice(0, 120),
+        format: aspectRatio === "9:16" ? "short" : "long",
+        targetLanguage: language,
+        ...(profileId ? { selectedProfileId: profileId } : {}),
+        targetDuration: duration,
+        workflowMode,
+        inputMode,
+        aspectRatio,
+        visualStyle: "vox-documentary",
+        ...(voiceId ? { voiceId: voiceId.startsWith("configured:") ? voiceId.slice("configured:".length) : voiceId } : {}),
+        outputResolution: resolution,
+        ...(inputMode === "existing_script" ? { sourceScript: script } : {}),
+        ...(inputMode === "reference" ? {
+          ...(referenceUrl.trim() ? { referenceUrl: referenceUrl.trim() } : {}),
+          competitorReference: { ...(referenceUrl.trim() ? { sourceUrl: referenceUrl.trim() } : {}), pastedTranscript: referenceTranscript, ...(notes.trim() ? { notes: notes.trim() } : {}) }
+        } : {})
+      });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <PageHeader title="Create Video Project" description="Choose the source, VOX Documentary style, an available voice, and output settings. Internal production stages run automatically when valid." />
+      <div className="form-grid">
+        <FormField label="Input mode" htmlFor="simple-input-mode">
+          <select id="simple-input-mode" value={inputMode} onChange={(event) => setInputMode(event.target.value as typeof inputMode)}>
+            <option value="topic">Topic</option>
+            <option value="existing_script">Existing Script</option>
+            <option value="reference">Reference</option>
+          </select>
+        </FormField>
+        <FormField label="Channel profile" htmlFor="simple-channel-profile">
+          <select id="simple-channel-profile" value={profileId} onChange={(event) => setProfileId(event.target.value)}>
+            {props.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Language" htmlFor="simple-language">
+          <select id="simple-language" value={language} onChange={(event) => setLanguage(event.target.value)}>
+            {languageOptions.filter((option) => option !== "Custom").map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Target duration" htmlFor="simple-duration">
+          <select id="simple-duration" value={duration} onChange={(event) => setDuration(event.target.value)}>
+            {['30-45 seconds', '45-60 seconds', '60-90 seconds', '2-3 minutes', '5-8 minutes', 'Custom'].map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Aspect ratio" htmlFor="simple-aspect-ratio">
+          <select id="simple-aspect-ratio" value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value as typeof aspectRatio)}>
+            <option value="16:9">16:9</option><option value="9:16">9:16</option><option value="1:1">1:1</option>
+          </select>
+        </FormField>
+        <FormField label="Visual style" htmlFor="simple-visual-style">
+          <select id="simple-visual-style" value="vox-documentary" disabled><option value="vox-documentary">VOX Documentary</option></select>
+        </FormField>
+        <FormField label="Voice" htmlFor="simple-voice" hint={voiceOptions.length ? "Available configured voices only." : "No available voice preset was detected. The project will need attention before voice generation."}>
+          <select id="simple-voice" value={voiceId} onChange={(event) => setVoiceId(event.target.value)}>
+            <option value="">Choose an available voice</option>
+            {voiceOptions.map((voice) => <option key={voice.key} value={voice.key}>{voice.label}</option>)}
+          </select>
+        </FormField>
+        <FormField label="Output resolution" htmlFor="simple-resolution">
+          <select id="simple-resolution" value={resolution} onChange={(event) => setResolution(event.target.value as typeof resolution)}><option value="1080p">1080p</option><option value="720p">720p</option></select>
+        </FormField>
+        <FormField label="Workflow mode" htmlFor="simple-workflow-mode">
+          <select id="simple-workflow-mode" value={workflowMode} onChange={(event) => setWorkflowMode(event.target.value as typeof workflowMode)}><option value="semi_automatic">Simple production</option><option value="guided">Advanced guided</option></select>
+        </FormField>
+      </div>
+      <SectionCard title="Source material" description="Free-form text is limited to your topic, script, reference, and production notes.">
+        {inputMode === "topic" ? <FormField label="Topic" htmlFor="simple-topic"><textarea id="simple-topic" value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="What should the video explain?" /></FormField> : null}
+        {inputMode === "existing_script" ? <FormField label="Existing script" htmlFor="simple-script"><textarea id="simple-script" value={script} onChange={(event) => setScript(event.target.value)} placeholder="Paste your script here" /></FormField> : null}
+        {inputMode === "reference" ? <div className="form-grid"><FormField label="Reference URL" htmlFor="simple-reference-url"><input id="simple-reference-url" value={referenceUrl} onChange={(event) => setReferenceUrl(event.target.value)} placeholder="Optional source URL" /></FormField><FormField label="Reference transcript" htmlFor="simple-reference-transcript"><textarea id="simple-reference-transcript" value={referenceTranscript} onChange={(event) => setReferenceTranscript(event.target.value)} placeholder="Paste the competitor transcript/reference" /></FormField><FormField label="Notes" htmlFor="simple-reference-notes"><textarea id="simple-reference-notes" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional notes" /></FormField></div> : null}
+      </SectionCard>
+      {message ? <p className="error-message">{message}</p> : null}
+      <div className="button-row"><button className="button primary" type="button" disabled={saving || !contentReady} onClick={() => void create()}>{saving ? "Creating..." : "Create Video Project"}</button><button className="button secondary" type="button" onClick={() => props.setRoute("projects")}>Cancel</button></div>
+    </>
+  );
+}
+
+function ProductionScreen(props: { project: FactoryProject; setRoute: (route: RouteId) => void; startSemiAutomatic: (chain: SemiAutomaticChain, project: FactoryProject) => Promise<void> }) {
+  const status = resolveProductionStatus(props.project);
+  const nextChain = nextSemiAutomaticChain(props.project);
+  const nextRoute = status === "waiting_for_idea" ? "idea-lab" : status === "needs_scene_review" ? "scene-review" : status === "needs_final_review" ? "final-preview" : "advanced-pipeline";
+  return <><PageHeader eyebrow="Production" title="Preparing your video" description="The application runs internal workflow stages automatically and brings you back only when your input is needed." actions={nextChain ? <button className="button primary" type="button" onClick={() => void props.startSemiAutomatic(nextChain, props.project)}>Continue production</button> : <button className="button secondary" type="button" onClick={() => props.setRoute(nextRoute)}>Open next step</button>} /><section className="metric-grid"><MetricCard label="Production status" value={productionStatusLabel(status)} tone={status === "needs_attention" || status === "failed" ? "warning" : status === "completed" ? "success" : "info"} /><MetricCard label="Input mode" value={props.project.setup.inputMode ?? "topic"} /><MetricCard label="Style" value="VOX Documentary" /><MetricCard label="Scenes" value={props.project.scenes.length} /></section><SectionCard title="What happens next" description={status === "needs_attention" ? "A persisted internal failure needs an explicit action before production can continue." : "Non-blocking internal stages remain hidden from the default production path."}><StatusBadge tone={status === "needs_attention" || status === "failed" ? "danger" : "info"}>{productionStatusLabel(status)}</StatusBadge><p>{status === "waiting_for_idea" ? "Choose one idea to set the creative direction." : status === "needs_scene_review" ? "Review scenes and regenerate only the ones that need changes." : status === "needs_final_review" ? "Review the real preview before exporting." : status === "completed" ? "Your project is complete." : status === "needs_attention" || status === "failed" ? "Open Advanced Pipeline Details to see the safe reason and retry action." : "Content preparation and production are in progress."}</p></SectionCard><AdvancedPipelineDetails project={props.project} setRoute={props.setRoute} /></>;
+}
+
+function AdvancedPipelineDetails(props: { project: FactoryProject; setRoute: (route: RouteId) => void }) {
+  return <SectionCard title="Advanced Pipeline Details" description="Read-only internal stages, runs, artifacts, and safe failure state for debugging and recovery."><details><summary>Show {workflowStageDefinitions.length} internal stages</summary><div className="workflow-list">{workflowStageDefinitions.map((definition) => { const stage = props.project.stages.find((item) => item.id === definition.id); return <div className="workflow-stage" key={definition.id}><span>{definition.order}. {definition.name}</span><StatusBadge tone={stageTone(stage?.status ?? "not_started")}>{(stage?.status ?? "not_started").replaceAll("_", " ")}</StatusBadge><small>{stage?.attention?.message ?? (stage?.dependsOn.join(", ") || "No dependencies")}</small></div>; })}</div></details><button className="button secondary compact" type="button" onClick={() => props.setRoute("advanced-pipeline")}>Open diagnostics view</button></SectionCard>;
+}
+
+function AdvancedPipelineScreen(props: { project: FactoryProject; setRoute: (route: RouteId) => void }) {
+  return <><PageHeader title="Advanced Pipeline Details" description="Internal stages remain available for debugging, history, and manual recovery." /><AdvancedPipelineDetails project={props.project} setRoute={props.setRoute} /></>;
+}
+
+function SceneReviewScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; setRoute: (route: RouteId) => void }) {
+  const [artifacts, setArtifacts] = useState<AssetReviewArtifact[]>([]);
+  const [running, setRunning] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function refresh(): Promise<AssetReviewArtifact[]> {
+    const next = await factoryClient.listAssetReviewArtifacts({ projectId: props.project.id });
+    setArtifacts(next);
+    return next;
+  }
+
+  useEffect(() => { void refresh(); }, [props.project.id]);
+
+  async function perform(action: () => Promise<FactoryProject>, success: string): Promise<void> {
+    setRunning(true);
+    setMessage("");
+    try {
+      const next = await action();
+      props.setSelectedProject(await factoryClient.loadProject(props.project.id) ?? next);
+      await refresh();
+      setMessage(success);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Scene review failed.");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function approveScene(sceneId: string): Promise<FactoryProject> {
+    let review = (await refresh()).find((artifact) => artifact.status === "needs_review");
+    if (!review) throw new Error("No reviewable scene assets exist.");
+    let pending = review.payloadJson.assets.find((item) => props.project.shots.some((shot) => shot.id === item.asset.shotId && shot.sceneId === sceneId) && item.reviewStatus === "needs_review");
+    while (pending) {
+      await factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: review.id, assetSha256: pending.asset.sha256, action: "approve" });
+      review = (await refresh()).find((artifact) => artifact.status === "needs_review");
+      if (!review) break;
+      pending = review.payloadJson.assets.find((item) => props.project.shots.some((shot) => shot.id === item.asset.shotId && shot.sceneId === sceneId) && item.reviewStatus === "needs_review");
+    }
+    review = (await refresh()).find((artifact) => artifact.status === "needs_review");
+    let unassigned = review?.payloadJson.assets.find((item) => props.project.shots.some((shot) => shot.id === item.asset.shotId && shot.sceneId === sceneId) && item.reviewStatus === "approved" && !item.assignedShotId);
+    while (review && unassigned) {
+      await factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: review.id, assetSha256: unassigned.asset.sha256, action: "assign", shotId: unassigned.asset.shotId });
+      review = (await refresh()).find((artifact) => artifact.status === "needs_review");
+      unassigned = review?.payloadJson.assets.find((item) => props.project.shots.some((shot) => shot.id === item.asset.shotId && shot.sceneId === sceneId) && item.reviewStatus === "approved" && !item.assignedShotId);
+    }
+    const finalReview = (await refresh()).find((artifact) => artifact.status === "needs_review");
+    if (finalReview?.payloadJson.assets.every((item) => item.reviewStatus === "approved" && Boolean(item.assignedShotId))) {
+      const approved = await factoryClient.approveAssetReview({ projectId: props.project.id });
+      return await factoryClient.loadProject(props.project.id) ?? approved;
+    }
+    return await factoryClient.loadProject(props.project.id) ?? props.project;
+  }
+
+  const review = artifacts.find((artifact) => artifact.status === "needs_review");
+  return <><PageHeader title="Scene Review" description="Review narration, timing, visual direction, and generated assets. Regeneration is scoped to the selected scene." actions={<button className="button secondary" type="button" onClick={() => props.setRoute("visuals")}>Open detailed visual controls</button>} />{props.project.scenes.length ? <div className="scene-grid">{props.project.scenes.map((scene, index) => {
+    const sceneShotIds = new Set(props.project.shots.filter((shot) => shot.sceneId === scene.id).map((shot) => shot.id));
+    const items = review?.payloadJson.assets.filter((item) => sceneShotIds.has(item.asset.shotId)) ?? [];
+    const ready = items.length > 0 && items.every((item) => item.reviewStatus === "approved" && Boolean(item.assignedShotId));
+    return <SectionCard title={`Scene ${index + 1}`} key={scene.id}><p><strong>Narration:</strong> {scene.narration}</p><p><strong>Duration:</strong> {formatTimecode(scene.durationFrames, props.project.timeline.fps)}</p><p><strong>Visual purpose:</strong> {scene.purpose}</p><p><strong>VOX scene type:</strong> {scene.visualMode}</p>{items.length ? items.map((item) => <div key={item.asset.sha256}><p><strong>{item.asset.shotId}</strong>: {item.reviewStatus.replaceAll("_", " ")} {item.assignedShotId ? `- assigned to ${item.assignedShotId}` : "- unassigned"}</p><div className="button-row">{item.reviewStatus === "needs_review" ? <button className="button compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: review!.id, assetSha256: item.asset.sha256, action: "approve" }), "Scene asset approved.")}>Approve Asset</button> : null}{item.reviewStatus === "approved" && !item.assignedShotId ? <button className="button compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: review!.id, assetSha256: item.asset.sha256, action: "assign", shotId: item.asset.shotId }), "Scene asset assigned.")}>Assign Asset</button> : null}</div></div>) : <StatusBadge tone="warning">No generated asset review yet</StatusBadge>}<div className="button-row"><button className="button secondary compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.retryScene({ projectId: props.project.id, sceneId: scene.id }), "Scene regeneration is ready for review.")}>Regenerate Scene</button><button className="button primary compact" type="button" disabled={running || !ready} onClick={() => void perform(() => approveScene(scene.id), "Scene approved.")}>Approve Scene</button></div></SectionCard>;
+  })}</div> : <EmptyState title="Scenes are not ready yet" detail="Production will create the scene list after content preparation." action={<button className="button primary" type="button" onClick={() => props.setRoute("production")}>Back to Production</button>} />}{message ? <p className={message.toLowerCase().includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</>;
+}
+
+function FinalPreviewScreen(props: { project: FactoryProject; localTtsSettings: LocalTtsSettings | null; setSelectedProject: (project: FactoryProject | null) => void; setRoute: (route: RouteId) => void; startSemiAutomatic: (chain: SemiAutomaticChain, project: FactoryProject) => Promise<void> }) {
+  const [artifacts, setArtifacts] = useState<PreviewRenderArtifact[]>([]);
+  const [mediaUrl, setMediaUrl] = useState("");
+  const [running, setRunning] = useState(false);
+  const [message, setMessage] = useState("");
+  const preview = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "preview-render");
+  const currentArtifact = artifacts.find((artifact) => artifact.status === "needs_review") ?? artifacts.find((artifact) => artifact.status === "approved");
+  const warnings = preview?.blockingReasons ?? [];
+
+  async function refresh(): Promise<void> {
+    const next = await factoryClient.listPreviewRenderArtifacts({ projectId: props.project.id });
+    setArtifacts(next);
+    const candidate = next.find((artifact) => artifact.status === "needs_review") ?? next.find((artifact) => artifact.status === "approved");
+    if (!candidate) {
+      setMediaUrl("");
+      return;
+    }
+    const response = await factoryClient.getPreviewVideoUrl({ projectId: props.project.id, artifactId: candidate.id });
+    setMediaUrl(response.url);
+  }
+
+  useEffect(() => { void refresh().catch((error) => setMessage(error instanceof Error ? error.message : String(error))); }, [props.project.id]);
+
+  async function perform(action: () => Promise<FactoryProject>, success: string): Promise<void> {
+    setRunning(true);
+    setMessage("");
+    try {
+      const next = await action();
+      props.setSelectedProject(next);
+      await refresh();
+      setMessage(success);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function approveFinalVideo(): Promise<FactoryProject> {
+    const next = await factoryClient.approvePreviewRender({ projectId: props.project.id });
+    if (next.setup.workflowMode === "semi_automatic") void props.startSemiAutomatic("preview", next);
+    else props.setRoute("export");
+    return next;
+  }
+
+  const canRenderAgain = Boolean(currentArtifact) && ["needs_review", "approved", "failed", "needs_attention", "stale"].includes(preview?.status ?? "");
+  const voiceLabel = props.project.setup.voiceId ?? props.localTtsSettings?.ttsVoiceId ?? "Existing configured voice";
+  const subtitleLabel = currentArtifact?.payloadJson.subtitleRelativeFilePath ? "VOX Clean · local UTF-8" : "Subtitle cues pending";
+
+  return <>
+    <PageHeader title="Final Preview" description="Review the real rendered video and its persisted metadata before export." actions={<div className="button-row"><button className="button secondary" type="button" onClick={() => props.setRoute("scene-review")}>Return to Scene Review</button><button className="button secondary" type="button" onClick={() => props.setRoute("timeline")}>Open subtitle controls</button></div>} />
+    <SectionCard title="Rendered video" description="This player uses a safe workspace URL for the persisted reviewable or approved MP4.">
+      {mediaUrl ? <video className="preview-video" controls preload="metadata" src={mediaUrl}>Your browser cannot play this preview.</video> : <EmptyState title="No reviewable preview yet" detail="Render an approved timeline after voice and subtitle preparation complete." action={<button className="button primary" type="button" onClick={() => props.setRoute("timeline")}>Open Timeline</button>} />}
+      {message ? <p className={message.toLowerCase().includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}
+    </SectionCard>
+    <section className="metric-grid">
+      <MetricCard label="Preview status" value={preview?.status?.replaceAll("_", " ") ?? "not started"} tone={preview?.status === "approved" ? "success" : preview?.status === "needs_review" ? "info" : "warning"} />
+      <MetricCard label="Duration" value={currentArtifact ? `${currentArtifact.payloadJson.durationSeconds.toFixed(2)}s` : "-"} />
+      <MetricCard label="Resolution" value={currentArtifact ? `${currentArtifact.payloadJson.width} × ${currentArtifact.payloadJson.height}` : "-"} />
+      <MetricCard label="Scenes" value={props.project.scenes.length} />
+    </section>
+    <SectionCard title="Preview details">
+      <p><strong>Voice:</strong> {voiceLabel}</p>
+      <p><strong>Subtitle preset:</strong> {subtitleLabel}</p>
+      <p><strong>Preview file:</strong> {currentArtifact?.relativeFilePath ?? "Not rendered"}</p>
+      {warnings.length ? <div><strong>Warnings</strong>{warnings.map((warning) => <p key={`${warning.code}-${warning.message}`}>{warning.message}</p>)}</div> : <p className="safe-message">No blocking preview warnings.</p>}
+      <div className="button-row">
+        {currentArtifact?.status === "needs_review" ? <button className="button primary" type="button" disabled={running || !preview?.approvable} onClick={() => void perform(approveFinalVideo, "Final video approved.")}>Approve Final Video</button> : null}
+        {canRenderAgain ? <button className="button secondary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runPreviewRender({ projectId: props.project.id, force: true }), "Preview rendered again; approval is still required.")}>{running ? "Rendering..." : "Render Again"}</button> : null}
+        <button className="button secondary" type="button" onClick={() => props.setRoute("scene-review")}>Return to Scene Review</button>
+        <button className="button secondary" type="button" onClick={() => props.setRoute("voice")}>Regenerate Voice</button>
+        <button className="button secondary" type="button" onClick={() => props.setRoute("timeline")}>Change Subtitle Preset</button>
+      </div>
+    </SectionCard>
+  </>;
 }
 
 function NewProjectWizard(props: {
@@ -762,6 +1192,7 @@ function ProjectOverview(props: {
   selectedProject: FactoryProject;
   selectedProfile: ChannelProfile | undefined;
   setRoute: (route: RouteId) => void;
+  startSemiAutomatic: (chain: SemiAutomaticChain, project: FactoryProject) => Promise<void>;
   textCertification: TextModelCertificationResponse;
   imageCertification: ImageModelCertificationResponse;
   localTtsSettings: LocalTtsSettings | null;
@@ -775,6 +1206,9 @@ function ProjectOverview(props: {
   const assetAcquisition = eligibilities.find((stage) => stage.stageId === "asset-acquisition")!;
   const nextStage = eligibilities.find((stage) => stage.runnable || stage.reviewable) ?? eligibilities.find((stage) => stage.status === "blocked") ?? eligibilities.at(-1);
   const nextStageRoute = nextStage ? stageRoute(nextStage.stageId) : "project-overview";
+  const nextChain = nextSemiAutomaticChain(project);
+  const nextChainRoute = nextChain === "reference" ? "competitor-dna" : nextChain === "idea" ? "visuals" : nextChain === "assets" ? "timeline" : "export";
+  const automaticRetryNeeded = Boolean(nextChain && project.stages.some((stage) => stage.status === "failed" || stage.status === "needs_attention"));
   return (
     <>
       <PageHeader
@@ -782,6 +1216,7 @@ function ProjectOverview(props: {
         description="Project command center backed by persisted SQLite data."
         actions={
           <>
+            {nextChain ? <button className="button primary" type="button" onClick={() => { props.setRoute(nextChainRoute); void props.startSemiAutomatic(nextChain, project); }}>{automaticRetryNeeded ? "Retry automatic workflow" : "Continue Semi-automatic workflow"}</button> : null}
             <button className="button primary" type="button" onClick={() => props.setRoute(nextStageRoute)}>Run next stage</button>
             <button className="button secondary" type="button" onClick={() => props.setRoute("settings")}>Project settings</button>
           </>
@@ -796,7 +1231,7 @@ function ProjectOverview(props: {
         <MetricCard label="Progress" value={`${projectProgress(project)}%`} />
         <MetricCard label="Estimated duration" value={estimatedDuration(project)} />
       </section>
-      <SectionCard title="Workflow progress" description={assetAcquisition.status !== "ready" ? assetAcquisition.blockingReasons[0]?.message ?? "Visual generation is blocked." : "Open stages one by one. Provider-backed runners still require explicit confirmation inside each stage."}>
+      <SectionCard title="Workflow progress" description={assetAcquisition.status !== "ready" ? assetAcquisition.blockingReasons[0]?.message ?? "Visual generation is blocked." : "Eligible automatic stages start after their dependencies are approved; the chain pauses only at human checkpoints or errors."}>
         <div className="workflow-list">
           {project.stages.map((stage) => (
             <button className="workflow-stage" key={stage.id} type="button" onClick={() => props.setRoute(stageRoute(stage.name))}>
@@ -818,7 +1253,7 @@ function ProjectOverview(props: {
       <SectionCard title="Process guide" description="Use this order to test the production flow without skipping approval gates.">
         <SettingsList items={[
           ["1. Reference Intake", "Paste competitor transcript/link and source notes. Save them to the project."],
-          ["2. Competitor DNA", "Run 9Router analysis only after references are saved, then approve/reject the analysis."],
+          ["2. Competitor DNA", "The competitor stages run automatically after reference approval; review only when the chain reaches a checkpoint or reports an error."],
           ["3. Opportunity Map", "Generate opportunities from approved competitor DNA and channel profile."],
           ["4. Idea Lab", "Generate idea candidates, review them, then choose exactly one approved idea."],
           ["5. Script", "Generate outline/script only from the approved idea, then approve before scenes/shots."],
@@ -837,7 +1272,6 @@ function stageRoute(name: string): RouteId {
   if (/competitor/i.test(name)) return "competitor-dna";
   if (/opportunity|originality|idea/i.test(name)) return "idea-lab";
   if (/idea/i.test(name)) return "idea-lab";
-  if (/claim|research/i.test(name)) return "research-claims";
   if (/script|outline|retention|fact/i.test(name)) return "script";
   if (/scene/i.test(name)) return "scenes";
   if (/shot|visual/i.test(name)) return "shots";
@@ -915,10 +1349,11 @@ function StageStatusHeader(props: {
   dependencies: string[];
   purpose: string;
 }) {
+  const registeredStage = workflowStageDefinitions.find((stage) => stage.name === props.stageName);
   return (
     <SectionCard title={props.stageName} description={props.purpose}>
       <div className="metric-grid">
-        <MetricCard label="Stage number" value={props.stageNumber} />
+        <MetricCard label="Stage number" value={registeredStage?.order ?? props.stageNumber} />
         <MetricCard label="Current status" value={props.eligibility.status.replaceAll("_", " ")} tone={stageTone(props.eligibility.status)} />
         <MetricCard label="Runnable" value={props.eligibility.runnable ? "Yes" : "No"} tone={props.eligibility.runnable ? "success" : "warning"} />
         <MetricCard label="Approval" value={props.eligibility.approvable ? "Available" : "Locked"} tone={props.eligibility.approvable ? "success" : "warning"} />
@@ -932,6 +1367,10 @@ function StageStatusHeader(props: {
   );
 }
 
+function canRetryStage(stage: StageEligibility): boolean {
+  return stage.runnable || stage.status === "failed" || stage.status === "needs_attention";
+}
+
 function ActionableBlockedState(props: { eligibility: StageEligibility; setRoute: (route: RouteId) => void }) {
   if (!props.eligibility.blockingReasons.length) return null;
   return (
@@ -941,9 +1380,9 @@ function ActionableBlockedState(props: { eligibility: StageEligibility; setRoute
           <div className="status-row" key={`${props.eligibility.stageId}-${reason.code}`}>
             <span>{reason.message}</span>
             <StatusBadge tone="warning">{reason.code.replaceAll("_", " ")}</StatusBadge>
-            {reason.actionRoute ? (
-              <button className="button compact" type="button" onClick={() => props.setRoute(reason.actionRoute as RouteId)}>Go to required screen</button>
-            ) : null}
+            {(reason.actions?.length ? reason.actions : reason.actionRoute ? [{ label: "Go to required screen", route: reason.actionRoute }] : [])
+              .filter((action) => action.route)
+              .map((action) => <button className="button compact" key={`${reason.code}-${action.label}`} type="button" onClick={() => props.setRoute(action.route as RouteId)}>{action.label}</button>)}
           </div>
         ))}
       </div>
@@ -951,7 +1390,7 @@ function ActionableBlockedState(props: { eligibility: StageEligibility; setRoute
   );
 }
 
-function ReferenceIntakeScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; setRoute: (route: RouteId) => void }) {
+function ReferenceIntakeScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; setRoute: (route: RouteId) => void; startSemiAutomatic: (chain: SemiAutomaticChain, project: FactoryProject) => Promise<void> }) {
   const referenceValidation = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "reference-validation")!;
   const canContinue = props.project.referenceSet?.status === "approved";
   return (
@@ -972,12 +1411,12 @@ function ReferenceIntakeScreen(props: { project: FactoryProject; setSelectedProj
         dependencies={["Reference Intake"]}
         purpose="Validate references, resolve duplicates, and approve the exact reference set that unlocks the competitor workflow."
       />
-      <CompetitorReferenceIntake project={props.project} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} />
+      <CompetitorReferenceIntake project={props.project} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} startSemiAutomatic={props.startSemiAutomatic} />
     </>
   );
 }
 
-function CompetitorReferenceIntake(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; setRoute: (route: RouteId) => void }) {
+function CompetitorReferenceIntake(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; setRoute: (route: RouteId) => void; startSemiAutomatic: (chain: SemiAutomaticChain, project: FactoryProject) => Promise<void> }) {
   const [sourceUrl, setSourceUrl] = useState("");
   const [pastedTranscript, setPastedTranscript] = useState("");
   const [notes, setNotes] = useState("");
@@ -1110,6 +1549,7 @@ function CompetitorReferenceIntake(props: { project: FactoryProject; setSelected
       const project = await factoryClient.approveReferenceSet({ projectId: props.project.id });
       props.setSelectedProject(project);
       setMessage("Reference set approved. Competitor Workflow is now available.");
+      if (project.setup.workflowMode === "semi_automatic") void props.startSemiAutomatic("reference", project);
     } catch (error) {
       setMessage(`Reference approval failed: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -1292,31 +1732,35 @@ function CompetitorReferenceIntake(props: { project: FactoryProject; setSelected
   );
 }
 
-function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; setRoute: (route: RouteId) => void; textCertification: TextModelCertificationResponse }) {
+function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; setRoute: (route: RouteId) => void; textCertification: TextModelCertificationResponse; startSemiAutomatic: (chain: SemiAutomaticChain, project: FactoryProject) => Promise<void> }) {
   const [runningReferenceId, setRunningReferenceId] = useState<string | null>(null);
   const [runMessage, setRunMessage] = useState("");
   const [cleaningArtifacts, setCleaningArtifacts] = useState<TranscriptCleaningArtifact[]>([]);
   const [segmentationArtifacts, setSegmentationArtifacts] = useState<ReferenceSegmentationArtifact[]>([]);
   const [dnaArtifacts, setDnaArtifacts] = useState<CompetitorDnaArtifact[]>([]);
+  const [workflowRuns, setWorkflowRuns] = useState<CompetitorWorkflowRun[]>([]);
   const hasReferences = props.project.competitorReferences.length > 0;
   const eligibilities = resolveStageEligibilities(props.project, { textVerified: props.textCertification.status === "verified" });
   const transcriptCleaning = eligibilities.find((stage) => stage.stageId === "transcript-cleaning")!;
   const segmentation = eligibilities.find((stage) => stage.stageId === "reference-segmentation")!;
   const competitorDna = eligibilities.find((stage) => stage.stageId === "competitor-dna")!;
   const approvedReferences = props.project.competitorReferences.filter((reference) => reference.included !== false && reference.status === "approved");
+  const isSemiAutomatic = props.project.setup.workflowMode === "semi_automatic";
 
   useEffect(() => {
     let cancelled = false;
     void Promise.all([
       Promise.all(approvedReferences.map((reference) => factoryClient.listTranscriptCleaningArtifacts({ projectId: props.project.id, referenceId: reference.id }))),
       Promise.all(approvedReferences.map((reference) => factoryClient.listReferenceSegmentationArtifacts({ projectId: props.project.id, referenceId: reference.id }))),
-      Promise.all(approvedReferences.map((reference) => factoryClient.listCompetitorDnaArtifacts({ projectId: props.project.id, referenceId: reference.id })))
+      Promise.all(approvedReferences.map((reference) => factoryClient.listCompetitorDnaArtifacts({ projectId: props.project.id, referenceId: reference.id }))),
+      loadCompetitorWorkflowRuns(props.project.id)
     ])
-      .then(([cleaning, segmentationArtifacts, dnaArtifacts]) => {
+      .then(([cleaning, segmentationArtifacts, dnaArtifacts, runs]) => {
         if (!cancelled) {
           setCleaningArtifacts(cleaning.flat());
           setSegmentationArtifacts(segmentationArtifacts.flat());
           setDnaArtifacts(dnaArtifacts.flat());
+          setWorkflowRuns(runs);
         }
       })
       .catch(() => {
@@ -1324,10 +1768,32 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
           setCleaningArtifacts([]);
           setSegmentationArtifacts([]);
           setDnaArtifacts([]);
+          setWorkflowRuns([]);
         }
       });
     return () => { cancelled = true; };
   }, [props.project]);
+
+  useEffect(() => {
+    if (!runningReferenceId) return;
+    let cancelled = false;
+    const refresh = () => {
+      void loadCompetitorWorkflowRuns(props.project.id).then((runs) => {
+        if (!cancelled) setWorkflowRuns(runs);
+      }).catch(() => undefined);
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 1000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [runningReferenceId, props.project.id]);
+
+  async function reloadWorkflowRuns() {
+    try { setWorkflowRuns(await loadCompetitorWorkflowRuns(props.project.id)); } catch { /* keep the last persisted view */ }
+  }
+
+  function continueAutomaticReferenceChain(project: FactoryProject): void {
+    if (project.setup.workflowMode === "semi_automatic") void props.startSemiAutomatic("reference", project);
+  }
 
   async function runCleaning(referenceId: string) {
     setRunningReferenceId(referenceId);
@@ -1335,12 +1801,17 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
     try {
       const project = await factoryClient.runTranscriptCleaning({ projectId: props.project.id, referenceId });
       props.setSelectedProject(project);
+      continueAutomaticReferenceChain(project);
       const artifacts = await factoryClient.listTranscriptCleaningArtifacts({ projectId: props.project.id, referenceId });
       setCleaningArtifacts((current) => [...current.filter((artifact) => artifact.payloadJson.referenceId !== referenceId), ...artifacts]);
-      setRunMessage("Transcript Cleaning completed and is ready for review.");
+      const stageStatus = project.stages.find((stage) => stage.id === "transcript-cleaning")?.status;
+      setRunMessage(stageStatus === "queued" || stageStatus === "running"
+        ? "Transcript Cleaning is already running; no duplicate request was sent."
+        : "Transcript Cleaning completed and is ready for review.");
     } catch (error) {
       setRunMessage(`Transcript Cleaning failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
+      void reloadWorkflowRuns();
       setRunningReferenceId(null);
     }
   }
@@ -1351,12 +1822,14 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
     try {
       const project = await factoryClient.approveTranscriptCleaning({ projectId: props.project.id, referenceId });
       props.setSelectedProject(project);
+      continueAutomaticReferenceChain(project);
       const artifacts = await factoryClient.listTranscriptCleaningArtifacts({ projectId: props.project.id, referenceId });
       setCleaningArtifacts((current) => [...current.filter((artifact) => artifact.payloadJson.referenceId !== referenceId), ...artifacts]);
       setRunMessage("Cleaned transcript approved.");
     } catch (error) {
       setRunMessage(`Transcript approval failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
+      void reloadWorkflowRuns();
       setRunningReferenceId(null);
     }
   }
@@ -1373,6 +1846,7 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
     } catch (error) {
       setRunMessage(`Transcript rejection failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
+      void reloadWorkflowRuns();
       setRunningReferenceId(null);
     }
   }
@@ -1383,12 +1857,14 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
     try {
       const project = await factoryClient.runReferenceSegmentation({ projectId: props.project.id, referenceId });
       props.setSelectedProject(project);
+      continueAutomaticReferenceChain(project);
       const artifacts = await factoryClient.listReferenceSegmentationArtifacts({ projectId: props.project.id, referenceId });
       setSegmentationArtifacts((current) => current.filter((artifact) => artifact.payloadJson.referenceId !== referenceId).concat(artifacts));
       setRunMessage("Reference Segmentation completed and is ready for review.");
     } catch (error) {
       setRunMessage(`Reference Segmentation failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
+      void reloadWorkflowRuns();
       setRunningReferenceId(null);
     }
   }
@@ -1399,6 +1875,7 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
     try {
       const project = await factoryClient.approveReferenceSegmentation({ projectId: props.project.id, referenceId });
       props.setSelectedProject(project);
+      continueAutomaticReferenceChain(project);
       const artifacts = await factoryClient.listReferenceSegmentationArtifacts({ projectId: props.project.id, referenceId });
       setSegmentationArtifacts((current) => current.filter((artifact) => artifact.payloadJson.referenceId !== referenceId).concat(artifacts));
       setRunMessage("Reference segmentation approved.");
@@ -1430,11 +1907,12 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
     try {
       const project = await factoryClient.runCompetitorDna({ projectId: props.project.id, referenceId });
       props.setSelectedProject(project);
+      continueAutomaticReferenceChain(project);
       const artifacts = await factoryClient.listCompetitorDnaArtifacts({ projectId: props.project.id, referenceId });
       setDnaArtifacts((current) => current.filter((artifact) => artifact.payloadJson.referenceId !== referenceId).concat(artifacts));
       setRunMessage("Competitor DNA completed and is ready for review.");
     } catch (error) { setRunMessage(`Competitor DNA failed: ${error instanceof Error ? error.message : String(error)}`); }
-    finally { setRunningReferenceId(null); }
+    finally { void reloadWorkflowRuns(); setRunningReferenceId(null); }
   }
 
   async function approveDna(referenceId: string) {
@@ -1442,11 +1920,12 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
     try {
       const project = await factoryClient.approveCompetitorDna({ projectId: props.project.id, referenceId });
       props.setSelectedProject(project);
+      continueAutomaticReferenceChain(project);
       const artifacts = await factoryClient.listCompetitorDnaArtifacts({ projectId: props.project.id, referenceId });
       setDnaArtifacts((current) => current.filter((artifact) => artifact.payloadJson.referenceId !== referenceId).concat(artifacts));
       setRunMessage("Competitor DNA approved.");
     } catch (error) { setRunMessage(`Competitor DNA approval failed: ${error instanceof Error ? error.message : String(error)}`); }
-    finally { setRunningReferenceId(null); }
+    finally { void reloadWorkflowRuns(); setRunningReferenceId(null); }
   }
 
   async function rejectDna(referenceId: string) {
@@ -1458,8 +1937,32 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
       setDnaArtifacts((current) => current.filter((artifact) => artifact.payloadJson.referenceId !== referenceId).concat(artifacts));
       setRunMessage("Competitor DNA rejected.");
     } catch (error) { setRunMessage(`Competitor DNA rejection failed: ${error instanceof Error ? error.message : String(error)}`); }
-    finally { setRunningReferenceId(null); }
+    finally { void reloadWorkflowRuns(); setRunningReferenceId(null); }
   }
+
+  function canRunStage(stage: StageEligibility): boolean {
+    return stage.runnable || stage.status === "failed" || stage.status === "needs_attention";
+  }
+
+  function stageActionReason(stage: StageEligibility, fallback: string): string {
+    return stage.blockingReasons[0]?.message ?? fallback;
+  }
+
+  function nextReferenceAction<T extends { status: string; payloadJson: { referenceId: string } }>(artifacts: T[]): { referenceId: string; kind: "approve" | "run" } | null {
+    for (const reference of approvedReferences) {
+      const current = artifacts.filter((artifact) => artifact.payloadJson.referenceId === reference.id && artifact.status !== "stale");
+      if (current.some((artifact) => artifact.status === "needs_review")) return { referenceId: reference.id, kind: "approve" };
+      if (!current.some((artifact) => artifact.status === "approved")) return { referenceId: reference.id, kind: "run" };
+    }
+    return null;
+  }
+
+  const nextSegmentationAction = nextReferenceAction(segmentationArtifacts);
+  const nextDnaAction = nextReferenceAction(dnaArtifacts);
+  const canRunPendingReferenceStage = (stage: StageEligibility): boolean =>
+    stage.runnable || stage.status === "needs_review" || stage.status === "failed" || stage.status === "needs_attention";
+  const canManuallyRunStage = (stage: StageEligibility): boolean =>
+    !isSemiAutomatic || stage.status === "failed" || stage.status === "needs_attention";
 
   return (
     <>
@@ -1469,13 +1972,29 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
         actions={
           <>
             <button className="button secondary" type="button" onClick={() => props.setRoute("reference-intake")}>Back to references</button>
-            {approvedReferences.length && transcriptCleaning.runnable ? (
+            {!isSemiAutomatic && approvedReferences.length && transcriptCleaning.runnable ? (
               <button className="button primary" type="button" onClick={() => void runCleaning(approvedReferences[0]!.id)} disabled={runningReferenceId !== null}>
                 {runningReferenceId ? "Cleaning transcript..." : "Run Transcript Cleaning"}
               </button>
+            ) : isSemiAutomatic && !hasSemiAutomaticAttention(props.project) ? (
+              <span className="muted">Transcript Cleaning, Segmentation, and Competitor DNA run automatically.</span>
             ) : (
               <DisabledAction reason={transcriptCleaning.blockingReasons[0]?.message ?? "Transcript Cleaning is not runnable yet."}>Run Transcript Cleaning</DisabledAction>
             )}
+            {!isSemiAutomatic && nextSegmentationAction?.kind === "approve" ? (
+              <button className="button secondary" type="button" onClick={() => void approveSegmentation(nextSegmentationAction.referenceId)} disabled={runningReferenceId !== null || !segmentation.approvable}>Approve Segmentation</button>
+            ) : !isSemiAutomatic && nextSegmentationAction?.kind === "run" && canRunPendingReferenceStage(segmentation) ? (
+              <button className="button secondary" type="button" onClick={() => void runSegmentation(nextSegmentationAction.referenceId)} disabled={runningReferenceId !== null}>Run Segmentation</button>
+            ) : canManuallyRunStage(segmentation) && segmentation.status !== "approved" ? (
+              <DisabledAction reason={stageActionReason(segmentation, "Approve all cleaned transcripts before running Segmentation.")}>Run Segmentation</DisabledAction>
+            ) : null}
+            {!isSemiAutomatic && nextDnaAction?.kind === "approve" ? (
+              <button className="button secondary" type="button" onClick={() => void approveDna(nextDnaAction.referenceId)} disabled={runningReferenceId !== null || !competitorDna.approvable}>Approve DNA</button>
+            ) : !isSemiAutomatic && nextDnaAction?.kind === "run" && canRunPendingReferenceStage(competitorDna) ? (
+              <button className="button secondary" type="button" onClick={() => void runDna(nextDnaAction.referenceId)} disabled={runningReferenceId !== null}>Run DNA</button>
+            ) : canManuallyRunStage(competitorDna) && competitorDna.status !== "approved" ? (
+              <DisabledAction reason={stageActionReason(competitorDna, "Approve all segmentations before running Competitor DNA.")}>Run DNA</DisabledAction>
+            ) : null}
           </>
         }
       />
@@ -1487,6 +2006,29 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
         purpose="First runnable stage in the competitor workflow. It must use the approved reference set, not raw pasted drafts."
       />
       <ActionableBlockedState eligibility={transcriptCleaning} setRoute={props.setRoute} />
+      <ActionableBlockedState eligibility={segmentation} setRoute={props.setRoute} />
+      <ActionableBlockedState eligibility={competitorDna} setRoute={props.setRoute} />
+      <SectionCard title="Next competitor actions" description="The next runnable action is shown here so Segmentation and Competitor DNA do not get hidden below the transcript table.">
+        <div className="button-row">
+          {approvedReferences.map((reference) => {
+            const cleaningArtifact = cleaningArtifacts.find((artifact) => artifact.payloadJson.referenceId === reference.id && artifact.status === "needs_review");
+            const segmentationArtifact = segmentationArtifacts.find((artifact) => artifact.payloadJson.referenceId === reference.id && artifact.status === "needs_review");
+            const dnaArtifact = dnaArtifacts.find((artifact) => artifact.payloadJson.referenceId === reference.id && artifact.status === "needs_review");
+            return <React.Fragment key={`next-${reference.id}`}>
+              {!isSemiAutomatic && cleaningArtifact ? <button className="button compact" type="button" onClick={() => void approveCleaning(reference.id)} disabled={runningReferenceId !== null}>Approve Cleaning</button> : null}
+              {(!isSemiAutomatic || transcriptCleaning.status === "failed" || transcriptCleaning.status === "needs_attention") && !cleaningArtifact && canRunStage(transcriptCleaning) ? <button className="button compact" type="button" onClick={() => void runCleaning(reference.id)} disabled={runningReferenceId !== null}>{transcriptCleaning.status === "failed" || transcriptCleaning.status === "needs_attention" ? "Retry Cleaning" : "Run Cleaning"}</button> : null}
+              {!isSemiAutomatic && segmentationArtifact ? <button className="button compact" type="button" onClick={() => void approveSegmentation(reference.id)} disabled={runningReferenceId !== null}>Approve Segmentation</button> : null}
+              {(!isSemiAutomatic || segmentation.status === "failed" || segmentation.status === "needs_attention") && !segmentationArtifact ? canRunStage(segmentation) ? <button className="button compact" type="button" onClick={() => void runSegmentation(reference.id)} disabled={runningReferenceId !== null}>{segmentation.status === "failed" || segmentation.status === "needs_attention" ? "Retry Segmentation" : "Run Segmentation"}</button> : <DisabledAction reason={stageActionReason(segmentation, "Approve all cleaned transcripts before running Segmentation.")}>Run Segmentation</DisabledAction> : null}
+              {!isSemiAutomatic && dnaArtifact ? <button className="button compact" type="button" onClick={() => void approveDna(reference.id)} disabled={runningReferenceId !== null}>Approve DNA</button> : null}
+              {(!isSemiAutomatic || competitorDna.status === "failed" || competitorDna.status === "needs_attention") && !dnaArtifact ? canRunStage(competitorDna) ? <button className="button compact" type="button" onClick={() => void runDna(reference.id)} disabled={runningReferenceId !== null}>{competitorDna.status === "failed" || competitorDna.status === "needs_attention" ? "Retry DNA" : "Run DNA"}</button> : <DisabledAction reason={stageActionReason(competitorDna, "Approve all segmentations before running Competitor DNA.")}>Run DNA</DisabledAction> : null}
+            </React.Fragment>;
+          })}
+          {!approvedReferences.length ? <>
+            <DisabledAction reason="Approve at least one included reference before running the competitor workflow.">Run Segmentation</DisabledAction>
+            <DisabledAction reason="Approve at least one included reference before running the competitor workflow.">Run DNA</DisabledAction>
+          </> : null}
+        </div>
+      </SectionCard>
       {!hasReferences ? (
         <EmptyState
           title="No references saved"
@@ -1494,7 +2036,7 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
           action={<button className="button primary" type="button" onClick={() => props.setRoute("reference-intake")}>Add reference</button>}
         />
       ) : (
-        <SectionCard title="Current approved input" description="Only approved included references may feed Transcript Cleaning. Each button starts one explicit provider run; no request runs on screen load.">
+        <SectionCard title="Current approved input" description="Only approved included references may feed Transcript Cleaning. In Semi-automatic mode the eligible chain starts automatically; controls remain available for Guided mode and failed-run recovery.">
           <DataTable label="Competitor DNA inputs">
             <thead><tr><th>Source</th><th>Raw transcript</th><th>Added</th><th>Run</th><th>Review output</th></tr></thead>
             <tbody>
@@ -1505,7 +2047,7 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
                   <td>{formatDate(reference.createdAt)}</td>
                   <td>
                     <StatusBadge tone={reference.status === "approved" ? "success" : "warning"}>{(reference.status ?? "draft").replaceAll("_", " ")}</StatusBadge>
-                    {reference.status === "approved" && transcriptCleaning.runnable ? (
+                    {reference.status === "approved" && !isSemiAutomatic && transcriptCleaning.runnable ? (
                       <button className="button compact" type="button" onClick={() => void runCleaning(reference.id)} disabled={runningReferenceId !== null}>
                         {runningReferenceId === reference.id ? "Running..." : "Clean"}
                       </button>
@@ -1516,7 +2058,9 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
                       <div key={artifact.id}>
                         <StatusBadge tone={artifact.status === "approved" ? "success" : artifact.status === "needs_review" ? "warning" : "info"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>
                         <small>{artifact.payloadJson.cleanedTranscript.slice(0, 140)}{artifact.payloadJson.cleanedTranscript.length > 140 ? "..." : ""}</small>
+                        <small>Characters: {artifact.payloadJson.sourceCharacterCount} -&gt; {artifact.payloadJson.cleanedCharacterCount}; chunks: {artifact.payloadJson.execution.chunkCount}; flagged: {artifact.payloadJson.execution.flaggedSegmentCount}; removed noise: {artifact.payloadJson.execution.removedNoise}</small>
                         {artifact.payloadJson.warnings.length ? <small>Warnings: {artifact.payloadJson.warnings.join(", ").replaceAll("_", " ")}</small> : null}
+                        <details><summary>Original / cleaned comparison</summary><small>Original: {reference.pastedTranscript}</small><small>Cleaned: {artifact.payloadJson.cleanedTranscript}</small></details>
                         {artifact.status === "needs_review" ? <div className="button-row">{transcriptCleaning.approvable ? <button className="button compact" type="button" onClick={() => void approveCleaning(reference.id)} disabled={runningReferenceId !== null}>Approve cleaned transcript</button> : <DisabledAction reason={transcriptCleaning.blockingReasons[0]?.message ?? "Transcript Cleaning cannot be approved yet."}>Approve cleaned transcript</DisabledAction>}<button className="button danger compact" type="button" onClick={() => void rejectCleaning(reference.id)} disabled={runningReferenceId !== null}>Reject cleaned transcript</button></div> : null}
                       </div>
                     ))}
@@ -1527,7 +2071,7 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
           </DataTable>
         </SectionCard>
       )}
-      <SectionCard title="Competitor workflow stages" description="Stages are separate even though they share this screen.">
+      <SectionCard title="Competitor workflow stages" description="Stages are persisted separately, but Semi-automatic mode runs each eligible stage in order and stops only on a checkpoint or error.">
         <DataTable label="Competitor workflow stage status">
           <thead><tr><th>Stage</th><th>Status</th><th>Runnable</th><th>Reason</th></tr></thead>
           <tbody>
@@ -1581,40 +2125,52 @@ function CompetitorDnaScreen(props: { project: FactoryProject; setSelectedProjec
         </DataTable>
       </SectionCard>
       {runMessage ? <p className={runMessage.includes("failed") ? "error-message" : "safe-message"}>{runMessage}</p> : null}
-      <SectionCard title="Run history" description="Each explicit Transcript Cleaning run is persisted in workflow_stage_runs with a review artifact. Detailed history UI is the next batch.">
-        <EmptyState title="Review required" detail={props.project.stages.find((stage) => stage.id === "transcript-cleaning")?.status === "needs_review" ? "The latest cleaning output is waiting for review and approval." : "Run an approved reference to create a reviewable cleaning artifact."} />
+      <SectionCard title="Run history" description="Every Stage 4-6 execution is persisted with its run ID, input fingerprint, provider/model, progress and safe failure state.">
+        {workflowRuns.length ? <DataTable label="Competitor workflow run history"><thead><tr><th>Stage</th><th>Status</th><th>Run ID</th><th>Provider / model</th><th>Started</th><th>Chunks</th><th>Input fingerprint</th><th>Safe error</th></tr></thead><tbody>
+          {workflowRuns.map((run) => <tr key={run.id}>
+            <td>{workflowStageLabel(run.stageId)}</td>
+            <td><StatusBadge tone={stageTone(run.status)}>{run.status.replaceAll("_", " ")}</StatusBadge></td>
+            <td><code>{run.id}</code></td>
+            <td>{run.providerId ?? "local"}{run.configuredModelId ? ` / ${run.configuredModelId}` : ""}</td>
+            <td>{run.startedAt ? formatDate(run.startedAt) : "-"}{run.finishedAt ? ` -> ${formatDate(run.finishedAt)}` : ""}</td>
+            <td>{chunkProgressLabel(run)}</td>
+            <td><code>{run.inputFingerprint.slice(0, 16)}</code></td>
+            <td>{run.safeErrorCategory ? `${run.safeErrorCategory}: ${run.safeErrorMessage ?? ""}` : "-"}</td>
+          </tr>)}
+        </tbody></DataTable> : <EmptyState title="No runs yet" detail="Run an approved reference to create a persisted StageRun history entry." />}
       </SectionCard>
     </>
   );
 }
 
-function IdeaLabScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; textCertification: TextModelCertificationResponse }) {
+function IdeaLabScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; textCertification: TextModelCertificationResponse; startSemiAutomatic: (chain: SemiAutomaticChain, project: FactoryProject) => Promise<void> }) {
   const [artifacts, setArtifacts] = useState<OpportunityMapArtifact[]>([]);
   const [originalityArtifacts, setOriginalityArtifacts] = useState<OriginalityReviewArtifact[]>([]);
   const [message, setMessage] = useState("");
   const opportunity = resolveStageEligibilities(props.project, { textVerified: props.textCertification.status === "verified" }).find((stage) => stage.stageId === "opportunity-map")!;
   const ideaLab = resolveStageEligibilities(props.project, { textVerified: props.textCertification.status === "verified" }).find((stage) => stage.stageId === "idea-lab")!;
   const originalityReview = resolveStageEligibilities(props.project, { textVerified: props.textCertification.status === "verified" }).find((stage) => stage.stageId === "originality-review")!;
+  const topicMode = props.project.setup.inputMode === "topic" && props.project.competitorReferences.length === 0;
   useEffect(() => { void factoryClient.listOpportunityMapArtifacts({ projectId: props.project.id }).then(setArtifacts).catch(() => setArtifacts([])); }, [props.project]);
   useEffect(() => { void factoryClient.listOriginalityReviewArtifacts({ projectId: props.project.id }).then(setOriginalityArtifacts).catch(() => setOriginalityArtifacts([])); }, [props.project]);
   async function runOpportunity() { try { const project = await factoryClient.runOpportunityMap({ projectId: props.project.id }); props.setSelectedProject(project); setArtifacts(await factoryClient.listOpportunityMapArtifacts({ projectId: props.project.id })); setMessage("Opportunity Map is ready for review."); } catch (error) { setMessage(`Opportunity Map failed: ${error instanceof Error ? error.message : String(error)}`); } }
   async function approveOpportunity() { try { const project = await factoryClient.approveOpportunityMap({ projectId: props.project.id }); props.setSelectedProject(project); setArtifacts(await factoryClient.listOpportunityMapArtifacts({ projectId: props.project.id })); setMessage("Opportunity Map approved."); } catch (error) { setMessage(`Opportunity approval failed: ${error instanceof Error ? error.message : String(error)}`); } }
   async function rejectOpportunity() { try { const project = await factoryClient.rejectOpportunityMap({ projectId: props.project.id }); props.setSelectedProject(project); setArtifacts(await factoryClient.listOpportunityMapArtifacts({ projectId: props.project.id })); setMessage("Opportunity Map rejected."); } catch (error) { setMessage(`Opportunity rejection failed: ${error instanceof Error ? error.message : String(error)}`); } }
   async function runIdeas() { try { const project = await factoryClient.runIdeaLab({ projectId: props.project.id }); props.setSelectedProject(project); setMessage("Idea Lab is ready for review."); } catch (error) { setMessage(`Idea Lab failed: ${error instanceof Error ? error.message : String(error)}`); } }
-  async function approveIdea(ideaId: string) { try { const project = await factoryClient.approveIdea({ projectId: props.project.id, ideaId }); props.setSelectedProject(project); setMessage("Idea approved."); } catch (error) { setMessage(`Idea approval failed: ${error instanceof Error ? error.message : String(error)}`); } }
+  async function approveIdea(ideaId: string) { try { const project = await factoryClient.approveIdea({ projectId: props.project.id, ideaId }); props.setSelectedProject(project); setMessage("Idea approved."); if (project.setup.workflowMode === "semi_automatic") void props.startSemiAutomatic("idea", project); } catch (error) { setMessage(`Idea approval failed: ${error instanceof Error ? error.message : String(error)}`); } }
   async function rejectIdeaLab() { try { const project = await factoryClient.rejectIdeaLab({ projectId: props.project.id }); props.setSelectedProject(project); setMessage("Idea Lab rejected."); } catch (error) { setMessage(`Idea Lab rejection failed: ${error instanceof Error ? error.message : String(error)}`); } }
   async function runOriginalityReview() { try { const project = await factoryClient.runOriginalityReview({ projectId: props.project.id }); props.setSelectedProject(project); setOriginalityArtifacts(await factoryClient.listOriginalityReviewArtifacts({ projectId: props.project.id })); setMessage("Originality Review is ready for review."); } catch (error) { setMessage(`Originality Review failed: ${error instanceof Error ? error.message : String(error)}`); } }
-  async function approveOriginalityReview() { try { const project = await factoryClient.approveOriginalityReview({ projectId: props.project.id }); props.setSelectedProject(project); setOriginalityArtifacts(await factoryClient.listOriginalityReviewArtifacts({ projectId: props.project.id })); setMessage("Originality Review approved. Research Source Intake is unlocked."); } catch (error) { setMessage(`Originality approval failed: ${error instanceof Error ? error.message : String(error)}`); } }
+  async function approveOriginalityReview() { try { const project = await factoryClient.approveOriginalityReview({ projectId: props.project.id }); props.setSelectedProject(project); setOriginalityArtifacts(await factoryClient.listOriginalityReviewArtifacts({ projectId: props.project.id })); setMessage("Originality Review approved. Outline is now eligible."); } catch (error) { setMessage(`Originality approval failed: ${error instanceof Error ? error.message : String(error)}`); } }
   async function rejectOriginalityReview() { try { const project = await factoryClient.rejectOriginalityReview({ projectId: props.project.id }); props.setSelectedProject(project); setOriginalityArtifacts(await factoryClient.listOriginalityReviewArtifacts({ projectId: props.project.id })); setMessage("Originality Review rejected."); } catch (error) { setMessage(`Originality rejection failed: ${error instanceof Error ? error.message : String(error)}`); } }
   return (
     <>
-      <PageHeader title="Idea Lab" description="Opportunity Map must be explicitly reviewed before Idea Lab becomes runnable." actions={ideaLab.runnable ? <button className="button primary" type="button" onClick={() => void runIdeas()}>Run Idea Lab</button> : opportunity.runnable ? <button className="button primary" type="button" onClick={() => void runOpportunity()}>Run Opportunity Map</button> : <DisabledAction reason={ideaLab.blockingReasons[0]?.message ?? opportunity.blockingReasons[0]?.message ?? "Opportunity Map is not runnable."}>Run Idea Lab</DisabledAction>} />
-      <StageStatusHeader stageName="Opportunity Map" stageNumber={7} eligibility={opportunity} dependencies={["Competitor DNA"]} purpose="Synthesize evidence-backed content spaces from approved Competitor DNA only." />
-      <SectionCard title="Opportunity Map review" description="No Idea Lab run is triggered automatically.">
+      <PageHeader title="Idea Lab" description={topicMode ? "Topic mode generates original candidates directly, then pauses for one creative choice." : "Reference analysis is prepared internally; review the resulting ideas rather than approving every internal stage."} actions={topicMode || ideaLab.runnable ? <button className="button primary" type="button" onClick={() => void runIdeas()}>Generate ideas</button> : opportunity.runnable ? <button className="button primary" type="button" onClick={() => void runOpportunity()}>Run Opportunity Map</button> : <DisabledAction reason={ideaLab.blockingReasons[0]?.message ?? opportunity.blockingReasons[0]?.message ?? "Idea generation is not ready."}>Generate ideas</DisabledAction>} />
+      {!topicMode ? <StageStatusHeader stageName="Opportunity Map" stageNumber={7} eligibility={opportunity} dependencies={["Competitor DNA"]} purpose="Internal evidence synthesis; users see its result through idea candidates." /> : null}
+      {!topicMode ? <SectionCard title="Opportunity Map review" description="The map is persisted for diagnostics but is not a normal user checkpoint.">
         {artifacts.length ? artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge><p>{artifact.payloadJson.recommendedContentSpaces.map((item) => `${item.text} (${item.confidence})`).join("; ") || "No recommended content spaces."}</p>{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" type="button" disabled={!opportunity.approvable} onClick={() => void approveOpportunity()}>Approve Opportunity Map</button><button className="button danger compact" type="button" onClick={() => void rejectOpportunity()}>Reject Opportunity Map</button></div> : null}</div>) : <EmptyState title="No Opportunity Map yet" detail="Approve Competitor DNA for every included reference, then run this stage explicitly." />}
         {message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}
-      </SectionCard>
-      <StageStatusHeader stageName="Idea Lab" stageNumber={8} eligibility={ideaLab} dependencies={["Opportunity Map"]} purpose="Generate exactly twelve original candidates from the approved Opportunity Map; approving one does not run research or script." />
+      </SectionCard> : null}
+      <StageStatusHeader stageName="Idea Lab" stageNumber={8} eligibility={ideaLab} dependencies={topicMode ? [] : ["Opportunity Map"]} purpose="Generate exactly six original candidates, then pause for the user to choose one." />
       <SectionCard title="Idea candidates" description="Provider-generated candidates require an explicit choice; no candidate is selected automatically.">
         {ideaLab.status === "needs_review" ? <div className="button-row"><button className="button danger compact" type="button" onClick={() => void rejectIdeaLab()}>Reject Idea Lab</button></div> : null}
         {ideaLab.status === "needs_review" || ideaLab.status === "approved" ? (
@@ -1649,12 +2205,12 @@ function IdeaLabScreen(props: { project: FactoryProject; setSelectedProject: (pr
         ) : (
           <EmptyState
             title="Idea Lab is blocked"
-            detail={ideaLab.blockingReasons[0]?.message ?? "Approve Opportunity Map before generating or reviewing ideas. Existing legacy fixture ideas are hidden until this stage is eligible."}
-            action={opportunity.runnable ? <button className="button primary" type="button" onClick={() => void runOpportunity()}>Run Opportunity Map</button> : undefined}
+            detail={topicMode ? "Generate ideas to choose the creative direction." : ideaLab.blockingReasons[0]?.message ?? "Reference analysis is still preparing."}
+            action={topicMode || opportunity.runnable ? <button className="button primary" type="button" onClick={() => void (topicMode ? runIdeas() : runOpportunity())}>{topicMode ? "Generate ideas" : "Run Opportunity Map"}</button> : undefined}
           />
         )}
       </SectionCard>
-      <StageStatusHeader stageName="Originality Review" stageNumber={9} eligibility={originalityReview} dependencies={["Approved Idea Lab candidate", "Approved Competitor DNA"]} purpose="Check phrase, structural, thumbnail, and concept overlap against stored competitor evidence before research begins." />
+      <StageStatusHeader stageName="Originality Review" stageNumber={9} eligibility={originalityReview} dependencies={["Approved Idea Lab candidate", "Approved Competitor DNA"]} purpose="Check phrase, structural, thumbnail, and concept overlap against stored competitor evidence before Outline begins." />
       <SectionCard title="Originality Review" description="This local deterministic review compares the selected idea to approved competitor patterns; it never claims external web-search coverage.">
         {originalityArtifacts.length ? originalityArtifacts.map((artifact) => (
           <div key={artifact.id}>
@@ -1669,82 +2225,6 @@ function IdeaLabScreen(props: { project: FactoryProject; setSelectedProject: (pr
           {originalityReview.runnable ? <button className="button primary" type="button" onClick={() => void runOriginalityReview()}>Run Originality Review</button> : <DisabledAction reason={originalityReview.blockingReasons[0]?.message ?? "Originality Review is not ready to run."}>Run Originality Review</DisabledAction>}
         </div>
       </SectionCard>
-    </>
-  );
-}
-
-function ClaimsScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; textCertification: TextModelCertificationResponse }) {
-  const [title, setTitle] = useState("");
-  const [url, setUrl] = useState("");
-  const [publisher, setPublisher] = useState("");
-  const [excerpt, setExcerpt] = useState("");
-  const [sourceType, setSourceType] = useState<"primary" | "secondary">("primary");
-  const [artifacts, setArtifacts] = useState<ResearchSourcesArtifact[]>([]);
-  const [claimMapArtifacts, setClaimMapArtifacts] = useState<ClaimMapArtifact[]>([]);
-  const [message, setMessage] = useState("");
-  const intake = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "research-source-intake")!;
-  const claimMap = resolveStageEligibilities(props.project, { textVerified: props.textCertification.status === "verified" }).find((stage) => stage.stageId === "claim-map")!;
-  useEffect(() => { void factoryClient.listResearchSourcesArtifacts({ projectId: props.project.id }).then(setArtifacts).catch(() => setArtifacts([])); }, [props.project]);
-  useEffect(() => { void factoryClient.listClaimMapArtifacts({ projectId: props.project.id }).then(setClaimMapArtifacts).catch(() => setClaimMapArtifacts([])); }, [props.project]);
-  async function saveSource() { try { const project = await factoryClient.saveResearchSources({ projectId: props.project.id, sources: [{ id: `source-${Date.now()}`, title, url, publisher, excerpt, sourceType }] }); props.setSelectedProject(project); setArtifacts(await factoryClient.listResearchSourcesArtifacts({ projectId: props.project.id })); setMessage("Research source is ready for review."); } catch (error) { setMessage(`Research source save failed: ${error instanceof Error ? error.message : String(error)}`); } }
-  async function approveSources() { try { const project = await factoryClient.approveResearchSources({ projectId: props.project.id }); props.setSelectedProject(project); setArtifacts(await factoryClient.listResearchSourcesArtifacts({ projectId: props.project.id })); setMessage("Research sources approved. Claim Map is now eligible."); } catch (error) { setMessage(`Research source approval failed: ${error instanceof Error ? error.message : String(error)}`); } }
-  async function rejectSources() { try { const project = await factoryClient.rejectResearchSources({ projectId: props.project.id }); props.setSelectedProject(project); setArtifacts(await factoryClient.listResearchSourcesArtifacts({ projectId: props.project.id })); setMessage("Research sources rejected."); } catch (error) { setMessage(`Research source rejection failed: ${error instanceof Error ? error.message : String(error)}`); } }
-  async function runClaimMap() { try { const project = await factoryClient.runClaimMap({ projectId: props.project.id }); props.setSelectedProject(project); setClaimMapArtifacts(await factoryClient.listClaimMapArtifacts({ projectId: props.project.id })); setMessage("Claim Map is ready for review."); } catch (error) { setMessage(`Claim Map failed: ${error instanceof Error ? error.message : String(error)}`); } }
-  async function approveClaimMap() { try { const project = await factoryClient.approveClaimMap({ projectId: props.project.id }); props.setSelectedProject(project); setClaimMapArtifacts(await factoryClient.listClaimMapArtifacts({ projectId: props.project.id })); setMessage("Claim Map approved. Outline is now eligible."); } catch (error) { setMessage(`Claim Map approval failed: ${error instanceof Error ? error.message : String(error)}`); } }
-  async function rejectClaimMap() { try { const project = await factoryClient.rejectClaimMap({ projectId: props.project.id }); props.setSelectedProject(project); setClaimMapArtifacts(await factoryClient.listClaimMapArtifacts({ projectId: props.project.id })); setMessage("Claim Map rejected."); } catch (error) { setMessage(`Claim Map rejection failed: ${error instanceof Error ? error.message : String(error)}`); } }
-  const selectedClaim = props.project.claims[0];
-  return (
-    <>
-      <PageHeader title="Research & Claims" description="Add cited sources manually. The app never fabricates source material or web-search results." />
-      <StageStatusHeader stageName="Research Source Intake" stageNumber={10} eligibility={intake} dependencies={["Approved Originality Review"]} purpose="Collect traceable source excerpts for later claim mapping." />
-      <SectionCard title="Research source intake" description="Each submission is a cited manual source artifact that requires approval before Claim Map can use it.">
-        <div className="form-grid">
-          <FormField label="Source title" htmlFor="research-source-title"><input id="research-source-title" value={title} onChange={(event) => setTitle(event.target.value)} /></FormField>
-          <FormField label="Canonical URL" htmlFor="research-source-url"><input id="research-source-url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://..." /></FormField>
-          <FormField label="Publisher" htmlFor="research-source-publisher"><input id="research-source-publisher" value={publisher} onChange={(event) => setPublisher(event.target.value)} /></FormField>
-          <FormField label="Quoted excerpt" htmlFor="research-source-excerpt"><textarea id="research-source-excerpt" value={excerpt} onChange={(event) => setExcerpt(event.target.value)} /></FormField>
-          <FormField label="Source type" htmlFor="research-source-type"><select id="research-source-type" value={sourceType} onChange={(event) => setSourceType(event.target.value as "primary" | "secondary")}><option value="primary">Primary</option><option value="secondary">Secondary</option></select></FormField>
-          {intake.runnable && title.trim() && url.trim() && publisher.trim() && excerpt.trim() ? <button className="button primary" type="button" onClick={() => void saveSource()}>Save source for review</button> : <DisabledAction reason={intake.blockingReasons[0]?.message ?? "Enter title, canonical URL, publisher, and an excerpt before saving."}>Save source for review</DisabledAction>}
-        </div>
-        {artifacts.map((artifact) => <div key={artifact.id}>{artifact.payloadJson.sources.map((source) => <p key={source.id}><strong>{source.title}</strong> ({source.sourceType}) - {source.url}</p>)}{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" type="button" disabled={!intake.approvable} onClick={() => void approveSources()}>Approve research sources</button><button className="button danger compact" type="button" onClick={() => void rejectSources()}>Reject research sources</button></div> : null}</div>)}
-        {message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}
-      </SectionCard>
-      <StageStatusHeader stageName="Claim Map" stageNumber={11} eligibility={claimMap} dependencies={["Approved research sources", "Verified text model"]} purpose="Create source-linked claims that must be reviewed before Outline can use them." />
-      <SectionCard title="Claim Map review" description="The provider may use only approved manual source excerpts. It cannot invent sources or silently approve unsupported claims.">
-        {claimMap.runnable ? <button className="button primary" type="button" onClick={() => void runClaimMap()}>Run Claim Map</button> : <DisabledAction reason={claimMap.blockingReasons[0]?.message ?? "Claim Map is not runnable yet."}>Run Claim Map</DisabledAction>}
-        {claimMapArtifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.payloadJson.claims.map((claim) => <p key={claim.id}>{claim.text} ({claim.state}; {claim.sourceIds.join(", ")})</p>)}{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" type="button" disabled={!claimMap.approvable} onClick={() => void approveClaimMap()}>Approve Claim Map</button><button className="button danger compact" type="button" onClick={() => void rejectClaimMap()}>Reject Claim Map</button></div> : null}</div>)}
-      </SectionCard>
-      <div className="split-grid">
-        <SectionCard title="Claim list">
-          {props.project.claims.length === 0 ? (
-            <EmptyState title="No claims" detail="Claim mapping will populate this once the research pipeline exists." />
-          ) : (
-            <DataTable label="Claims">
-              <thead><tr><th>Claim</th><th>Type</th><th>Status</th><th>Confidence</th></tr></thead>
-              <tbody>
-                {props.project.claims.map((claim) => (
-                  <tr key={claim.id}>
-                    <td>{claim.text}</td>
-                    <td>{claim.type}</td>
-                    <td><StatusBadge tone={claim.state === "unsupported" ? "warning" : "info"}>{claim.state.replaceAll("_", " ")}</StatusBadge></td>
-                    <td>{Math.round(claim.confidence * 100)}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </DataTable>
-          )}
-        </SectionCard>
-        <SectionCard title="Claim inspector">
-          {selectedClaim ? (
-            <div className="inspector">
-              <p>{selectedClaim.text}</p>
-              <p><strong>Evidence:</strong> {selectedClaim.evidenceNote ?? "No evidence note"}</p>
-              <p><strong>Qualification:</strong> {selectedClaim.qualification ?? "Not provided"}</p>
-              <StatusBadge tone={selectedClaim.approvalState === "blocked" ? "warning" : "success"}>{selectedClaim.approvalState}</StatusBadge>
-            </div>
-          ) : <EmptyState title="Nothing selected" detail="Select a claim after claim mapping exists." />}
-        </SectionCard>
-      </div>
     </>
   );
 }
@@ -1787,20 +2267,20 @@ function ScriptScreen(props: { project: FactoryProject; selectedProfile: Channel
   return (
     <>
       <PageHeader title="Script" description="Outline, Script, and Fact Review remain separate review checkpoints." actions={outline.runnable ? <button className="button primary" type="button" onClick={() => void runOutline()} disabled={running}>Run Outline</button> : <DisabledAction reason={outline.blockingReasons[0]?.message ?? "Outline is not runnable."}>Run Outline</DisabledAction>} />
-      <StageStatusHeader stageName="Outline" stageNumber={12} eligibility={outline} dependencies={["Approved Claim Map", "Approved idea", "Approved Originality Review"]} purpose="Plan factual sections linked only to allowed, verified claims." />
+      <StageStatusHeader stageName="Outline" stageNumber={10} eligibility={outline} dependencies={["Approved idea", "Approved Originality Review"]} purpose="Plan sections from the approved idea without external research or claim mapping." />
       <SectionCard title="Outline review">{outlines.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.payloadJson.sections.map((section) => <p key={section.id}>{section.purpose}: {section.keyPoint}</p>)}{artifact.status === "needs_review" ? <div className="button-row">{outline.approvable ? <button className="button compact" type="button" onClick={() => void approveOutline()} disabled={running}>Approve Outline</button> : <DisabledAction reason={outline.blockingReasons[0]?.message ?? "Outline cannot be approved yet."}>Approve Outline</DisabledAction>}<button className="button danger compact" type="button" onClick={() => void rejectOutline()} disabled={running}>Reject Outline</button></div> : null}</div>)}</SectionCard>
-      <StageStatusHeader stageName="Script" stageNumber={13} eligibility={script} dependencies={["Approved Outline", "Approved Claim Map"]} purpose="Draft narration only from each outline section's allowed claims." />
+      <StageStatusHeader stageName="Script" stageNumber={11} eligibility={script} dependencies={["Approved Outline"]} purpose="Draft narration only from the approved outline." />
       <SectionCard title="Script review" description="Each run is explicit and uses the certified text model; approval persists the reviewed sections.">
         {script.runnable ? <button className="button primary" type="button" onClick={() => void runScript()} disabled={running}>Run Script</button> : <DisabledAction reason={script.blockingReasons[0]?.message ?? "Script is not runnable."}>Run Script</DisabledAction>}
         {scripts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.payloadJson.sections.map((section) => <p key={section.id}><strong>{section.purpose}</strong>: {section.narration}</p>)}{artifact.status === "needs_review" ? <div className="button-row">{script.approvable ? <button className="button compact" type="button" onClick={() => void approveScript()} disabled={running}>Approve Script</button> : <DisabledAction reason={script.blockingReasons[0]?.message ?? "Script cannot be approved yet."}>Approve Script</DisabledAction>}<button className="button danger compact" type="button" onClick={() => void rejectScript()} disabled={running}>Reject Script</button></div> : null}</div>)}
       </SectionCard>
-      <StageStatusHeader stageName="Fact Review" stageNumber={14} eligibility={factReview} dependencies={["Approved Script"]} purpose="Locally verify the claims actually used in the approved script; this is not a web-search review." />
+      <StageStatusHeader stageName="Fact Review" stageNumber={12} eligibility={factReview} dependencies={["Approved Script"]} purpose="Review script findings locally; this stage does not perform web research." />
       <SectionCard title="Fact Review" description="Blocked findings prevent approval. Qualification findings must remain qualified in narration.">
         {factReview.runnable ? <button className="button primary" type="button" onClick={() => void runFactReview()} disabled={running}>Run Fact Review</button> : <DisabledAction reason={factReview.blockingReasons[0]?.message ?? "Fact Review is not runnable."}>Run Fact Review</DisabledAction>}
         {factReviews.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge><small>Reviewer: local deterministic</small>{artifact.payloadJson.findings.map((finding) => <p key={finding.claimId}><strong>{finding.claimId}</strong>: {finding.verdict.replaceAll("_", " ")} - {finding.reason}</p>)}{artifact.status === "needs_review" ? <div className="button-row">{factReview.approvable ? <button className="button compact" type="button" onClick={() => void approveFactReview()} disabled={running}>Approve Fact Review</button> : <DisabledAction reason={factReview.blockingReasons[0]?.message ?? "Fact Review cannot be approved yet."}>Approve Fact Review</DisabledAction>}<button className="button danger compact" type="button" onClick={() => void rejectFactReview()} disabled={running}>Reject Fact Review</button></div> : null}</div>)}
         {message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}
       </SectionCard>
-      <StageStatusHeader stageName="Retention Review" stageNumber={15} eligibility={retentionReview} dependencies={["Approved Fact Review", "Approved Script"]} purpose="Review pacing and retention risks without rewriting or adding facts." />
+      <StageStatusHeader stageName="Retention Review" stageNumber={13} eligibility={retentionReview} dependencies={["Approved Fact Review", "Approved Script"]} purpose="Review pacing and retention risks without rewriting or adding facts." />
       <SectionCard title="Retention Review" description="The certified text model returns section-bound editorial findings for human review.">
         {retentionReview.runnable ? <button className="button primary" type="button" onClick={() => void runRetentionReview()} disabled={running}>Run Retention Review</button> : <DisabledAction reason={retentionReview.blockingReasons[0]?.message ?? "Retention Review is not runnable."}>Run Retention Review</DisabledAction>}
         {retentionReviews.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge><p>Verdict: {artifact.payloadJson.overallVerdict.replaceAll("_", " ")}</p>{artifact.payloadJson.findings.map((finding) => <p key={finding.sectionId}><strong>{finding.sectionId}</strong> ({finding.severity}): {finding.reason} Suggested: {finding.recommendedChange}</p>)}{artifact.status === "needs_review" ? <div className="button-row">{retentionReview.approvable ? <button className="button compact" type="button" onClick={() => void approveRetentionReview()} disabled={running}>Approve Retention Review</button> : <DisabledAction reason={retentionReview.blockingReasons[0]?.message ?? "Retention Review cannot be approved yet."}>Approve Retention Review</DisabledAction>}<button className="button danger compact" type="button" onClick={() => void rejectRetentionReview()} disabled={running}>Reject Retention Review</button></div> : null}</div>)}
@@ -1842,7 +2322,7 @@ function ScenesScreen(props: { project: FactoryProject; setSelectedProject: (pro
   return (
     <>
       <PageHeader title="Scenes" description="Review frame-timed scenes generated only from the approved Script and Retention Review." actions={eligibility.runnable ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runScenePlan({ projectId: props.project.id }), "Scene Plan is ready for review.")} disabled={running}>Run Scene Plan</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Scene Plan is not runnable."}>Run Scene Plan</DisabledAction>} />
-      <StageStatusHeader stageName="Scene Plan" stageNumber={16} eligibility={eligibility} dependencies={["Approved Retention Review"]} purpose="Create frame-timed scenes without creating assets or shots." />
+      <StageStatusHeader stageName="Scene Plan" stageNumber={15} eligibility={eligibility} dependencies={["Approved Retention Review"]} purpose="Create frame-timed scenes without creating assets or shots." />
       <SectionCard title="Scene Plan review">{artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.payloadJson.scenes.map((scene) => <p key={scene.id}>{scene.purpose}: {scene.startFrame} + {scene.durationFrames} frames</p>)}{artifact.status === "needs_review" ? <div className="button-row">{eligibility.approvable ? <button className="button compact" type="button" onClick={() => void perform(() => factoryClient.approveScenePlan({ projectId: props.project.id }), "Scene Plan approved.")} disabled={running}>Approve Scene Plan</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Scene Plan cannot be approved yet."}>Approve Scene Plan</DisabledAction>}<button className="button danger compact" type="button" onClick={() => void perform(() => factoryClient.rejectScenePlan({ projectId: props.project.id }), "Scene Plan rejected.")} disabled={running}>Reject Scene Plan</button></div> : null}</div>)}{message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</SectionCard>
       <div className="card-grid">
         {props.project.scenes.map((scene) => (
@@ -1875,7 +2355,7 @@ function ShotsScreen(props: { project: FactoryProject; setSelectedProject: (proj
           <><div className="segmented">{(["board", "table", "timeline"] as const).map((item) => <button className={view === item ? "active" : ""} key={item} onClick={() => setView(item)} type="button">{item}</button>)}</div>{eligibility.runnable ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runShotPlan({ projectId: props.project.id }), "Shot Plan is ready for review.")} disabled={running}>Run Shot Plan</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Shot Plan is not runnable."}>Run Shot Plan</DisabledAction>}</>
         }
       />
-      <StageStatusHeader stageName="Shot Plan" stageNumber={17} eligibility={eligibility} dependencies={["Approved Scene Plan"]} purpose="Create frame-timed shots without creating or assigning assets." />
+      <StageStatusHeader stageName="Shot Plan" stageNumber={16} eligibility={eligibility} dependencies={["Approved Scene Plan"]} purpose="Create frame-timed shots without creating or assigning assets." />
       <SectionCard title="Shot Plan review">{artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.payloadJson.shots.map((shot) => <p key={shot.id}>{shot.purpose}: {shot.startFrame} + {shot.durationFrames} frames</p>)}{artifact.status === "needs_review" ? <div className="button-row">{eligibility.approvable ? <button className="button compact" type="button" onClick={() => void perform(() => factoryClient.approveShotPlan({ projectId: props.project.id }), "Shot Plan approved.")} disabled={running}>Approve Shot Plan</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Shot Plan cannot be approved yet."}>Approve Shot Plan</DisabledAction>}<button className="button danger compact" type="button" onClick={() => void perform(() => factoryClient.rejectShotPlan({ projectId: props.project.id }), "Shot Plan rejected.")} disabled={running}>Reject Shot Plan</button></div> : null}</div>)}{message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</SectionCard>
       {view === "board" ? (
         <div className="shot-board">
@@ -1914,49 +2394,53 @@ function ShotsScreen(props: { project: FactoryProject; setSelectedProject: (proj
   );
 }
 
-function VisualsScreen(props: { project: FactoryProject; imageCertification: ImageModelCertificationResponse; setSelectedProject: (project: FactoryProject | null) => void; setImageCertification: (certification: ImageModelCertificationResponse) => void }) {
+function VisualsScreen(props: { project: FactoryProject; textCertification: TextModelCertificationResponse; imageCertification: ImageModelCertificationResponse; setSelectedProject: (project: FactoryProject | null) => void; setImageCertification: (certification: ImageModelCertificationResponse) => void; startSemiAutomatic: (chain: SemiAutomaticChain, project: FactoryProject) => Promise<void> }) {
   const [artifacts, setArtifacts] = useState<VisualRoutingArtifact[]>([]); const [promptArtifacts, setPromptArtifacts] = useState<PromptPreparationArtifact[]>([]); const [assetArtifacts, setAssetArtifacts] = useState<AssetAcquisitionArtifact[]>([]); const [assetReviewArtifacts, setAssetReviewArtifacts] = useState<AssetReviewArtifact[]>([]); const [running, setRunning] = useState(false); const [message, setMessage] = useState("");
   const visualModes = ["reuse", "document", "diagram", "stock_image", "stock_video", "ai_image", "ai_video", "manual_upload"] as const;
   const eligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "visual-routing")!;
-  const promptEligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "prompt-preparation")!;
+  const promptEligibility = resolveStageEligibilities(props.project, { textVerified: props.textCertification.status === "verified" }).find((stage) => stage.stageId === "prompt-preparation")!;
   const assetEligibility = resolveStageEligibilities(props.project, { imageVerified: props.imageCertification.status === "verified" }).find((stage) => stage.stageId === "asset-acquisition")!;
   const assetReviewEligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "asset-review")!;
+  const nextChain = nextSemiAutomaticChain(props.project);
   const refresh = async () => { const [routing, prompts, assets, reviews] = await Promise.all([factoryClient.listVisualRoutingArtifacts({ projectId: props.project.id }), factoryClient.listPromptPreparationArtifacts({ projectId: props.project.id }), factoryClient.listAssetAcquisitionArtifacts({ projectId: props.project.id }), factoryClient.listAssetReviewArtifacts({ projectId: props.project.id })]); setArtifacts(routing); setPromptArtifacts(prompts); setAssetArtifacts(assets); setAssetReviewArtifacts(reviews); };
   useEffect(() => { void refresh().catch(() => setArtifacts([])); }, [props.project.id]);
   async function perform(action: () => Promise<FactoryProject>, success: string) { setRunning(true); try { props.setSelectedProject(await action()); await refresh(); setMessage(success); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } finally { setRunning(false); } }
   return <>
-    <PageHeader title="Visual Sources" description="Route approved shots to visual modes before preparing prompts or acquiring assets." actions={eligibility.runnable ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runVisualRouting({ projectId: props.project.id }), "Visual Routing is ready for review.")} disabled={running}>Run Visual Routing</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Visual Routing is not runnable."}>Run Visual Routing</DisabledAction>} />
-    <StageStatusHeader stageName="Visual Routing" stageNumber={18} eligibility={eligibility} dependencies={["Approved Shot Plan"]} purpose="Assign an editable visual mode per shot; this stage does not generate assets." />
+    <PageHeader title="Visual Sources" description="Route approved shots to visual modes before preparing prompts or acquiring assets." actions={canRetryStage(eligibility) ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runVisualRouting({ projectId: props.project.id }), eligibility.status === "failed" || eligibility.status === "needs_attention" ? "Visual Routing retry is ready for review." : "Visual Routing is ready for review.")} disabled={running}>{eligibility.status === "failed" || eligibility.status === "needs_attention" ? "Retry Visual Routing" : "Run Visual Routing"}</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Visual Routing is not runnable."}>Run Visual Routing</DisabledAction>} />
+    <StageStatusHeader stageName="Visual Routing" stageNumber={16} eligibility={eligibility} dependencies={["Approved Shot Plan"]} purpose="Assign an editable visual mode per shot; this stage does not generate assets." />
     <SectionCard title="Visual Routing review">{artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.payloadJson.shots.map((shot) => <p key={shot.id}><strong>{shot.id}</strong>: {shot.purpose} - {artifact.status === "needs_review" ? <select aria-label={`Visual mode for ${shot.id}`} value={shot.visualMode} disabled={running} onChange={(event) => void perform(() => factoryClient.editVisualRouting({ projectId: props.project.id, artifactId: artifact.id, shotId: shot.id, visualMode: event.target.value as FactoryProject["shots"][number]["visualMode"] }), "Visual Routing revision is ready for review.")}>{visualModes.map((mode) => <option key={mode} value={mode}>{mode.replaceAll("_", " ")}</option>)}</select> : shot.visualMode}</p>)}{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" type="button" onClick={() => void perform(() => factoryClient.approveVisualRouting({ projectId: props.project.id }), "Visual Routing approved.")} disabled={running || !eligibility.approvable}>Approve Visual Routing</button><button className="button danger compact" type="button" onClick={() => void perform(() => factoryClient.rejectVisualRouting({ projectId: props.project.id }), "Visual Routing rejected.")} disabled={running}>Reject Visual Routing</button></div> : null}</div>)}{message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</SectionCard>
-    <StageStatusHeader stageName="Prompt Preparation" stageNumber={19} eligibility={promptEligibility} dependencies={["Approved Visual Routing"]} purpose="Prepare reviewable generation prompts only for AI-routed shots; no assets are created." />
+    <StageStatusHeader stageName="Prompt Preparation" stageNumber={17} eligibility={promptEligibility} dependencies={["Approved Visual Routing"]} purpose="Prepare reviewable generation prompts only for AI-routed shots; no assets are created." />
     <SectionCard title="Prompt Preparation review">{promptEligibility.runnable ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runPromptPreparation({ projectId: props.project.id }), "Prompt Preparation is ready for review.")} disabled={running}>Run Prompt Preparation</button> : <DisabledAction reason={promptEligibility.blockingReasons[0]?.message ?? "Prompt Preparation is not runnable."}>Run Prompt Preparation</DisabledAction>}{promptArtifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.payloadJson.prompts.map((prompt) => <p key={prompt.shotId}><strong>{prompt.shotId}</strong>: {prompt.positivePrompt}</p>)}{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" type="button" onClick={() => void perform(() => factoryClient.approvePromptPreparation({ projectId: props.project.id }), "Prompt Preparation approved.")} disabled={running || !promptEligibility.approvable}>Approve Prompt Preparation</button><button className="button danger compact" type="button" onClick={() => void perform(() => factoryClient.rejectPromptPreparation({ projectId: props.project.id }), "Prompt Preparation rejected.")} disabled={running}>Reject Prompt Preparation</button></div> : null}</div>)}</SectionCard>
-    <StageStatusHeader stageName="Asset Acquisition" stageNumber={20} eligibility={assetEligibility} dependencies={["Approved Prompt Preparation", "Verified image model"]} purpose="Generate one validated local image per approved AI-image prompt; every result remains in review." />
+    <StageStatusHeader stageName="Asset Acquisition" stageNumber={18} eligibility={assetEligibility} dependencies={["Approved Prompt Preparation", "Verified image model"]} purpose="Generate one validated local image per approved AI-image prompt; every result remains in review." />
     <SectionCard title="Image model certification" description="This sends exactly one paid capability request only after you click the button. A selected or discovered model is not enough."><StatusBadge tone={props.imageCertification.status === "verified" ? "success" : "warning"}>{props.imageCertification.status.replaceAll("_", " ")}</StatusBadge><p>{props.imageCertification.message}</p><button className="button secondary" type="button" disabled={running} onClick={() => { if (window.confirm("Run one image certification request with the selected 9Router image model?")) { setRunning(true); void factoryClient.run9RouterImageCertification({ providerId: "9router", confirmation: "Run 1 image certification request" }).then((result) => { props.setImageCertification(result); setMessage(result.message); }).catch((error) => setMessage(error instanceof Error ? error.message : String(error))).finally(() => setRunning(false)); } }}>Run image certification</button></SectionCard>
     <SectionCard title="Asset Acquisition review" description="This is sequential and explicit. Image URLs and provider credentials are never stored in project artifacts.">{assetEligibility.runnable ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runAssetAcquisition({ projectId: props.project.id }), "Generated assets are ready for review.")} disabled={running}>Generate approved AI images</button> : <DisabledAction reason={assetEligibility.blockingReasons[0]?.message ?? "Asset Acquisition is not runnable."}>Generate approved AI images</DisabledAction>}{assetArtifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.payloadJson.assets.map((asset) => <p key={asset.shotId}><strong>{asset.shotId}</strong>: {asset.mimeType}, {asset.width}x{asset.height}, SHA-256 {asset.sha256.slice(0, 12)}...</p>)}{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" type="button" onClick={() => void perform(() => factoryClient.approveAssetAcquisition({ projectId: props.project.id }), "Asset acquisition approved; continue to Asset Review.")} disabled={running || !assetEligibility.approvable}>Approve acquisition batch</button><button className="button danger compact" type="button" onClick={() => void perform(() => factoryClient.rejectAssetAcquisition({ projectId: props.project.id }), "Asset acquisition rejected.")} disabled={running}>Reject acquisition batch</button></div> : null}</div>)}</SectionCard>
-    <StageStatusHeader stageName="Asset Review" stageNumber={21} eligibility={assetReviewEligibility} dependencies={["Approved Asset Acquisition"]} purpose="Approve or reject each image, then explicitly assign it to its mapped shot. No image reaches the timeline by default." />
-    <SectionCard title="Asset Review" description="Review decisions create immutable revisions. A generated asset cannot be assigned to a different shot.">{assetReviewEligibility.runnable ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runAssetReview({ projectId: props.project.id }), "Asset Review is ready for per-asset decisions.")} disabled={running}>Start Asset Review</button> : <DisabledAction reason={assetReviewEligibility.blockingReasons[0]?.message ?? "Asset Review is not runnable."}>Start Asset Review</DisabledAction>}{assetReviewArtifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.status === "needs_review" ? props.project.shots.filter((shot) => shot.visualMode === "manual_upload").map((shot) => <button className="button secondary compact" type="button" disabled={running} key={`upload-${shot.id}`} onClick={() => void perform(() => factoryClient.selectManualAssetUpload({ projectId: props.project.id, artifactId: artifact.id, shotId: shot.id }), "Manual image imported and ready for review.")}>Upload for {shot.id}</button>) : null}{artifact.payloadJson.assets.map((item) => <div key={item.asset.sha256}><p><strong>{item.asset.shotId}</strong>: {item.reviewStatus.replaceAll("_", " ")} {item.assignedShotId ? `- assigned to ${item.assignedShotId}` : "- unassigned"}</p>{artifact.status === "needs_review" ? <div className="button-row">{item.reviewStatus === "needs_review" ? <><button className="button compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: artifact.id, assetSha256: item.asset.sha256, action: "approve" }), "Asset approved. Assign it explicitly before completing review.")}>Approve</button><button className="button danger compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: artifact.id, assetSha256: item.asset.sha256, action: "reject" }), "Asset rejected; it cannot be assigned.")}>Reject</button></> : null}{item.reviewStatus === "approved" && !item.assignedShotId ? <button className="button compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: artifact.id, assetSha256: item.asset.sha256, action: "assign", shotId: item.asset.shotId }), "Asset assigned to its mapped shot.")}>Assign to {item.asset.shotId}</button> : null}{item.assignedShotId ? <button className="button secondary compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: artifact.id, assetSha256: item.asset.sha256, action: "unassign" }), "Asset unassigned.")}>Unassign</button> : null}</div> : null}</div>)}{artifact.status === "needs_review" ? <div className="button-row"><button className="button primary" type="button" disabled={running || !assetReviewEligibility.approvable} onClick={() => void perform(() => factoryClient.approveAssetReview({ projectId: props.project.id }), "Asset Review approved. Voice Generation can now use only assigned approved assets.")}>Complete Asset Review</button><button className="button danger compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.rejectAssetReview({ projectId: props.project.id }), "Asset Review rejected.")}>Reject Asset Review</button></div> : null}</div>)}</SectionCard>
+    <StageStatusHeader stageName="Asset Review" stageNumber={19} eligibility={assetReviewEligibility} dependencies={["Approved Asset Acquisition"]} purpose="Approve or reject each image, then explicitly assign it to its mapped shot. No image reaches the timeline by default." />
+    <SectionCard title="Asset Review" description="Review decisions create immutable revisions. A generated asset cannot be assigned to a different shot.">{canRetryStage(assetReviewEligibility) ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runAssetReview({ projectId: props.project.id }), assetReviewEligibility.status === "failed" || assetReviewEligibility.status === "needs_attention" ? "Asset Review retry is ready for per-asset decisions." : "Asset Review is ready for per-asset decisions.")} disabled={running}>{assetReviewEligibility.status === "failed" || assetReviewEligibility.status === "needs_attention" ? "Retry Asset Review" : "Start Asset Review"}</button> : <DisabledAction reason={assetReviewEligibility.blockingReasons[0]?.message ?? "Asset Review is not runnable."}>Start Asset Review</DisabledAction>}{assetReviewArtifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.status === "needs_review" ? props.project.shots.filter((shot) => shot.visualMode === "manual_upload").map((shot) => <button className="button secondary compact" type="button" disabled={running} key={`upload-${shot.id}`} onClick={() => void perform(() => factoryClient.selectManualAssetUpload({ projectId: props.project.id, artifactId: artifact.id, shotId: shot.id }), "Manual image imported and ready for review.")}>Upload for {shot.id}</button>) : null}{artifact.payloadJson.assets.map((item) => <div key={item.asset.sha256}><p><strong>{item.asset.shotId}</strong>: {item.reviewStatus.replaceAll("_", " ")} {item.assignedShotId ? `- assigned to ${item.assignedShotId}` : "- unassigned"}</p>{artifact.status === "needs_review" ? <div className="button-row">{item.reviewStatus === "needs_review" ? <><button className="button compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: artifact.id, assetSha256: item.asset.sha256, action: "approve" }), "Asset approved. Assign it explicitly before completing review.")}>Approve</button><button className="button danger compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: artifact.id, assetSha256: item.asset.sha256, action: "reject" }), "Asset rejected; it cannot be assigned.")}>Reject</button></> : null}{item.reviewStatus === "approved" && !item.assignedShotId ? <button className="button compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: artifact.id, assetSha256: item.asset.sha256, action: "assign", shotId: item.asset.shotId }), "Asset assigned to its mapped shot.")}>Assign to {item.asset.shotId}</button> : null}{item.assignedShotId ? <button className="button secondary compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: artifact.id, assetSha256: item.asset.sha256, action: "unassign" }), "Asset unassigned.")}>Unassign</button> : null}</div> : null}</div>)}{artifact.status === "needs_review" ? <div className="button-row"><button className="button primary" type="button" disabled={running || !assetReviewEligibility.approvable} onClick={() => void perform(async () => { const project = await factoryClient.approveAssetReview({ projectId: props.project.id }); if (project.setup.workflowMode === "semi_automatic") void props.startSemiAutomatic("assets", project); return project; }, "Asset Review approved. Voice Generation can now use only assigned approved assets.")}>Complete Asset Review</button><button className="button danger compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.rejectAssetReview({ projectId: props.project.id }), "Asset Review rejected.")}>Reject Asset Review</button></div> : null}</div>)}</SectionCard>
+    {props.project.setup.workflowMode === "semi_automatic" && nextChain === "assets" && assetReviewEligibility.status === "approved" ? <SectionCard title="Continue automatic production" description="Asset Review is approved. The next stages run automatically until the final Preview Render checkpoint."><button className="button primary" type="button" disabled={running} onClick={() => void props.startSemiAutomatic("assets", props.project)}>Continue to Preview Render</button></SectionCard> : null}
     <div className="shot-board">{props.project.shots.map((shot) => <article className="shot-card" key={shot.id}><div className="shot-thumb">No asset</div><div><strong>{shot.id}</strong><span>{shot.sceneId}</span></div><p>{shot.purpose}</p><StatusBadge tone="warning">{shot.visualMode}</StatusBadge></article>)}</div>
   </>;
 }
 
-function TimelineScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void }) {
+function TimelineScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; startSemiAutomatic: (chain: SemiAutomaticChain, project: FactoryProject) => Promise<void> }) {
   const [artifacts, setArtifacts] = useState<TimelineAssemblyArtifact[]>([]); const [previewArtifacts, setPreviewArtifacts] = useState<PreviewRenderArtifact[]>([]); const [running, setRunning] = useState(false); const [message, setMessage] = useState("");
   const eligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "timeline-assembly")!;
   const previewEligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "preview-render")!;
+  const nextChain = nextSemiAutomaticChain(props.project);
   const refresh = async () => { const [timeline, previews] = await Promise.all([factoryClient.listTimelineAssemblyArtifacts({ projectId: props.project.id }), factoryClient.listPreviewRenderArtifacts({ projectId: props.project.id })]); setArtifacts(timeline); setPreviewArtifacts(previews); };
   useEffect(() => { void refresh().catch(() => setArtifacts([])); }, [props.project.id]);
   async function perform(action: () => Promise<FactoryProject>, success: string) { setRunning(true); try { props.setSelectedProject(await action()); await refresh(); setMessage(success); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } finally { setRunning(false); } }
   const totalFrames = Math.max(...props.project.timeline.items.map((item) => item.startFrame + item.durationFrames), 1);
   return (
     <>
-      <PageHeader title="Timeline" description="Assemble approved visuals, voice, and subtitles into an integer-frame review timeline." actions={eligibility.runnable ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runTimelineAssembly({ projectId: props.project.id }), "Timeline Assembly is ready for review.")}>Assemble timeline</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Timeline Assembly is not runnable."}>Assemble timeline</DisabledAction>} />
-      <StageStatusHeader stageName="Timeline Assembly" stageNumber={24} eligibility={eligibility} dependencies={["Approved Asset Review", "Approved Voice", "Approved Subtitles"]} purpose="Create a reviewable timeline only from approved media; it does not render or export." />
+      <PageHeader title="Timeline" description="Assemble approved visuals, voice, and subtitles into an integer-frame review timeline." actions={canRetryStage(eligibility) ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runTimelineAssembly({ projectId: props.project.id }), eligibility.status === "failed" || eligibility.status === "needs_attention" ? "Timeline Assembly retry is ready for review." : "Timeline Assembly is ready for review.")}>{eligibility.status === "failed" || eligibility.status === "needs_attention" ? "Retry Timeline Assembly" : "Assemble timeline"}</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Timeline Assembly is not runnable."}>Assemble timeline</DisabledAction>} />
+      <StageStatusHeader stageName="Timeline Assembly" stageNumber={22} eligibility={eligibility} dependencies={["Approved Asset Review", "Approved Voice", "Approved Subtitles"]} purpose="Create a reviewable timeline only from approved media; it does not render or export." />
 <SectionCard title="Timeline Assembly review">{artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : artifact.status === "rejected" ? "danger" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge><p>{artifact.payloadJson.items.length} media items at {artifact.payloadJson.fps} fps</p>{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" type="button" disabled={running || !eligibility.approvable} onClick={() => void perform(() => factoryClient.approveTimelineAssembly({ projectId: props.project.id }), "Timeline Assembly approved.")}>Approve timeline</button><button className="button danger compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.rejectTimelineAssembly({ projectId: props.project.id }), "Timeline Assembly rejected.")}>Reject timeline</button></div> : null}</div>)}{message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</SectionCard>
-      <StageStatusHeader stageName="Preview Render" stageNumber={25} eligibility={previewEligibility} dependencies={["Approved Timeline Assembly"]} purpose="Render real approved visual and narration media with FFmpeg, then review the validated local preview before QA." />
+      <StageStatusHeader stageName="Preview Render" stageNumber={23} eligibility={previewEligibility} dependencies={["Approved Timeline Assembly"]} purpose="Render real approved visual and narration media with FFmpeg, then review the validated local preview before QA." />
       <SectionCard title="Preview Render review" description="This runs FFmpeg only after you click it. The renderer cannot select paths or invoke a process directly.">
-        {previewEligibility.runnable ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runPreviewRender({ projectId: props.project.id }), "Preview Render is ready for review.")}>{running ? "Rendering preview..." : "Render approved preview"}</button> : <DisabledAction reason={previewEligibility.blockingReasons[0]?.message ?? "Preview Render requires an approved timeline."}>Render approved preview</DisabledAction>}
-        {previewArtifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : artifact.status === "rejected" ? "danger" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge><p>{artifact.payloadJson.width}x{artifact.payloadJson.height}, {artifact.payloadJson.durationSeconds.toFixed(2)}s</p><p>{artifact.relativeFilePath}</p><p>SHA-256: {artifact.payloadJson.sha256 ?? "Unavailable; render again before approval."}</p>{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" type="button" disabled={running || !previewEligibility.approvable} onClick={() => void perform(() => factoryClient.approvePreviewRender({ projectId: props.project.id }), "Preview Render approved.")}>Approve preview</button><button className="button danger compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.rejectPreviewRender({ projectId: props.project.id }), "Preview Render rejected. Render another approved timeline when ready.")}>Reject preview</button></div> : null}</div>)}
+        {canRetryStage(previewEligibility) ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runPreviewRender({ projectId: props.project.id }), previewEligibility.status === "failed" || previewEligibility.status === "needs_attention" ? "Preview Render retry is ready for review." : "Preview Render is ready for review.")}>{running ? "Rendering preview..." : previewEligibility.status === "failed" || previewEligibility.status === "needs_attention" ? "Retry Preview Render" : "Render approved preview"}</button> : <DisabledAction reason={previewEligibility.blockingReasons[0]?.message ?? "Preview Render requires an approved timeline."}>Render approved preview</DisabledAction>}
+        {previewArtifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : artifact.status === "rejected" ? "danger" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge><p>{artifact.payloadJson.width}x{artifact.payloadJson.height}, {artifact.payloadJson.durationSeconds.toFixed(2)}s</p><p>{artifact.relativeFilePath}</p><p>SHA-256: {artifact.payloadJson.sha256 ?? "Unavailable; render again before approval."}</p>{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" type="button" disabled={running || !previewEligibility.approvable} onClick={() => void perform(async () => { const project = await factoryClient.approvePreviewRender({ projectId: props.project.id }); if (project.setup.workflowMode === "semi_automatic") void props.startSemiAutomatic("preview", project); return project; }, "Preview Render approved.")}>Approve preview</button><button className="button danger compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.rejectPreviewRender({ projectId: props.project.id }), "Preview Render rejected. Render another approved timeline when ready.")}>Reject preview</button></div> : null}</div>)}
       </SectionCard>
+      {props.project.setup.workflowMode === "semi_automatic" && nextChain === "preview" && previewEligibility.status === "approved" ? <SectionCard title="Continue automatic production" description="The final Preview Render is approved. CapCut Draft and Packaging Export will run automatically."><button className="button primary" type="button" disabled={running} onClick={() => void props.startSemiAutomatic("preview", props.project)}>Continue to CapCut and Packaging</button></SectionCard> : null}
       <SectionCard>
         <div className="timeline-view">
           {props.project.timeline.items.map((item) => (
@@ -1973,20 +2457,23 @@ function TimelineScreen(props: { project: FactoryProject; setSelectedProject: (p
 function QaScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void }) {
   const [artifacts, setArtifacts] = useState<QaArtifact[]>([]); const [running, setRunning] = useState(false); const [message, setMessage] = useState("");
   const eligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "qa")!;
+  const canRunQa = canRetryStage(eligibility);
   const refresh = () => factoryClient.listQaArtifacts({ projectId: props.project.id }).then(setArtifacts);
   useEffect(() => { void refresh().catch(() => setArtifacts([])); }, [props.project.id]);
   async function perform(action: () => Promise<FactoryProject>, success: string) { setRunning(true); try { props.setSelectedProject(await action()); await refresh(); setMessage(success); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } finally { setRunning(false); } }
-  return <><PageHeader title="QA" description="Run deterministic evidence checks after an approved preview. QA never fabricates AI findings or auto-approves the project." actions={eligibility.runnable ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runQa({ projectId: props.project.id }), "QA report is ready for review.")}>Run QA</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "QA requires an approved preview."}>Run QA</DisabledAction>} /><StageStatusHeader stageName="QA" stageNumber={26} eligibility={eligibility} dependencies={["Approved Preview Render"]} purpose="Inspect persisted artifacts and local media evidence before CapCut Draft." /><SectionCard title="QA reports">{artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.payloadJson.findings.length ? artifact.payloadJson.findings.map((finding, index) => <p key={`${finding.code}-${index}`}><strong>{finding.severity}</strong> {finding.code}: {finding.message}</p>) : <p>No deterministic findings.</p>}{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" disabled={running || !eligibility.approvable || artifact.payloadJson.findings.some((finding) => finding.severity === "blocking")} type="button" onClick={() => void perform(() => factoryClient.approveQa({ projectId: props.project.id }), "QA approved.")}>Approve QA</button><button className="button danger compact" disabled={running} type="button" onClick={() => void perform(() => factoryClient.rejectQa({ projectId: props.project.id }), "QA rejected.")}>Reject QA</button></div> : null}</div>)}{message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</SectionCard></>;
+  return <><PageHeader title="QA" description="Run deterministic evidence checks after an approved preview. QA never fabricates AI findings or auto-approves the project." actions={canRunQa ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runQa({ projectId: props.project.id }), eligibility.status === "failed" || eligibility.status === "needs_attention" ? "QA retry is ready for review." : "QA report is ready for review.")}>{eligibility.status === "failed" || eligibility.status === "needs_attention" ? "Retry QA" : "Run QA"}</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "QA requires an approved preview."}>Run QA</DisabledAction>} /><StageStatusHeader stageName="QA" stageNumber={25} eligibility={eligibility} dependencies={["Approved Preview Render"]} purpose="Inspect persisted artifacts and local media evidence before CapCut Draft." /><SectionCard title="QA reports">{artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge>{artifact.payloadJson.findings.length ? artifact.payloadJson.findings.map((finding, index) => <p key={`${finding.code}-${index}`}><strong>{finding.severity}</strong> {finding.code}: {finding.message}</p>) : <p>No deterministic findings.</p>}{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" disabled={running || !eligibility.approvable || artifact.payloadJson.findings.some((finding) => finding.severity === "blocking")} type="button" onClick={() => void perform(() => factoryClient.approveQa({ projectId: props.project.id }), "QA approved.")}>Approve QA</button><button className="button danger compact" disabled={running} type="button" onClick={() => void perform(() => factoryClient.rejectQa({ projectId: props.project.id }), "QA rejected.")}>Reject QA</button></div> : null}</div>)}{message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</SectionCard></>;
 }
 
 function ExportScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void }) {
   const [artifacts, setArtifacts] = useState<PackagingExportArtifact[]>([]); const [capcutArtifacts, setCapcutArtifacts] = useState<CapCutDraftArtifact[]>([]); const [running, setRunning] = useState(false); const [message, setMessage] = useState("");
   const eligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "packaging-export")!;
   const capcutEligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "capcut-draft")!;
+  const canRunCapcut = canRetryStage(capcutEligibility);
+  const canRunPackaging = canRetryStage(eligibility);
   const refresh = async () => { const [exports, drafts] = await Promise.all([factoryClient.listPackagingExportArtifacts({ projectId: props.project.id }), factoryClient.listCapCutDraftArtifacts({ projectId: props.project.id })]); setArtifacts(exports); setCapcutArtifacts(drafts); };
   useEffect(() => { void refresh().catch(() => setArtifacts([])); }, [props.project.id]);
   async function perform(action: () => Promise<FactoryProject>, success: string) { setRunning(true); try { props.setSelectedProject(await action()); await refresh(); setMessage(success); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } finally { setRunning(false); } }
-  return <><PageHeader title="Export" description="Create a reproducible, reviewed manifest from approved production artifacts only." actions={eligibility.runnable ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runPackagingExport({ projectId: props.project.id }), "Package manifest is ready for review.")}>Create package manifest</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Packaging requires approved CapCut Draft and QA."}>Create package manifest</DisabledAction>} /><StageStatusHeader stageName="CapCut Draft" stageNumber={27} eligibility={capcutEligibility} dependencies={["Approved QA", "Approved Timeline"]} purpose="Create a structural draft for manual CapCut desktop review; it is never auto-approved." /><SectionCard title="CapCut Draft review">{capcutEligibility.runnable ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runCapCutDraft({ projectId: props.project.id }), "CapCut draft is ready for manual desktop review.")}>Create CapCut draft</button> : <DisabledAction reason={capcutEligibility.blockingReasons[0]?.message ?? "CapCut Draft requires approved QA and runtime prerequisites."}>Create CapCut draft</DisabledAction>}{capcutArtifacts.map((artifact) => <p key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : artifact.status === "rejected" ? "danger" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge> {artifact.payloadJson.draftName}: {artifact.payloadJson.trackCounts.video} video, {artifact.payloadJson.trackCounts.audio} audio, {artifact.payloadJson.trackCounts.text} subtitle tracks. {artifact.status === "needs_review" ? <span className="button-row"><button className="button compact" disabled={running || !capcutEligibility.approvable} type="button" onClick={() => { if (window.confirm("Confirm that you opened this draft in CapCut and verified that video, audio, and subtitle tracks are editable.")) void perform(() => factoryClient.approveCapCutDraft({ projectId: props.project.id, confirmation: "I opened the draft in CapCut and verified editable tracks" }), "CapCut Draft approved after manual verification."); }}>Confirm CapCut review</button><button className="button danger compact" disabled={running} type="button" onClick={() => void perform(() => factoryClient.rejectCapCutDraft({ projectId: props.project.id }), "CapCut Draft rejected.")}>Reject draft</button></span> : null}</p>)}</SectionCard><StageStatusHeader stageName="Packaging Export" stageNumber={28} eligibility={eligibility} dependencies={["Approved CapCut Draft", "Approved QA"]} purpose="Exports no credentials, signed URLs, absolute paths, or unapproved artifacts." /><SectionCard title="Package manifests">{artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge><p>{artifact.relativeFilePath}</p><p>{artifact.payloadJson.artifactIds.length} approved artifacts, SHA-256 {artifact.payloadJson.sha256.slice(0, 12)}...</p>{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" disabled={running || !eligibility.approvable} type="button" onClick={() => void perform(() => factoryClient.approvePackagingExport({ projectId: props.project.id }), "Package manifest approved.")}>Approve package</button><button className="button danger compact" disabled={running} type="button" onClick={() => void perform(() => factoryClient.rejectPackagingExport({ projectId: props.project.id }), "Package manifest rejected.")}>Reject package</button></div> : null}</div>)}{message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</SectionCard></>;
+  return <><PageHeader title="Export" description="Create a reproducible, reviewed manifest from approved production artifacts only." actions={canRunPackaging ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runPackagingExport({ projectId: props.project.id }), eligibility.status === "failed" || eligibility.status === "needs_attention" ? "Packaging retry is ready for review." : "Package manifest is ready for review.")}>{eligibility.status === "failed" || eligibility.status === "needs_attention" ? "Retry Packaging Export" : "Create package manifest"}</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Packaging requires approved CapCut Draft and QA."}>Create package manifest</DisabledAction>} /><StageStatusHeader stageName="CapCut Draft" stageNumber={26} eligibility={capcutEligibility} dependencies={["Approved QA", "Approved Timeline"]} purpose="Create a structural draft for manual CapCut desktop review; it is never auto-approved." /><SectionCard title="CapCut Draft review">{canRunCapcut ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runCapCutDraft({ projectId: props.project.id }), capcutEligibility.status === "failed" || capcutEligibility.status === "needs_attention" ? "CapCut Draft retry is ready for manual desktop review." : "CapCut draft is ready for manual desktop review.")}>{capcutEligibility.status === "failed" || capcutEligibility.status === "needs_attention" ? "Retry CapCut draft" : "Create CapCut draft"}</button> : <DisabledAction reason={capcutEligibility.blockingReasons[0]?.message ?? "CapCut Draft requires approved QA and runtime prerequisites."}>Create CapCut draft</DisabledAction>}{capcutArtifacts.map((artifact) => <p key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : artifact.status === "rejected" ? "danger" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge> {artifact.payloadJson.draftName}: {artifact.payloadJson.trackCounts.video} video, {artifact.payloadJson.trackCounts.audio} audio, {artifact.payloadJson.trackCounts.text} subtitle tracks. {artifact.status === "needs_review" ? <span className="button-row"><button className="button compact" disabled={running || !capcutEligibility.approvable} type="button" onClick={() => { if (window.confirm("Confirm that you opened this draft in CapCut and verified that video, audio, and subtitle tracks are editable.")) void perform(() => factoryClient.approveCapCutDraft({ projectId: props.project.id, confirmation: "I opened the draft in CapCut and verified editable tracks" }), "CapCut Draft approved after manual verification."); }}>Confirm CapCut review</button><button className="button danger compact" disabled={running} type="button" onClick={() => void perform(() => factoryClient.rejectCapCutDraft({ projectId: props.project.id }), "CapCut Draft rejected.")}>Reject draft</button></span> : null}</p>)}</SectionCard><StageStatusHeader stageName="Packaging Export" stageNumber={27} eligibility={eligibility} dependencies={["Approved CapCut Draft", "Approved QA"]} purpose="Exports no credentials, signed URLs, absolute paths, or unapproved artifacts." /><SectionCard title="Package manifests">{artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge><p>{artifact.relativeFilePath}</p><p>{artifact.payloadJson.artifactIds.length} approved artifacts, SHA-256 {artifact.payloadJson.sha256.slice(0, 12)}...</p>{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" disabled={running || !eligibility.approvable} type="button" onClick={() => void perform(() => factoryClient.approvePackagingExport({ projectId: props.project.id }), "Package manifest approved.")}>Approve package</button><button className="button danger compact" disabled={running} type="button" onClick={() => void perform(() => factoryClient.rejectPackagingExport({ projectId: props.project.id }), "Package manifest rejected.")}>Reject package</button></div> : null}</div>)}{message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</SectionCard></>;
 }
 
 function QueueScreen(props: { queue: QueueSnapshot; selectedProject: FactoryProject | null; onRunDemo: () => Promise<void> }) {
@@ -2097,8 +2584,10 @@ function ProvidersScreen(props: {
   const [savingCredential, setSavingCredential] = useState(false);
   const [savingModelConfiguration, setSavingModelConfiguration] = useState(false);
   const [certificationRunning, setCertificationRunning] = useState(false);
+  const [imageCertificationRunning, setImageCertificationRunning] = useState(false);
   const [certificationRetryUsed, setCertificationRetryUsed] = useState(false);
   const [savingStock, setSavingStock] = useState(false);
+  const modelRefreshRunning = useRef(false);
   const modelListingRunning = modelListStatus === "testing";
   const baseUrlValid = isValidProviderBaseUrl(baseUrl);
   const discoveredModelIds = models.map((model) => model.id);
@@ -2122,6 +2611,11 @@ function ProvidersScreen(props: {
     props.setPresence({ providerId: settings.providerId, hasCredential: settings.hasCredential });
     setCertificationRetryUsed(false);
   }, [props.settings, props.setPresence]);
+
+  useEffect(() => {
+    if (!props.presence.hasCredential || !isValidProviderBaseUrl(baseUrl)) return;
+    void refreshModels();
+  }, [props.presence.hasCredential, baseUrl]);
 
   async function saveCredential() {
     setSavingCredential(true);
@@ -2178,6 +2672,8 @@ function ProvidersScreen(props: {
   }
 
   async function refreshModels() {
+    if (modelRefreshRunning.current) return;
+    modelRefreshRunning.current = true;
     setModelListStatus("testing");
     setModelListMessage("Testing endpoint...");
     try {
@@ -2190,6 +2686,8 @@ function ProvidersScreen(props: {
     } catch {
       setModelListStatus("network_error");
       setModelListMessage("Model listing failed before a safe response was returned.");
+    } finally {
+      modelRefreshRunning.current = false;
     }
   }
 
@@ -2250,6 +2748,31 @@ function ProvidersScreen(props: {
       });
     } finally {
       setCertificationRunning(false);
+    }
+  }
+
+  async function runImageCertification() {
+    const model = imageModel || "No selected model";
+    const confirmed = window.confirm(
+      `This test sends one real image request to 9Router and may consume provider quota.\n\nProvider: 9Router\nModel: ${model}\nEndpoint: /v1/images/generations\nRequests: 1`
+    );
+    if (!confirmed) return;
+    setImageCertificationRunning(true);
+    try {
+      const result = await factoryClient.run9RouterImageCertification({
+        providerId: "9router",
+        confirmation: "Run 1 image certification request"
+      });
+      props.setImageCertification(result);
+      await props.onRefresh();
+    } catch {
+      props.setImageCertification({
+        status: "failed",
+        message: "Image model certification failed before a safe response was returned.",
+        errorCategory: "unknown_error"
+      });
+    } finally {
+      setImageCertificationRunning(false);
     }
   }
 
@@ -2323,6 +2846,14 @@ function ProvidersScreen(props: {
             retryExhausted={certificationRetryExhausted}
             hasCredential={props.presence.hasCredential}
             onRun={() => void runTextCertification()}
+          />
+          <ImageModelCertificationPanel
+            selectedModel={imageModel}
+            configurationSaved={props.settings?.imageModel === imageModel}
+            certification={props.imageCertification}
+            running={imageCertificationRunning}
+            hasCredential={props.presence.hasCredential}
+            onRun={() => void runImageCertification()}
           />
           {models.length ? (
             <DataTable label="9Router Discovered models">
@@ -2486,6 +3017,54 @@ function TextModelCertificationPanel(props: {
   );
 }
 
+function ImageModelCertificationPanel(props: {
+  selectedModel: string;
+  configurationSaved: boolean;
+  certification: ImageModelCertificationResponse;
+  running: boolean;
+  hasCredential: boolean;
+  onRun: () => void;
+}) {
+  const displayedStatus = props.running ? "Testing" : imageCertificationLabel(props.certification.status);
+  return (
+    <div className="form-grid">
+      <div className="section-heading">
+        <h3>Image Model Certification</h3>
+        <p>This test sends one real image request to 9Router and may consume provider quota.</p>
+      </div>
+      <div className="form-grid">
+        <div className="capability-card">
+          <strong>Selected model</strong>
+          <StatusBadge tone={props.selectedModel ? "info" : "warning"}>{props.selectedModel || "Not selected"}</StatusBadge>
+          <small>{props.selectedModel ? "Selected" : "Refresh models, then select and save an image model first."}</small>
+        </div>
+        <div className="capability-card">
+          <strong>Endpoint strategy</strong>
+          <StatusBadge tone="info">/v1/images/generations</StatusBadge>
+          <small>Requests: 1</small>
+        </div>
+        <div className="capability-card">
+          <strong>Certification status</strong>
+          <StatusBadge tone={certificationTone(displayedStatus)}>{displayedStatus}</StatusBadge>
+          <small>{props.certification.message}</small>
+        </div>
+        <SettingsList items={[
+          ["Last tested time", props.certification.record?.testedAt ? formatDate(props.certification.record.testedAt) : "Not tested"],
+          ["Result", props.running ? "Testing" : imageCertificationLabel(props.certification.status)],
+          ["Model at last test", props.certification.record?.configuredModelId ?? "Not tested"]
+        ]} />
+        <div className="button-row">
+          {props.hasCredential && props.selectedModel && props.configurationSaved && !props.running ? (
+            <button className="button primary" type="button" onClick={props.onRun}>Run 1 image certification request</button>
+          ) : (
+            <DisabledAction reason={!props.hasCredential ? "Save a 9Router credential first." : !props.selectedModel ? "Refresh models, then select an Image model." : !props.configurationSaved ? "Save model configuration before running certification." : "Image certification is already testing."}>Run 1 image certification request</DisabledAction>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function testResultLabel(result: { status: "passed" | "failed"; skipped?: boolean; errorCategory?: string }): string {
   if (result.skipped) return `Skipped (${result.errorCategory ?? "unknown_error"})`;
   if (result.status === "passed") return "Passed";
@@ -2590,7 +3169,7 @@ function VoiceScreen(props: { project: FactoryProject; localTtsSettings: LocalTt
   return (
     <>
       <PageHeader title="Voice" description="Edge Neural is the default Vietnamese provider. Jobs remain strict by default: a failed provider is never silently replaced." />
-      <StageStatusHeader stageName="Voice Generation" stageNumber={22} eligibility={eligibility} dependencies={["Approved Script", "Approved Asset Review", "Configured TTS provider"]} purpose="Generate timestamped, FFprobe-validated voice segments and a merged voiceover track before review." />
+      <StageStatusHeader stageName="Voice Generation" stageNumber={20} eligibility={eligibility} dependencies={["Approved Script", "Approved Asset Review", "Configured TTS provider"]} purpose="Generate timestamped, FFprobe-validated voice segments and a merged voiceover track before review." />
       <SectionCard title="Selected voice provider">
         <div className="form-grid">
           <FormField label="Voice provider status" htmlFor="tts-provider-status"><input id="tts-provider-status" value={available ? "Configured" : "Needs setup"} disabled readOnly /></FormField>
@@ -2611,7 +3190,7 @@ function VoiceScreen(props: { project: FactoryProject; localTtsSettings: LocalTt
         </div>
       </SectionCard>
       <SectionCard title="Background and original audio"><p>Unavailable: this workflow has no approved audio source. The timeline contains narration only and does not synthesize placeholder BGM.</p></SectionCard>
-      <StageStatusHeader stageName="Subtitle Preparation" stageNumber={23} eligibility={subtitleEligibility} dependencies={["Approved Script", "Approved Voice Generation"]} purpose="Derive frame-based cues from the timestamped narration without changing script wording." />
+      <StageStatusHeader stageName="Subtitle Preparation" stageNumber={21} eligibility={subtitleEligibility} dependencies={["Approved Script", "Approved Voice Generation"]} purpose="Derive frame-based cues from the timestamped narration without changing script wording." />
       <SectionCard title="Subtitle review">{subtitleEligibility.runnable ? <button className="button primary" type="button" disabled={generating} onClick={() => void perform(() => factoryClient.runSubtitlePreparation({ projectId: props.project.id }), "Subtitle cues are ready for review.")}>Prepare subtitles</button> : <DisabledAction reason={subtitleEligibility.blockingReasons[0]?.message ?? "Approve Voice Generation before preparing subtitles."}>Prepare subtitles</DisabledAction>}{subtitleArtifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : artifact.status === "rejected" ? "danger" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge><p>{artifact.payloadJson.cues.length} cues at {artifact.payloadJson.fps} fps</p>{artifact.payloadJson.cues.slice(0, 5).map((cue) => <p key={cue.id}>{cue.startFrame}: {cue.text}</p>)}{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" type="button" disabled={generating || !subtitleEligibility.approvable} onClick={() => void perform(() => factoryClient.approveSubtitlePreparation({ projectId: props.project.id }), "Subtitle Preparation approved.")}>Approve subtitles</button><button className="button danger compact" type="button" disabled={generating} onClick={() => void perform(() => factoryClient.rejectSubtitlePreparation({ projectId: props.project.id }), "Subtitle Preparation rejected.")}>Reject subtitles</button></div> : null}</div>)}</SectionCard>
     </>
   );
@@ -2953,5 +3532,5 @@ createRoot(document.getElementById("root")!).render(
 
 function routeFromHash(): RouteId {
   const value = window.location.hash.replace(/^#/, "");
-  return allRoutes.some((item) => item.id === value) ? (value as RouteId) : "dashboard";
+  return allRoutes.some((item) => item.id === value) ? (value as RouteId) : "projects";
 }

@@ -23,11 +23,14 @@ export const workflowStageStatusSchema = z.enum([
   "queued",
   "running",
   "needs_review",
+  "needs_attention",
   "approved",
   "rejected",
   "failed",
   "stale"
 ]);
+
+const workflowArtifactStatusSchema = z.enum(["draft", "needs_review", "needs_attention", "approved", "rejected", "stale"]);
 
 export const referenceStatusSchema = z.enum(["draft", "duplicate", "invalid", "valid", "approved", "rejected", "stale"]);
 
@@ -41,11 +44,20 @@ export const channelRouteInputSchema = z.object({
 
 export const createProjectRequestSchema = z.object({
   topic: z.string().min(1).max(500),
+  synthetic: z.boolean().optional(),
   format: z.enum(["long", "short"]).default("long"),
   targetLanguage: z.string().min(1).max(80).default("English"),
+  selectedProfileId: idSchema.optional(),
   targetDuration: z.string().min(1).max(120).optional(),
   projectName: z.string().min(1).max(120).optional(),
-  workflowMode: z.enum(["guided", "semi_automatic", "full_automatic"]).default("guided"),
+  workflowMode: z.enum(["guided", "semi_automatic", "full_automatic"]).default("semi_automatic"),
+  inputMode: z.enum(["topic", "existing_script", "reference"]).default("topic"),
+  aspectRatio: z.enum(["16:9", "9:16", "1:1"]).optional(),
+  visualStyle: z.literal("vox-documentary").default("vox-documentary"),
+  voiceId: z.string().max(300).optional(),
+  outputResolution: z.enum(["1080p", "720p"]).default("1080p"),
+  sourceScript: z.string().max(200000).optional(),
+  referenceUrl: z.string().max(1000).optional(),
   competitorReference: z.object({
     sourceUrl: z.string().max(1000).optional(),
     pastedTranscript: z.string().min(1).max(200000),
@@ -56,6 +68,10 @@ export const createProjectRequestSchema = z.object({
 export const projectIdRequestSchema = z.object({
   projectId: idSchema
 });
+
+export const productionPreparationRequestSchema = projectIdRequestSchema;
+export const productionIdeaSelectionRequestSchema = z.object({ projectId: idSchema, ideaId: idSchema }).strict();
+export const productionSceneRetryRequestSchema = z.object({ projectId: idSchema, sceneId: idSchema }).strict();
 
 export const saveProviderCredentialRequestSchema = z.object({
   providerId: idSchema,
@@ -415,7 +431,7 @@ export const referenceValidationOutputSchema = z.object({
 export const referenceValidationArtifactResponseSchema = z.object({
   id: idSchema,
   stageRunId: idSchema.optional(),
-  status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]),
+  status: workflowArtifactStatusSchema,
   payloadJson: referenceValidationOutputSchema,
   createdAt: z.string(),
   updatedAt: z.string()
@@ -426,43 +442,107 @@ export const runTranscriptCleaningRequestSchema = z.object({
   referenceId: idSchema
 }).strict();
 
+export const competitorWorkflowStageIdSchema = z.enum(["transcript-cleaning", "reference-segmentation", "competitor-dna"]);
+export const workflowRunListRequestSchema = z.object({
+  projectId: idSchema,
+  stageId: competitorWorkflowStageIdSchema
+}).strict();
+export const workflowRunResponseSchema = z.object({
+  id: idSchema,
+  projectId: idSchema,
+  stageId: competitorWorkflowStageIdSchema,
+  status: workflowStageStatusSchema,
+  runnerId: z.string().min(1).max(300),
+  runnerVersion: z.string().min(1).max(300),
+  providerId: z.string().min(1).max(100).optional(),
+  configuredModelId: modelIdSchema.optional(),
+  returnedModelId: modelIdSchema.optional(),
+  inputArtifactIds: z.array(idSchema).max(1000),
+  inputFingerprint: z.string().min(1).max(200),
+  outputArtifactIds: z.array(idSchema).max(1000),
+  payloadJson: z.record(z.unknown()).optional(),
+  startedAt: z.string().optional(),
+  finishedAt: z.string().optional(),
+  safeErrorCategory: z.string().min(1).max(100).optional(),
+  safeErrorMessage: z.string().min(1).max(1000).optional()
+}).strict();
+export const workflowRunsResponseSchema = z.array(workflowRunResponseSchema);
+
+export const stageAttentionRequestSchema = z.object({
+  projectId: idSchema,
+  stageId: idSchema,
+  referenceId: idSchema.optional(),
+  code: z.string().min(1).max(100),
+  message: z.string().min(1).max(1000)
+}).strict();
+
 export const transcriptCleaningArtifactRequestSchema = runTranscriptCleaningRequestSchema;
 export const runReferenceSegmentationRequestSchema = runTranscriptCleaningRequestSchema;
 export const referenceSegmentationArtifactRequestSchema = runTranscriptCleaningRequestSchema;
 
+const transcriptCleaningExecutionSchema = z.object({
+  mode: z.enum(["single_request", "chunked"]),
+  chunkCount: z.number().int().positive(),
+  completedChunkCount: z.number().int().nonnegative(),
+  estimatedInputTokens: z.number().int().nonnegative(),
+  selectedModel: z.string().min(1).max(300),
+  configuredTimeoutMs: z.number().int().positive(),
+  removedNoise: z.number().int().nonnegative(),
+  flaggedSegmentCount: z.number().int().nonnegative()
+}).strict();
+
 export const cleanedTranscriptOutputSchema = z.object({
   referenceId: idSchema,
   sourceTranscriptVersionId: idSchema,
+  // Legacy artifacts predate rawTranscript; new Transcript Cleaning runs always persist it.
+  rawTranscript: z.string().min(1).max(200000).optional(),
   cleanedTranscript: z.string().min(1).max(200000),
   removedSegments: z.array(z.object({
     text: z.string().min(1).max(20000),
+    sourceStart: z.number().int().nonnegative().optional(),
+    sourceEnd: z.number().int().nonnegative().optional(),
     reason: z.enum(["timestamp", "duplicate_caption", "formatting_noise", "empty_fragment"])
   })).max(10000),
   flaggedSegments: z.array(z.object({
     text: z.string().min(1).max(20000),
-    reason: z.enum(["unclear_audio", "possible_transcription_error", "language_mismatch"])
+    sourceStart: z.number().int().nonnegative().optional(),
+    sourceEnd: z.number().int().nonnegative().optional(),
+    reason: z.enum(["unclear_transcription", "possible_name_error", "possible_term_error", "language_mismatch", "sponsor", "self_promotion", "affiliate", "disclaimer"]),
+    suggestion: z.string().max(2000).optional()
   })).max(10000),
   sourceCharacterCount: z.number().int().nonnegative(),
-  cleanedCharacterCount: z.number().int().nonnegative()
+  cleanedCharacterCount: z.number().int().nonnegative(),
+  execution: transcriptCleaningExecutionSchema
 }).strict();
 
+export const segmentTypeSchema = z.enum([
+  "hook", "promise", "context", "story", "problem", "conflict", "evidence", "example",
+  "reveal", "payoff", "transition", "sponsor", "self_promotion", "affiliate", "disclaimer",
+  "subscribe_cta", "engagement_cta", "outro", "other"
+]);
+
+const segmentExclusionReasonSchema = z.enum(["sponsor", "self_promotion", "affiliate", "disclaimer", "non_narrative_cta"]);
 export const referenceSegmentationOutputSchema = z.object({
   referenceId: idSchema,
+  cleanedTranscriptArtifactId: idSchema,
   segments: z.array(z.object({
     id: idSchema,
     order: z.number().int().nonnegative(),
     startCharacter: z.number().int().nonnegative(),
     endCharacter: z.number().int().nonnegative(),
-    type: z.enum(["hook", "promise", "context", "problem", "conflict", "evidence", "example", "reveal", "payoff", "cta", "other"]),
+    type: segmentTypeSchema,
     text: z.string().min(1).max(200000),
-    function: z.string().min(1).max(2000)
-  })).min(1).max(10000)
+    function: z.string().min(1).max(2000),
+    includedForDna: z.boolean(),
+    exclusionReason: segmentExclusionReasonSchema.optional()
+  })).min(1).max(10000),
+  excludedSegmentIds: z.array(idSchema).max(10000)
 }).strict();
 
 export const transcriptCleaningArtifactResponseSchema = z.object({
   id: idSchema,
   stageRunId: idSchema.optional(),
-  status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]),
+  status: workflowArtifactStatusSchema,
   payloadJson: cleanedTranscriptOutputSchema.extend({
     warnings: z.array(z.enum(["excessive_content_loss", "content_expansion"]))
   }),
@@ -475,7 +555,7 @@ export const transcriptCleaningArtifactsResponseSchema = z.array(transcriptClean
 export const referenceSegmentationArtifactResponseSchema = z.object({
   id: idSchema,
   stageRunId: idSchema.optional(),
-  status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]),
+  status: workflowArtifactStatusSchema,
   payloadJson: referenceSegmentationOutputSchema,
   createdAt: z.string(),
   updatedAt: z.string()
@@ -484,34 +564,47 @@ export const referenceSegmentationArtifactResponseSchema = z.object({
 export const referenceSegmentationArtifactsResponseSchema = z.array(referenceSegmentationArtifactResponseSchema);
 
 const evidenceSegmentIdsSchema = z.array(idSchema).min(1).max(1000);
+const dnaNarrativePatternSchema = z.object({
+  phase: z.string().min(1).max(500),
+  function: z.string().min(1).max(2000),
+  evidenceSegmentIds: evidenceSegmentIdsSchema
+}).strict();
 export const competitorDnaOutputSchema = z.object({
   referenceId: idSchema,
+  segmentationArtifactId: idSchema,
   hookPattern: z.object({ abstraction: z.string().min(1).max(2000), evidenceSegmentIds: evidenceSegmentIdsSchema }).strict(),
   promisePattern: z.object({ abstraction: z.string().min(1).max(2000), evidenceSegmentIds: evidenceSegmentIdsSchema }).strict(),
+  narrativeStructure: z.array(dnaNarrativePatternSchema).min(1).max(100),
   pacingPattern: z.object({ description: z.string().min(1).max(2000), evidenceSegmentIds: evidenceSegmentIdsSchema }).strict(),
+  conflictAndRevealPattern: z.object({ description: z.string().min(1).max(2000), evidenceSegmentIds: evidenceSegmentIdsSchema }).strict(),
   proofPattern: z.object({ description: z.string().min(1).max(2000), evidenceSegmentIds: evidenceSegmentIdsSchema }).strict(),
   emotionalArc: z.array(z.object({ phase: z.string().min(1).max(500), emotion: z.string().min(1).max(500), evidenceSegmentIds: evidenceSegmentIdsSchema }).strict()).max(100),
   retentionDevices: z.array(z.object({ abstraction: z.string().min(1).max(2000), evidenceSegmentIds: evidenceSegmentIdsSchema }).strict()).max(100),
-  visualOpportunities: z.array(z.object({ abstraction: z.string().min(1).max(2000), evidenceSegmentIds: evidenceSegmentIdsSchema }).strict()).max(100),
-  reusablePrinciples: z.array(z.string().min(1).max(1000)).max(100),
-  forbiddenToCopy: z.array(z.object({ element: z.string().min(1).max(1000), reason: z.string().min(1).max(1000) }).strict()).max(100),
+  transitionPatterns: z.array(z.object({ abstraction: z.string().min(1).max(2000), evidenceSegmentIds: evidenceSegmentIdsSchema }).strict()).max(100),
+  reusablePrinciples: z.array(z.object({ principle: z.string().min(1).max(1000), evidenceSegmentIds: evidenceSegmentIdsSchema }).strict()).max(100),
+  forbiddenToCopy: z.array(z.object({ element: z.string().min(1).max(1000), reason: z.string().min(1).max(1000), evidenceSegmentIds: evidenceSegmentIdsSchema }).strict()).max(100),
+  excludedContentSummary: z.object({
+    sponsorSegmentCount: z.number().int().nonnegative(),
+    selfPromotionSegmentCount: z.number().int().nonnegative(),
+    excludedSegmentIds: z.array(idSchema).max(10000)
+  }).strict(),
   uncertainties: z.array(z.string().min(1).max(1000)).max(100)
 }).strict();
 
 export const runCompetitorDnaRequestSchema = runTranscriptCleaningRequestSchema;
 export const competitorDnaArtifactRequestSchema = runTranscriptCleaningRequestSchema;
-export const competitorDnaArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: competitorDnaOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const competitorDnaArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: competitorDnaOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const competitorDnaArtifactsResponseSchema = z.array(competitorDnaArtifactResponseSchema);
 
 const opportunityItemSchema = z.object({ text: z.string().min(1).max(2000), sourceReferenceIds: z.array(idSchema).min(1).max(100), sourceArtifactIds: z.array(idSchema).min(1).max(100), confidence: z.enum(["low", "medium", "high"]) }).strict();
 export const opportunityMapOutputSchema = z.object({ sharedPatterns: z.array(opportunityItemSchema).max(100), overusedPatterns: z.array(opportunityItemSchema).max(100), underservedViewerQuestions: z.array(opportunityItemSchema).max(100), evidenceGaps: z.array(opportunityItemSchema).max(100), differentiationDirections: z.array(opportunityItemSchema).max(100), riskyDirections: z.array(opportunityItemSchema).max(100), recommendedContentSpaces: z.array(opportunityItemSchema).max(100) }).strict();
 export const opportunityMapRequestSchema = z.object({ projectId: idSchema }).strict();
-export const opportunityMapArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: opportunityMapOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const opportunityMapArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: opportunityMapOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const ideaCandidateOutputSchema = z.object({ id: idSchema, workingTitle: z.string().min(1).max(300), angle: z.string().min(1).max(2000), corePromise: z.string().min(1).max(1000), viewerProblem: z.string().min(1).max(1000), dramaticQuestion: z.string().min(1).max(1000), targetEmotion: z.string().min(1).max(300), trafficModel: z.enum(["browse", "suggested", "search", "mixed"]), thumbnailConcept: z.string().min(1).max(1000), noveltyExplanation: z.string().min(1).max(1000), noveltyScore: z.number().min(0).max(100), audienceFitScore: z.number().min(0).max(100), thumbnailPotentialScore: z.number().min(0).max(100), researchRisk: z.enum(["low", "medium", "high"]), productionDifficulty: z.enum(["low", "medium", "high"]), repurposePotential: z.array(z.string().min(1).max(300)).max(20), whyThisCanWin: z.string().min(1).max(1000) }).strict();
-export const ideaLabOutputSchema = z.object({ candidates: z.array(ideaCandidateOutputSchema).length(12) }).strict().superRefine((value, context) => {
+export const ideaLabOutputSchema = z.object({ candidates: z.array(ideaCandidateOutputSchema).length(6) }).strict().superRefine((value, context) => {
   const riskCounts = value.candidates.reduce<Record<string, number>>((counts, candidate) => ({ ...counts, [candidate.researchRisk]: (counts[candidate.researchRisk] ?? 0) + 1 }), {});
-  if (riskCounts.low !== 4 || riskCounts.medium !== 4 || riskCounts.high !== 4) {
-    context.addIssue({ code: z.ZodIssueCode.custom, message: "Idea Lab requires four candidates in each research-risk bucket." });
+  if (riskCounts.low !== 2 || riskCounts.medium !== 2 || riskCounts.high !== 2) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Idea Lab requires two candidates in each research-risk bucket." });
   }
   if (new Set(value.candidates.map((candidate) => candidate.id)).size !== value.candidates.length) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "Idea Lab candidates must have unique IDs." });
@@ -535,7 +628,7 @@ export const originalityReviewRequestSchema = z.object({ projectId: idSchema }).
 export const originalityReviewArtifactResponseSchema = z.object({
   id: idSchema,
   stageRunId: idSchema.optional(),
-  status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]),
+  status: workflowArtifactStatusSchema,
   payloadJson: originalityReviewOutputSchema,
   createdAt: z.string(),
   updatedAt: z.string()
@@ -562,7 +655,8 @@ export const saveResearchSourcesRequestSchema = z.object({ projectId: idSchema, 
   if (new Set(value.sources.map((source) => source.url)).size !== value.sources.length) context.addIssue({ code: z.ZodIssueCode.custom, message: "Research source URLs must be unique." });
 });
 export const researchSourcesRequestSchema = z.object({ projectId: idSchema }).strict();
-export const researchSourcesArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: researchSourcesOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const researchSourceSearchRequestSchema = z.object({ projectId: idSchema }).strict();
+export const researchSourcesArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: researchSourcesOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const researchSourcesArtifactsResponseSchema = z.array(researchSourcesArtifactResponseSchema);
 export const claimMapClaimSchema = z.object({
   id: idSchema,
@@ -578,53 +672,53 @@ export const claimMapClaimSchema = z.object({
 }).strict();
 export const claimMapOutputSchema = z.object({ claims: z.array(claimMapClaimSchema).min(1).max(100) }).strict();
 export const claimMapRequestSchema = z.object({ projectId: idSchema }).strict();
-export const claimMapArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: claimMapOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const claimMapArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: claimMapOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const claimMapArtifactsResponseSchema = z.array(claimMapArtifactResponseSchema);
-export const outlineSectionSchema = z.object({ id: idSchema, order: z.number().int().nonnegative(), purpose: z.string().min(1).max(1000), keyPoint: z.string().min(1).max(3000), linkedClaimIds: z.array(idSchema).min(1).max(100), dramaticFunction: z.string().min(1).max(1000), estimatedSeconds: z.number().int().positive().max(7200), openLoop: z.string().max(1000).optional(), proofObjects: z.array(z.string().min(1).max(1000)).max(50) }).strict();
+export const outlineSectionSchema = z.object({ id: idSchema, order: z.number().int().nonnegative(), purpose: z.string().min(1).max(1000), keyPoint: z.string().min(1).max(3000), linkedClaimIds: z.array(idSchema).max(100), dramaticFunction: z.string().min(1).max(1000), estimatedSeconds: z.number().int().positive().max(7200), openLoop: z.string().max(1000).optional(), proofObjects: z.array(z.string().min(1).max(1000)).max(50) }).strict();
 export const outlineOutputSchema = z.object({ sections: z.array(outlineSectionSchema).min(1).max(100) }).strict();
 export const outlineRequestSchema = z.object({ projectId: idSchema }).strict();
-export const outlineArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: outlineOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const outlineArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: outlineOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const outlineArtifactsResponseSchema = z.array(outlineArtifactResponseSchema);
-export const scriptSectionOutputSchema = z.object({ id: idSchema, outlineSectionId: idSchema, purpose: z.string().min(1).max(1000), narration: z.string().min(1).max(20000), estimatedWords: z.number().int().positive().max(10000), estimatedSeconds: z.number().int().positive().max(7200), linkedClaimIds: z.array(idSchema).min(1).max(100), dramaticFunction: z.string().min(1).max(1000), openLoop: z.string().max(1000).optional(), visualOpportunities: z.array(z.string().min(1).max(1000)).max(50), proofObjects: z.array(z.string().min(1).max(1000)).max(50), retentionRisk: z.enum(["low", "medium", "high"]) }).strict();
+export const scriptSectionOutputSchema = z.object({ id: idSchema, outlineSectionId: idSchema, purpose: z.string().min(1).max(1000), narration: z.string().min(1).max(20000), estimatedWords: z.number().int().positive().max(10000), estimatedSeconds: z.number().int().positive().max(7200), linkedClaimIds: z.array(idSchema).max(100), dramaticFunction: z.string().min(1).max(1000), openLoop: z.string().max(1000).optional(), visualOpportunities: z.array(z.string().min(1).max(1000)).max(50), proofObjects: z.array(z.string().min(1).max(1000)).max(50), retentionRisk: z.enum(["low", "medium", "high"]) }).strict();
 export const scriptOutputSchema = z.object({ sections: z.array(scriptSectionOutputSchema).min(1).max(100) }).strict();
 export const scriptRequestSchema = z.object({ projectId: idSchema }).strict();
-export const scriptArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: scriptOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const scriptArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: scriptOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const scriptArtifactsResponseSchema = z.array(scriptArtifactResponseSchema);
 export const factReviewFindingSchema = z.object({ claimId: idSchema, verdict: z.enum(["supported", "needs_qualification", "blocked"]), reason: z.string().min(1).max(2000) }).strict();
-export const factReviewOutputSchema = z.object({ reviewer: z.literal("local_deterministic"), findings: z.array(factReviewFindingSchema).min(1).max(100) }).strict();
+export const factReviewOutputSchema = z.object({ reviewer: z.literal("local_deterministic"), findings: z.array(factReviewFindingSchema).max(100) }).strict();
 export const factReviewRequestSchema = z.object({ projectId: idSchema }).strict();
-export const factReviewArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: factReviewOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const factReviewArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: factReviewOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const factReviewArtifactsResponseSchema = z.array(factReviewArtifactResponseSchema);
 export const retentionReviewFindingSchema = z.object({ sectionId: idSchema, severity: z.enum(["low", "medium", "high"]), reason: z.string().min(1).max(2000), recommendedChange: z.string().min(1).max(2000) }).strict();
 export const retentionReviewOutputSchema = z.object({ overallVerdict: z.enum(["pass", "needs_changes", "blocked"]), findings: z.array(retentionReviewFindingSchema).max(100) }).strict();
 export const retentionReviewRequestSchema = z.object({ projectId: idSchema }).strict();
-export const retentionReviewArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: retentionReviewOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const retentionReviewArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: retentionReviewOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const retentionReviewArtifactsResponseSchema = z.array(retentionReviewArtifactResponseSchema);
 export const scenePlanSceneSchema = z.object({ id: idSchema, scriptSectionId: idSchema, narration: z.string().min(1).max(20000), purpose: z.string().min(1).max(2000), startFrame: z.number().int().nonnegative(), durationFrames: z.number().int().positive(), visualMode: z.enum(["ai_image", "ai_video", "stock_image", "stock_video", "manual_upload", "uploaded", "document", "diagram", "text_card", "reuse"]), proofObject: z.string().min(1).max(1000).optional(), emotionalState: z.string().min(1).max(1000), requiredAssets: z.array(z.string().min(1).max(1000)).max(50), continuityRefs: z.array(z.string().min(1).max(1000)).max(50) }).strict();
 export const scenePlanOutputSchema = z.object({ fps: z.number().int().positive().max(120), scenes: z.array(scenePlanSceneSchema).min(1).max(200) }).strict();
 export const scenePlanRequestSchema = z.object({ projectId: idSchema }).strict();
-export const scenePlanArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: scenePlanOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const scenePlanArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: scenePlanOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const scenePlanArtifactsResponseSchema = z.array(scenePlanArtifactResponseSchema);
 export const shotPlanShotSchema = z.object({ id: idSchema, sceneId: idSchema, order: z.number().int().nonnegative(), startFrame: z.number().int().nonnegative(), durationFrames: z.number().int().positive(), fps: z.number().int().positive().max(120), purpose: z.string().min(1).max(2000), visualMode: z.enum(["ai_image", "ai_video", "stock_image", "stock_video", "manual_upload", "uploaded", "document", "diagram", "text_card", "reuse"]), framing: z.string().min(1).max(1000), cameraAngle: z.string().min(1).max(1000), cameraMovement: z.string().min(1).max(1000), subjectAction: z.string().min(1).max(2000), startState: z.record(z.string(), z.unknown()), endState: z.record(z.string(), z.unknown()), continuityRefs: z.array(z.string().min(1).max(1000)).max(50) }).strict();
 const uniqueShotPlanShotsSchema = z.array(shotPlanShotSchema).min(1).max(500).refine((shots) => new Set(shots.map((shot) => shot.id)).size === shots.length, { message: "Shot IDs must be unique." });
 export const shotPlanOutputSchema = z.object({ shots: uniqueShotPlanShotsSchema }).strict();
 export const shotPlanRequestSchema = z.object({ projectId: idSchema }).strict();
-export const shotPlanArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: shotPlanOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const shotPlanArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: shotPlanOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const shotPlanArtifactsResponseSchema = z.array(shotPlanArtifactResponseSchema);
 export const visualRoutingOutputSchema = z.object({ shots: uniqueShotPlanShotsSchema }).strict();
 export const visualRoutingRequestSchema = z.object({ projectId: idSchema }).strict();
-export const visualRoutingArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: visualRoutingOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const visualRoutingArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: visualRoutingOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const visualRoutingArtifactsResponseSchema = z.array(visualRoutingArtifactResponseSchema);
 export const editVisualRoutingRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema, shotId: idSchema, visualMode: shotPlanShotSchema.shape.visualMode }).strict();
 export const visualPromptSchema = z.object({ shotId: idSchema, promptVersionId: idSchema, positivePrompt: z.string().min(1).max(10000), negativePrompt: z.string().min(1).max(5000), aspectRatio: z.enum(["16:9", "9:16"]), continuityConstraints: z.array(z.string().min(1).max(1000)).max(50), prohibitedElements: z.array(z.string().min(1).max(1000)).max(50) }).strict();
 export const promptPreparationOutputSchema = z.object({ prompts: z.array(visualPromptSchema).max(500) }).strict();
 export const promptPreparationRequestSchema = z.object({ projectId: idSchema }).strict();
-export const promptPreparationArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: promptPreparationOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const promptPreparationArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: promptPreparationOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const promptPreparationArtifactsResponseSchema = z.array(promptPreparationArtifactResponseSchema);
 export const acquiredImageAssetSchema = z.object({ shotId: idSchema, promptVersionId: idSchema, relativeFilePath: safePathSchema, sha256: z.string().length(64), mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]), byteLength: z.number().int().positive(), width: z.number().int().positive(), height: z.number().int().positive() }).strict();
 export const assetAcquisitionOutputSchema = z.object({ assets: z.array(acquiredImageAssetSchema).min(1).max(500) }).strict();
-export const assetAcquisitionRequestSchema = z.object({ projectId: idSchema }).strict();
-export const assetAcquisitionArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: assetAcquisitionOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const assetAcquisitionRequestSchema = z.object({ projectId: idSchema, sceneId: idSchema.optional() }).strict();
+export const assetAcquisitionArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: assetAcquisitionOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const assetAcquisitionArtifactsResponseSchema = z.array(assetAcquisitionArtifactResponseSchema);
 export const assetReviewItemSchema = z.object({ asset: acquiredImageAssetSchema, reviewStatus: z.enum(["needs_review", "approved", "rejected"]), assignedShotId: idSchema.optional() }).strict()
   .refine((item) => item.assignedShotId === undefined || item.assignedShotId === item.asset.shotId, { message: "Assigned shot must match the reviewed asset shot." });
@@ -633,8 +727,8 @@ export const assetReviewOutputSchema = z.object({ acquisitionArtifactId: idSchem
     const assignedShotIds = output.assets.flatMap((item) => item.assignedShotId ? [item.assignedShotId] : []);
     return new Set(assignedShotIds).size === assignedShotIds.length;
   }, { message: "Each shot can have only one assigned reviewed asset." });
-export const assetReviewRequestSchema = z.object({ projectId: idSchema }).strict();
-export const assetReviewArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: assetReviewOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const assetReviewRequestSchema = z.object({ projectId: idSchema, sceneId: idSchema.optional() }).strict();
+export const assetReviewArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: assetReviewOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const assetReviewArtifactsResponseSchema = z.array(assetReviewArtifactResponseSchema);
 export const reviseAssetReviewRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema, assetSha256: z.string().length(64), action: z.enum(["approve", "reject", "assign", "unassign"]), shotId: idSchema.optional() }).strict();
 export const manualAssetUploadRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema, shotId: idSchema }).strict();
@@ -662,35 +756,38 @@ export const voiceGenerationOutputSchema = z.object({
   timingWarnings: z.array(z.string().min(1).max(500)).max(100).optional()
 }).strict();
 export const voiceGenerationRequestSchema = z.object({ projectId: idSchema }).strict();
-export const voiceGenerationArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: voiceGenerationOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const voiceGenerationArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: voiceGenerationOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const voiceGenerationArtifactsResponseSchema = z.array(voiceGenerationArtifactResponseSchema);
 export const subtitleCueSchema = z.object({ id: idSchema, scriptSectionId: idSchema, startFrame: z.number().int().nonnegative(), durationFrames: z.number().int().positive(), text: z.string().min(1).max(1000) }).strict();
 export const subtitlePreparationOutputSchema = z.object({ fps: z.number().int().positive().max(120), cues: z.array(subtitleCueSchema).min(1).max(2000) }).strict();
 export const subtitlePreparationRequestSchema = z.object({ projectId: idSchema }).strict();
-export const subtitlePreparationArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: subtitlePreparationOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const subtitlePreparationArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: subtitlePreparationOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const subtitlePreparationArtifactsResponseSchema = z.array(subtitlePreparationArtifactResponseSchema);
 export const timelineItemOutputSchema = z.object({ id: idSchema, track: z.enum(["primary_visual", "overlay_visual", "narration", "music", "sfx", "subtitles", "text", "markers"]), sourceId: z.string().min(1).max(1000), startFrame: z.number().int().nonnegative(), durationFrames: z.number().int().positive(), fps: z.number().int().positive().max(120) }).strict();
 export const timelineAssemblyOutputSchema = z.object({ fps: z.number().int().positive().max(120), items: z.array(timelineItemOutputSchema).min(1).max(2000) }).strict();
 export const timelineAssemblyRequestSchema = z.object({ projectId: idSchema }).strict();
-export const timelineAssemblyArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: timelineAssemblyOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const timelineAssemblyArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: timelineAssemblyOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const timelineAssemblyArtifactsResponseSchema = z.array(timelineAssemblyArtifactResponseSchema);
 
 export const previewRenderOutputSchema = z.object({
   relativeFilePath: safePathSchema,
+  subtitleRelativeFilePath: safePathSchema.optional(),
   durationSeconds: z.number().positive().max(7200),
   width: z.number().int().positive().max(7680),
   height: z.number().int().positive().max(7680),
   sha256: z.string().length(64).optional(),
-  inputArtifactIds: z.array(idSchema).min(3).max(3)
+  inputArtifactIds: z.array(idSchema).min(3).max(4)
 }).strict();
-export const previewRenderRequestSchema = z.object({ projectId: idSchema }).strict();
-export const previewRenderArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: previewRenderOutputSchema, relativeFilePath: safePathSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const previewRenderRequestSchema = z.object({ projectId: idSchema, force: z.boolean().optional() }).strict();
+export const previewMediaRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema }).strict();
+export const previewMediaUrlResponseSchema = z.object({ url: z.string().url() }).strict();
+export const previewRenderArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: previewRenderOutputSchema, relativeFilePath: safePathSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const previewRenderArtifactsResponseSchema = z.array(previewRenderArtifactResponseSchema);
 
 export const qaFindingSchema = z.object({ code: z.enum(["stale_upstream", "missing_approval", "unsupported_claim", "missing_shot_asset", "rejected_asset", "duration_mismatch", "missing_audio", "subtitle_overflow", "continuity", "certification", "broken_path", "capcut_prerequisite"]), severity: z.enum(["blocking", "warning"]), message: z.string().min(1).max(500), evidence: z.string().min(1).max(1000) }).strict();
 export const qaOutputSchema = z.object({ runner: z.literal("local_deterministic"), findings: z.array(qaFindingSchema).max(100), inputArtifactIds: z.array(idSchema).min(1).max(8) }).strict();
 export const qaRequestSchema = z.object({ projectId: idSchema }).strict();
-export const qaArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: qaOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const qaArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: qaOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const qaArtifactsResponseSchema = z.array(qaArtifactResponseSchema);
 
 export const capcutDraftOutputSchema = z.object({
@@ -701,12 +798,12 @@ export const capcutDraftOutputSchema = z.object({
 }).strict();
 export const capcutDraftRequestSchema = z.object({ projectId: idSchema }).strict();
 export const capcutDraftApprovalRequestSchema = z.object({ projectId: idSchema, confirmation: z.literal("I opened the draft in CapCut and verified editable tracks") }).strict();
-export const capcutDraftArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: capcutDraftOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const capcutDraftArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: capcutDraftOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const capcutDraftArtifactsResponseSchema = z.array(capcutDraftArtifactResponseSchema);
 
 export const packagingExportOutputSchema = z.object({ relativeFilePath: safePathSchema, artifactIds: z.array(idSchema).min(6).max(12).refine((ids) => new Set(ids).size === ids.length, { message: "Package artifact IDs must be unique." }), sha256: z.string().length(64) }).strict();
 export const packagingExportRequestSchema = z.object({ projectId: idSchema }).strict();
-export const packagingExportArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: z.enum(["draft", "needs_review", "approved", "rejected", "stale"]), payloadJson: packagingExportOutputSchema, relativeFilePath: safePathSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
+export const packagingExportArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: packagingExportOutputSchema, relativeFilePath: safePathSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const packagingExportArtifactsResponseSchema = z.array(packagingExportArtifactResponseSchema);
 
 export const imageCertificationErrorCategorySchema = z.enum(["credential_missing", "model_not_selected", "invalid_base_url", "unauthorized", "endpoint_not_found", "rate_limited", "server_error", "timeout", "network_error", "invalid_response_shape", "unsafe_asset", "unknown_error"]);
@@ -751,6 +848,8 @@ export const projectSummaryResponseSchema = z.object({
 });
 
 const timelineItemResponseSchema = timelineItemOutputSchema;
+const stageAttentionActionResponseSchema = z.object({ label: z.string().min(1), route: z.string().min(1).optional() }).strict();
+const stageAttentionResponseSchema = z.object({ code: z.string().min(1), message: z.string().min(1), actions: z.array(stageAttentionActionResponseSchema) }).strict();
 
 export const factoryProjectResponseSchema = z.object({
   id: idSchema,
@@ -759,7 +858,7 @@ export const factoryProjectResponseSchema = z.object({
   targetLanguage: z.string(),
   profileId: idSchema,
   routeDecision: channelRouteDecisionResponseSchema,
-  stages: z.array(z.object({ id: idSchema, name: z.string(), status: z.string(), dependsOn: z.array(idSchema) })),
+  stages: z.array(z.object({ id: idSchema, name: z.string(), status: z.string(), dependsOn: z.array(idSchema), attention: stageAttentionResponseSchema.optional() })),
   ideas: z.array(z.object({ id: idSchema }).passthrough()),
   claims: z.array(z.object({ id: idSchema }).passthrough()),
   scriptSections: z.array(z.object({ id: idSchema }).passthrough()),
@@ -896,3 +995,4 @@ export type ReferenceSegmentationOutput = z.infer<typeof referenceSegmentationOu
 export type TranscriptCleaningArtifactResponse = z.infer<typeof transcriptCleaningArtifactResponseSchema>;
 export type ReferenceSegmentationArtifactResponse = z.infer<typeof referenceSegmentationArtifactResponseSchema>;
 export type CompetitorDnaOutput = z.infer<typeof competitorDnaOutputSchema>;
+export type WorkflowRunResponse = z.infer<typeof workflowRunResponseSchema>;

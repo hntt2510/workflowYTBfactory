@@ -15,6 +15,25 @@ describe("preview rendering", () => {
     await expect(renderPreview({ timeline: { fps: 30, items: [{ id: "visual-1", track: "primary_visual", sourceId: "asset-1", startFrame: 0, durationFrames: 30, fps: 30 }] }, outputPath: "missing.mp4", resolution: "1080p-vertical", visualInputs: [{ filePath: "missing.png", startFrame: 0, durationFrames: 30 }], audioInputs: [{ filePath: "missing.wav" }] })).rejects.toMatchObject({ category: "missing_media" } satisfies Partial<PreviewRenderError>);
   });
 
+  it("blocks a missing local subtitle file", async () => {
+    const workspace = mkdtempSync(join(tmpdir(), "lsf-preview-subtitles-"));
+    const inputPath = join(workspace, "input.png");
+    const audioPath = join(workspace, "input.wav");
+    writeFileSync(inputPath, "preview-input");
+    writeFileSync(audioPath, "preview-audio");
+
+    await expect(renderPreview({
+      timeline: { fps: 30, items: [{ id: "visual-1", track: "primary_visual", sourceId: "asset-1", startFrame: 0, durationFrames: 30, fps: 30 }] },
+      outputPath: join(workspace, "output.mp4"),
+      resolution: "1080p-vertical",
+      visualInputs: [{ filePath: inputPath, startFrame: 0, durationFrames: 30 }],
+      audioInputs: [{ filePath: audioPath }],
+      subtitleFilePath: join(workspace, "missing.srt")
+    })).rejects.toMatchObject({ category: "missing_media" } satisfies Partial<PreviewRenderError>);
+
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
   it("treats a missing rendered file as an invalid preview", async () => {
     const workspace = mkdtempSync(join(tmpdir(), "lsf-preview-"));
     const inputPath = join(workspace, "input.png");
