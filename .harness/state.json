@@ -1,13 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-03T14:40:00.000Z",
-  "activeJobs": [
-    {
-      "jobId": "JOB-ROUTE-AWARE-ASSET-ACQUISITION-V1",
-      "role": "builder",
-      "status": "active",
-      "startedAt": "2026-08-03T14:40:00.000Z"
-    }
-  ],
-  "notes": "JOB-ROUTE-AWARE-ASSET-ACQUISITION-V1 is active. Prior simple Create and Scene Review work remains committed; unrelated dirty changes are preserved."
+  "updatedAt": "2026-08-03T14:46:00.000Z",
+  "activeJobs": [],
+  "notes": "JOB-ROUTE-AWARE-ASSET-ACQUISITION-V1 builder verification passed and is ready for independent review. Prior simple Create and Scene Review work remains committed; unrelated dirty changes are preserved."
 }

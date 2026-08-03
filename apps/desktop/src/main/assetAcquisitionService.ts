@@ -66,6 +66,7 @@ export function planAssetAcquisition(input: {
 
   if (imagePrompts.length === 0 && preservedAssets.length === 0) throw new AssetAcquisitionError("route_unavailable", "No supported visual route is available for Asset Acquisition.");
   return { imagePrompts, preservedAssets };
+}
 interface ImageClient {
   createImage(input: { model: string; prompt: string; aspectRatio: "16:9" | "9:16"; idempotencyKey?: string }): Promise<Array<{ url?: string; b64Json?: string; dataUri?: string }>>;
 }

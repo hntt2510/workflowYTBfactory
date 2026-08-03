@@ -2,7 +2,7 @@
   "jobId": "JOB-ROUTE-AWARE-ASSET-ACQUISITION-V1",
   "type": "short",
   "title": "Make Asset Acquisition route-aware",
-  "status": "active",
+  "status": "review_required",
   "targetBranch": "chore/setup-agent-harness",
   "assignedRole": "builder",
   "description": "Extend the existing Asset Acquisition handler to plan per-shot visual routes, generate only approved AI-image shots, preserve reusable/local image assets, and fail closed for routes without a verified acquisition adapter.",
