@@ -1298,6 +1298,58 @@ function updateProjectStage(project: FactoryProject, stageId: string, status: Wo
   };
 }
 
+function describeAssetAcquisitionPreflightFailure(error: unknown): { category: string; message: string } {
+  if (error instanceof AssetAcquisitionError) return { category: error.category, message: error.message };
+  if (error instanceof Error && [
+    "Asset Acquisition requires approved Prompt Preparation.",
+    "A verified image-model certification is required before Asset Acquisition can run.",
+    "The selected image model or credential is unavailable."
+  ].includes(error.message)) return { category: error.message.startsWith("A verified") ? "capability_not_verified" : "credential_missing", message: error.message };
+  return { category: "provider_failed", message: "Asset Acquisition preflight failed. Check the configured image provider and retry." };
+}
+
+function persistAssetAcquisitionPreflightFailure(input: {
+  project: FactoryProject;
+  projectId: string;
+  runId: string;
+  runnerId: string;
+  inputArtifactIds: string[];
+  inputFingerprint: string;
+  category: string;
+  message: string;
+}): void {
+  const startedAt = new Date().toISOString();
+  const running = transitionProjectStage(transitionProjectStage(input.project, "asset-acquisition", "queued"), "asset-acquisition", "running");
+  const failed = updateProjectStage(running, "asset-acquisition", "failed", {
+    code: input.category,
+    message: input.message,
+    actions: [{ label: "Review stage", route: "visuals" }]
+  });
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true });
+    workflowRunStore.createRun({
+      id: input.runId,
+      projectId: input.projectId,
+      stageId: "asset-acquisition",
+      status: "failed",
+      runnerId: input.runnerId,
+      runnerVersion: "asset-acquisition-preflight-v1",
+      inputArtifactIds: input.inputArtifactIds,
+      inputFingerprint: input.inputFingerprint,
+      outputArtifactIds: [],
+      safeErrorCategory: input.category,
+      safeErrorMessage: input.message,
+      startedAt,
+      finishedAt: startedAt
+    });
+    db.exec("COMMIT;");
+  } catch (persistenceError) {
+    db.exec("ROLLBACK;");
+    throw persistenceError;
+  }
+}
+
 function transitionProjectStage(project: FactoryProject, stageId: string, status: WorkflowStageStatus): FactoryProject {
   const current = normalizeProjectStages(project.stages).find((stage) => stage.id === stageId);
   if (!current) throw new Error(`Unknown workflow stage: ${stageId}`);
@@ -3359,55 +3411,73 @@ ipcMain.handle("run-asset-acquisition", async (_event, input: unknown) => {
   const project = projectRepository.loadProject(projectId);
   if (!project) throw new Error(`Project not found: ${projectId}`);
   if (sceneId && !project.scenes.some((scene) => scene.id === sceneId)) throw new Error("The selected scene was not found.");
-  const promptArtifact = currentApprovedArtifacts(project, "prompt-preparation").find((item) => item.payloadJson);
-  if (!promptArtifact?.payloadJson) throw new Error("Asset Acquisition requires approved Prompt Preparation.");
-  const prompts = promptPreparationOutputSchema.parse(promptArtifact.payloadJson).prompts;
-  const targetShots = project.shots.filter((shot) => !sceneId || shot.sceneId === sceneId);
-  const priorAssetIds = new Set<string>();
-  const priorAssets: AcquiredImageAsset[] = [];
-  for (const artifact of [
-    ...currentApprovedArtifacts(project, "asset-acquisition"),
-    ...currentApprovedArtifacts(project, "asset-review"),
-    ...workflowRunStore.listArtifacts(projectId, "asset-acquisition").filter((item) => (item.status === "approved" || item.status === "stale") && item.payloadJson),
-    ...workflowRunStore.listArtifacts(projectId, "asset-review").filter((item) => (item.status === "approved" || item.status === "stale") && item.payloadJson)
-  ]) {
-    const acquisition = assetAcquisitionOutputSchema.safeParse(artifact.payloadJson);
-    if (acquisition.success) for (const asset of acquisition.data.assets) if (!priorAssetIds.has(`asset-${asset.sha256}`)) {
-      priorAssetIds.add(`asset-${asset.sha256}`);
-      priorAssets.push(asset);
+  let promptArtifact: WorkflowArtifact | undefined;
+  let prompts: ReturnType<typeof promptPreparationOutputSchema.parse>["prompts"] = [];
+  let targetShots: FactoryProject["shots"] = [];
+  let priorAssets: AcquiredImageAsset[] = [];
+  let routePlan!: ReturnType<typeof planAssetAcquisition>;
+  let providerConfig: { imageModel: string; apiKey: string; baseUrl: string; imageCapabilityVerified: true } | undefined;
+  let providerRunMetadata: { providerId?: "9router"; configuredModelId?: string } = {};
+  let retryGenerationVersion = 0;
+  let fingerprint = canonicalSha256({ stageId: "asset-acquisition", projectId, sceneId });
+  let preflightRunnerId = "asset-acquisition-9router";
+  let preflightInputArtifactIds: string[] = [];
+  try {
+    promptArtifact = currentApprovedArtifacts(project, "prompt-preparation").find((item) => item.payloadJson);
+    if (!promptArtifact?.payloadJson) throw new Error("Asset Acquisition requires approved Prompt Preparation.");
+    preflightInputArtifactIds = [promptArtifact.id];
+    prompts = promptPreparationOutputSchema.parse(promptArtifact.payloadJson).prompts;
+    targetShots = project.shots.filter((shot) => !sceneId || shot.sceneId === sceneId);
+    const priorAssetIds = new Set<string>();
+    for (const artifact of [
+      ...currentApprovedArtifacts(project, "asset-acquisition"),
+      ...currentApprovedArtifacts(project, "asset-review"),
+      ...workflowRunStore.listArtifacts(projectId, "asset-acquisition").filter((item) => (item.status === "approved" || item.status === "stale") && item.payloadJson),
+      ...workflowRunStore.listArtifacts(projectId, "asset-review").filter((item) => (item.status === "approved" || item.status === "stale") && item.payloadJson)
+    ]) {
+      const acquisition = assetAcquisitionOutputSchema.safeParse(artifact.payloadJson);
+      if (acquisition.success) for (const asset of acquisition.data.assets) if (!priorAssetIds.has(`asset-${asset.sha256}`)) {
+        priorAssetIds.add(`asset-${asset.sha256}`);
+        priorAssets.push(asset);
+      }
+      const review = assetReviewOutputSchema.safeParse(artifact.payloadJson);
+      if (review.success) for (const item of review.data.assets) if (!priorAssetIds.has(`asset-${item.asset.sha256}`)) {
+        priorAssetIds.add(`asset-${item.asset.sha256}`);
+        priorAssets.push(item.asset);
+      }
     }
-    const review = assetReviewOutputSchema.safeParse(artifact.payloadJson);
-    if (review.success) for (const item of review.data.assets) if (!priorAssetIds.has(`asset-${item.asset.sha256}`)) {
-      priorAssetIds.add(`asset-${item.asset.sha256}`);
-      priorAssets.push(item.asset);
+    routePlan = planAssetAcquisition({ shots: targetShots, prompts, priorAssets });
+    preflightRunnerId = routePlan.imagePrompts.length ? "asset-acquisition-9router" : "asset-acquisition-local";
+    for (const asset of routePlan.preservedAssets) {
+      if (!existsSync(resolveWorkspaceArtifactPath(asset.relativeFilePath))) throw new AssetAcquisitionError("unsafe_asset", `The approved local asset for shot ${asset.shotId} is missing from the workspace.`);
     }
+    const certification = routePlan.imagePrompts.length
+      ? await loadNineRouterImageCertification({ credentialStore, certificationStore: imageCertificationStore })
+      : undefined;
+    if (routePlan.imagePrompts.length && certification?.status !== "verified") throw new Error("A verified image-model certification is required before Asset Acquisition can run.");
+    const settings = routePlan.imagePrompts.length ? credentialStore.loadProviderCredentialSettings("9router") : undefined;
+    const apiKey = routePlan.imagePrompts.length ? await credentialStore.resolveProviderSecret("9router") : null;
+    if (routePlan.imagePrompts.length && (!settings?.imageModel || !apiKey)) throw new Error("The selected image model or credential is unavailable.");
+    providerConfig = routePlan.imagePrompts.length
+      ? { imageModel: settings!.imageModel!, apiKey: apiKey!, baseUrl: settings!.baseUrl, imageCapabilityVerified: true }
+      : undefined;
+    providerRunMetadata = providerConfig ? { providerId: "9router" as const, configuredModelId: providerConfig.imageModel } : {};
+    retryGenerationVersion = sceneId ? workflowRunStore.listArtifacts(projectId, "asset-acquisition").length : 0;
+    fingerprint = canonicalSha256({
+      stageId: "asset-acquisition",
+      promptArtifactId: promptArtifact.id,
+      ...(certification?.record?.id ? { imageCertificationId: certification.record.id } : {}),
+      sceneId,
+      retryGenerationVersion,
+      routes: targetShots.map((shot) => ({ shotId: shot.id, visualMode: shot.visualMode, promptVersionId: shot.promptVersionId, approvedAssetId: shot.approvedAssetId })),
+      promptIds: routePlan.imagePrompts.map((prompt) => prompt.promptVersionId),
+      preservedAssetIds: routePlan.preservedAssets.map((asset) => asset.sha256)
+    });
+  } catch (error) {
+    const failure = describeAssetAcquisitionPreflightFailure(error);
+    persistAssetAcquisitionPreflightFailure({ project, projectId, runId: `stage-run-${randomUUID()}`, runnerId: preflightRunnerId, inputArtifactIds: preflightInputArtifactIds, inputFingerprint: fingerprint, ...failure });
+    throw new Error(failure.message);
   }
-  const routePlan = planAssetAcquisition({ shots: targetShots, prompts, priorAssets });
-  for (const asset of routePlan.preservedAssets) {
-    if (!existsSync(resolveWorkspaceArtifactPath(asset.relativeFilePath))) throw new AssetAcquisitionError("unsafe_asset", `The approved local asset for shot ${asset.shotId} is missing from the workspace.`);
-  }
-  const certification = routePlan.imagePrompts.length
-    ? await loadNineRouterImageCertification({ credentialStore, certificationStore: imageCertificationStore })
-    : undefined;
-  if (routePlan.imagePrompts.length && certification?.status !== "verified") throw new Error("A verified image-model certification is required before Asset Acquisition can run.");
-  const settings = routePlan.imagePrompts.length ? credentialStore.loadProviderCredentialSettings("9router") : undefined;
-  const apiKey = routePlan.imagePrompts.length ? await credentialStore.resolveProviderSecret("9router") : null;
-  if (routePlan.imagePrompts.length && (!settings?.imageModel || !apiKey)) throw new Error("The selected image model or credential is unavailable.");
-  const providerConfig = routePlan.imagePrompts.length
-    ? { imageModel: settings!.imageModel!, apiKey: apiKey!, baseUrl: settings!.baseUrl, imageCapabilityVerified: true }
-    : undefined;
-  const providerRunMetadata = providerConfig ? { providerId: "9router" as const, configuredModelId: providerConfig.imageModel } : {};
-  const retryGenerationVersion = sceneId ? workflowRunStore.listArtifacts(projectId, "asset-acquisition").length : 0;
-  const fingerprint = canonicalSha256({
-    stageId: "asset-acquisition",
-    promptArtifactId: promptArtifact.id,
-    ...(certification?.record?.id ? { imageCertificationId: certification.record.id } : {}),
-    sceneId,
-    retryGenerationVersion,
-    routes: targetShots.map((shot) => ({ shotId: shot.id, visualMode: shot.visualMode, promptVersionId: shot.promptVersionId, approvedAssetId: shot.approvedAssetId })),
-    promptIds: routePlan.imagePrompts.map((prompt) => prompt.promptVersionId),
-    preservedAssetIds: routePlan.preservedAssets.map((asset) => asset.sha256)
-  });
   const existing = workflowRunStore.findLatestByInput(projectId, "asset-acquisition", fingerprint);
   if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project);
   const runId = `stage-run-${randomUUID()}`;
@@ -3438,7 +3508,7 @@ ipcMain.handle("run-asset-acquisition", async (_event, input: unknown) => {
         generationJobStore.finish(jobId, "failed", { ...jobPayload, errorCategory: error instanceof AssetAcquisitionError ? error.category : "unexpected_failure" }); throw error;
       }
     }
-    const output = assetAcquisitionOutputSchema.parse({ assets }); const artifactId = `artifact-${randomUUID()}`; const finishedAt = new Date().toISOString(); const review = transitionProjectStage(running, "asset-acquisition", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-acquisition", status: "needs_review", runnerId, runnerVersion: "asset-acquisition-v1", ...providerRunMetadata, inputArtifactIds: [promptArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt }, { id: artifactId, projectId, stageId: "asset-acquisition", stageRunId: runId, type: "asset", version: workflowRunStore.listArtifacts(projectId, "asset-acquisition").length + 1, status: "needs_review", payloadJson: output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review); } catch (error) { const failed = transitionProjectStage(running, "asset-acquisition", "failed"); const message = error instanceof AssetAcquisitionError ? error.message : "Asset Acquisition failed."; db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-acquisition", status: "failed", runnerId, runnerVersion: "asset-acquisition-v1", ...providerRunMetadata, inputArtifactIds: [promptArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof AssetAcquisitionError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; } throw new Error(message); }
+    const output = assetAcquisitionOutputSchema.parse({ assets }); const artifactId = `artifact-${randomUUID()}`; const finishedAt = new Date().toISOString(); const review = transitionProjectStage(running, "asset-acquisition", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-acquisition", status: "needs_review", runnerId, runnerVersion: "asset-acquisition-v1", ...providerRunMetadata, inputArtifactIds: [promptArtifact!.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt }, { id: artifactId, projectId, stageId: "asset-acquisition", stageRunId: runId, type: "asset", version: workflowRunStore.listArtifacts(projectId, "asset-acquisition").length + 1, status: "needs_review", payloadJson: output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review); } catch (error) { const failed = transitionProjectStage(running, "asset-acquisition", "failed"); const message = error instanceof AssetAcquisitionError ? error.message : "Asset Acquisition failed."; db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-acquisition", status: "failed", runnerId, runnerVersion: "asset-acquisition-v1", ...providerRunMetadata, inputArtifactIds: [promptArtifact!.id], inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof AssetAcquisitionError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; } throw new Error(message); }
 });
 ipcMain.handle("list-asset-acquisition-artifacts", (_event, input: unknown) => { const { projectId } = assetAcquisitionRequestSchema.parse(input); return assetAcquisitionArtifactsResponseSchema.parse(workflowRunStore.listArtifacts(projectId, "asset-acquisition").map((artifact) => ({ id: artifact.id, ...(artifact.stageRunId ? { stageRunId: artifact.stageRunId } : {}), status: artifact.status, payloadJson: artifact.payloadJson, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt }))); });
 ipcMain.handle("approve-asset-acquisition", (_event, input: unknown) => { const { projectId } = assetAcquisitionRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "asset-acquisition").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Asset Acquisition output exists."); assetAcquisitionOutputSchema.parse(artifact.payloadJson); const approved = transitionProjectStage(markDownstreamStagesStale(project, "asset-acquisition"), "asset-acquisition", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
