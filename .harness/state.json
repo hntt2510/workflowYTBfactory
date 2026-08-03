@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-03T13:50:00.000Z",
+  "updatedAt": "2026-08-03T14:30:00.000Z",
   "activeJobs": [],
-  "notes": "JOB-SCENE-REVIEW-CONTROLS-V1 builder verification passed: focused Scene Review schema/automatic-flow/packaging tests, typecheck, and diff check. Exact VOX Simple Flow runtime remains pending because the existing Electron smoke helper expects the removed New Project route."
+  "notes": "JOB-SIMPLE-CREATE-VOICE-RUNTIME-V1 builder verification passed: configured voice binding, simplified Create smoke, typecheck, navigation test, and diff check. Full legacy smoke matrix remains blocked by missing text-model certification in its isolated setup."
 }

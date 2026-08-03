@@ -669,11 +669,12 @@ function SimpleCreateScreen(props: {
     return () => { cancelled = true; };
   }, [language]);
 
-  const voices = (catalog?.voices ?? []).filter((voice) => voice.enabled && !voice.experimental);
+  const configuredProvider = props.localTtsSettings?.ttsProvider;
+  const voices = (catalog?.voices ?? []).filter((voice) => voice.enabled && !voice.experimental && (!configuredProvider || voice.provider === configuredProvider));
   const configuredVoice = props.localTtsSettings?.available && props.localTtsSettings.ttsVoiceId
     ? [{ key: `configured:${props.localTtsSettings.ttsVoiceId}`, label: `Configured voice (${props.localTtsSettings.ttsVoiceId})` }]
     : [];
-  const voiceOptions = voices.length ? voices.map((voice) => ({ key: voice.key, label: voice.label })) : configuredVoice;
+  const voiceOptions = voices.length ? voices.map((voice) => ({ key: voice.providerVoiceId, label: voice.label })) : configuredVoice;
   const contentReady = inputMode === "topic" ? topic.trim().length > 0 : inputMode === "existing_script" ? script.trim().length > 0 : referenceTranscript.trim().length > 0;
 
   async function create(): Promise<void> {

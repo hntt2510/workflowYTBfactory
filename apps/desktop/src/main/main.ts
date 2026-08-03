@@ -848,7 +848,7 @@ app.whenReady().then(async () => {
 app.on("before-quit", () => ttsManager?.dispose());
 
 async function runUiVerification(win: BrowserWindow, reportPath: string, mode: string): Promise<void> {
-  const topic = mode === "workflow-contract" || mode === "reference-restart" || mode === "reference-invalidation" ? "Workflow contract verification project" : mode === "semi-automatic-resume" ? "Semi-automatic resume verification project" : "What did Aaron's breastpiece symbolize?";
+  const topic = mode === "workflow-contract" || mode === "reference-restart" || mode === "reference-invalidation" ? "Workflow contract verification project" : mode === "semi-automatic-resume" ? "Semi-automatic resume verification project" : "Why did oil matter so much in World War II?";
   try {
     writeUiVerificationReport(reportPath, { ok: false, mode, phase: "started", workspaceRoot, databasePath });
     await waitForRenderer(win);
@@ -931,31 +931,24 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
       await assertText(win, "Generation");
     } else {
       await assertText(win, "Long/Short Factory");
-      await waitForText(win, "New Project", 15_000);
-      await clickText(win, "New Project");
-      await assertText(win, "New Project Wizard");
-      await clickText(win, "Route channel profile");
-      await assertText(win, "Bible Mysteries Revealed");
-      await clickText(win, "Continue");
-      await clickText(win, "Continue");
-      await clickText(win, "Review");
-      await clickText(win, "Create Project");
+      await clickText(win, "Create");
+      await assertText(win, "Create Video Project");
+      await assertText(win, "VOX Documentary");
+      await setInputValue(win, "#simple-topic", topic);
+      await clickText(win, "Create Video Project");
+      await assertText(win, "Preparing your video");
+      await clickText(win, "Projects");
       await assertText(win, topic);
-      await assertText(win, "Project command center");
-      await clickText(win, "Shots");
-      await assertText(win, "Shot Board");
-      await clickText(win, "Visuals");
-      await assertText(win, "Visual Routing");
-      await clickText(win, "Production Queue");
-      await assertText(win, "Queue Simulation");
-      await clickText(win, "Providers");
-      await assertText(win, "Video model");
-      await assertText(win, "TTS model");
-      await assertText(win, "Other providers");
-      await setInputValue(win, "#provider-api-key", "sk-ui-runtime-secret");
-      await clickText(win, "Save credential");
-      await assertText(win, "Credential saved");
-      await assertNoText(win, "sk-ui-runtime-secret");
+      await clickProjectOpen(win, topic);
+      await assertOneOfText(win, ["Preparing your video", "Project command center"]);
+      await clickText(win, "Scene Review");
+      await assertText(win, "Scenes are not ready yet");
+      await clickText(win, "Final Preview");
+      await assertText(win, "No reviewable preview yet");
+      await clickText(win, "Settings");
+      await assertText(win, "Generation");
+      await clickText(win, "Diagnostics");
+      await assertText(win, "Diagnostics");
     }
     writeUiVerificationReport(reportPath, { ok: true, mode, workspaceRoot, databasePath });
     app.quit();
@@ -1336,6 +1329,17 @@ async function assertText(win: BrowserWindow, expected: string): Promise<void> {
     await delay(250);
   }
   throw new Error(`Expected page text to include: ${expected}. Page text: ${text.slice(0, 600)}`);
+}
+
+async function assertOneOfText(win: BrowserWindow, expected: string[]): Promise<void> {
+  const started = Date.now();
+  let text = "";
+  while (Date.now() - started < 5_000) {
+    text = await pageText(win);
+    if (expected.some((value) => text.includes(value))) return;
+    await delay(250);
+  }
+  throw new Error(`Expected page text to include one of: ${expected.join(", ")}. Page text: ${text.slice(0, 600)}`);
 }
 
 async function assertNoText(win: BrowserWindow, forbidden: string): Promise<void> {
@@ -3192,7 +3196,7 @@ ipcMain.handle("run-voice-generation", async (_event, input: unknown) => {
   const settings = loadLocalTtsSettings();
   const provider = configuredTtsProvider(settings);
   if (!settings.available) throw new Error(`Selected TTS provider (${provider}) is not configured or available. No fallback voice provider will be used.`);
-  const voiceId = provider === "omnivoice-local" ? "omnivoice-local" : settings.ttsVoiceId ?? defaultVoiceForProvider(provider, settings.language ?? "vi");
+  const voiceId = provider === "omnivoice-local" ? "omnivoice-local" : project.setup.voiceId ?? settings.ttsVoiceId ?? defaultVoiceForProvider(provider, settings.language ?? "vi");
   if (!voiceId) throw new Error("Select a voice before starting Voice Generation.");
   const script = scriptOutputSchema.parse(scriptArtifact.payloadJson);
   const fingerprint = canonicalSha256({ stageId: "voice-generation", scriptArtifactId: scriptArtifact.id, assetReviewArtifactId: assetReviewArtifact.id, provider, voiceId, rate: settings.ttsRate ?? 1, fallbackEnabled: settings.ttsFallbackEnabled ?? false, fallbackOrder: settings.ttsFallbackOrder ?? [], sections: script.sections.map((section) => section.id) });
