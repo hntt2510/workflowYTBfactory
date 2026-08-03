@@ -1,0 +1,40 @@
+{
+  "jobId": "JOB-VOX-RESUME-FINAL-EXPORT-V1",
+  "type": "short",
+  "title": "Resume certified VOX media through final export",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Add an explicit resume-from-preview smoke path for a persisted certified VOX project and verify real preview approval, QA, packaging, and final MP4 export without starting new provider work.",
+  "businessContext": "The certified VOX workspace already contains approved scenes, voice, subtitles, timeline, and preview media. The fresh smoke cannot reach Idea Lab because text certification is unavailable, so the remaining export path must be exercised from persisted media through the existing UI controls.",
+  "allowedPaths": [
+    "apps/desktop/src/main/main.ts",
+    "scripts/verify-electron-ui.cjs",
+    ".harness/jobs/JOB-VOX-RESUME-FINAL-EXPORT-V1.json",
+    ".harness/handoffs/JOB-VOX-RESUME-FINAL-EXPORT-V1.md",
+    ".harness/locks/JOB-VOX-RESUME-FINAL-EXPORT-V1.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": [
+    "apps/desktop/src/renderer/**",
+    "apps/desktop/src/preload/**",
+    "packages/db/**",
+    "packages/providers/**"
+  ],
+  "dependencies": ["JOB-VOX-FINAL-PREVIEW-CHECKPOINT-V1", "certified VOX media workspace"],
+  "acceptanceCriteria": [
+    "Resume-from-preview is opt-in and does not alter fresh smoke behavior.",
+    "The branch opens the explicitly supplied persisted project, uses Render Again to create a real reviewable preview, and does not rerun scene, voice, subtitle, or timeline generation.",
+    "The branch explicitly approves Final Preview and verifies approved QA, Packaging Export, and a non-empty final MP4.",
+    "No provider, stage, approval, or export evidence is fabricated."
+  ],
+  "verificationCommands": [
+    "$env:LSF_UI_USE_CONFIGURED_KEYCHAIN='1'; $env:LSF_UI_SEED_WORKSPACE='...'; $env:LSF_UI_USE_SEED_WORKSPACE='1'; $env:LSF_UI_RESUME_PROJECT='1'; $env:LSF_UI_RESUME_FROM_PREVIEW='1'; $env:LSF_UI_MODES='vox-simple-flow'; node scripts/verify-electron-ui.cjs",
+    "node --check scripts/verify-electron-ui.cjs",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["The persisted certified workspace is missing approved media or the existing preview/export handlers require a backend change."]
+}

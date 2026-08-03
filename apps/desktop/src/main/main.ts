@@ -1048,7 +1048,35 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
   }
   phases.persistedConfiguration = "verified";
 
-  try {
+  const persistedPreviewStatus = persisted.stages.find((stage) => stage.id === "preview-render")?.status;
+  const resumeFromPreview = resumeProject && process.env.LSF_UI_RESUME_FROM_PREVIEW === "1" && (persistedPreviewStatus === "approved" || persistedPreviewStatus === "needs_review");
+  let resumedPreviewCompleted = false;
+  if (resumeFromPreview) {
+    await clickText(win, "Final Preview");
+    await waitForText(win, "Final Preview", 30_000);
+    if (persistedPreviewStatus === "approved") {
+      await waitForEnabledControl(win, "Render Again", 30_000);
+      await clickText(win, "Render Again");
+      await waitForText(win, "Preview rendered again; approval is still required.", 900_000);
+      await waitForProjectStageStatus(summary.id, "preview-render", ["needs_review"], 900_000);
+    }
+    phases.sceneReview = "persisted_approved";
+    phases.voiceGeneration = persisted.stages.find((stage) => stage.id === "voice-generation")?.status === "approved" ? "approved" : "not_approved";
+    phases.subtitles = persisted.stages.find((stage) => stage.id === "subtitle-preparation")?.status === "approved" ? "approved" : "not_approved";
+    phases.finalPreview = "real_preview_visible";
+    await waitForEnabledControl(win, "Approve Final Video", 30_000);
+    await clickText(win, "Approve Final Video");
+    await waitForProjectStageStatus(summary.id, "packaging-export", ["approved"], 900_000);
+    phases.previewApproval = "approved";
+    phases.packagingExport = "approved";
+    await clickText(win, "Export");
+    await waitForText(win, "Final MP4", 30_000);
+    phases.export = "verified";
+    resumedPreviewCompleted = true;
+  }
+
+  if (!resumedPreviewCompleted) {
+    try {
     await clickText(win, "Projects");
     await assertText(win, topic);
     await clickProjectOpen(win, topic);
@@ -1166,6 +1194,7 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
     if (requireFullFlow) throw error;
     phases.ideaSelection = "blocked_or_not_reached";
     runtimeNotes.push("Preparation checkpoint was unavailable; the persisted stage status and safe reason are recorded below.");
+  }
   }
 
   if (phases.export !== "verified") {
@@ -1742,8 +1771,9 @@ async function clickProjectOpen(win: BrowserWindow, topic: string): Promise<void
   const clicked = await win.webContents.executeJavaScript(
     `(() => {
       const rows = Array.from(document.querySelectorAll("tr"));
-      const row = rows.find((item) => (item.innerText || "").includes(${JSON.stringify(topic)}));
-      const button = row && Array.from(row.querySelectorAll("button")).find((item) => (item.innerText || "").includes("Open"));
+      const textOf = (item) => [item.innerText, item.textContent].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim();
+      const row = rows.find((item) => textOf(item).includes(${JSON.stringify(topic)}));
+      const button = row && Array.from(row.querySelectorAll("button")).find((item) => textOf(item).includes("Open"));
       if (!button || button.disabled) return false;
       button.click();
       return true;
