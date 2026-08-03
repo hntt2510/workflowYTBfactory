@@ -1,0 +1,43 @@
+{
+  "jobId": "JOB-VOX-TOPIC-IDEA-ELIGIBILITY-V1",
+  "type": "short",
+  "title": "Allow Topic Mode to approve ideas without reference analysis",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Make the shared eligibility engine treat Opportunity Map as optional for Topic Mode with no competitor references, while preserving the required reference chain for Reference Mode.",
+  "businessContext": "The exact VOX Simple Flow runtime generated valid Topic-mode candidates but every approval control was disabled because Idea Lab inherited the Reference Mode Opportunity Map dependency.",
+  "allowedPaths": [
+    "packages/domain/src/workflowEligibility.ts",
+    "packages/domain/test/workflowEligibility.test.ts",
+    ".harness/jobs/JOB-VOX-TOPIC-IDEA-ELIGIBILITY-V1.json",
+    ".harness/handoffs/JOB-VOX-TOPIC-IDEA-ELIGIBILITY-V1.md",
+    ".harness/locks/JOB-VOX-TOPIC-IDEA-ELIGIBILITY-V1.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": [
+    "apps/desktop/src/main/**",
+    "apps/desktop/src/renderer/**",
+    "packages/db/**",
+    "packages/providers/**"
+  ],
+  "dependencies": [
+    "VOX full-flow smoke handoff 2f47e96f"
+  ],
+  "acceptanceCriteria": [
+    "Topic Mode with no included competitor references can approve a reviewable Idea Lab artifact without an Opportunity Map.",
+    "Downstream Originality Review becomes eligible after the Topic idea is approved without requiring Opportunity Map approval.",
+    "Reference Mode still requires the approved Opportunity Map before Idea Lab is runnable or approvable.",
+    "Focused eligibility tests, typecheck, and diff checks pass."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run packages/domain/test/workflowEligibility.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": [
+    "Changing effective dependencies would invalidate Reference Mode approval or stale-chain semantics."
+  ]
+}

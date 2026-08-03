@@ -12,6 +12,7 @@ export interface ProviderCapabilitySnapshot {
 export interface WorkflowStateSnapshot {
   stages: PipelineStage[];
   referenceSetStatus?: ReferenceSetState["status"];
+  inputMode?: FactoryProject["setup"]["inputMode"];
   includedReferenceCount: number;
   invalidIncludedReferenceCount: number;
   duplicateReferenceCount: number;
@@ -22,6 +23,7 @@ export function buildWorkflowStateSnapshot(project: FactoryProject, providerCapa
   return {
     stages: normalizeProjectStages(project.stages),
     ...(project.referenceSet?.status ? { referenceSetStatus: project.referenceSet.status } : {}),
+    ...(project.setup.inputMode ? { inputMode: project.setup.inputMode } : {}),
     includedReferenceCount: project.competitorReferences.filter((reference) => reference.included !== false).length,
     invalidIncludedReferenceCount: project.competitorReferences.filter(
       (reference) => reference.included !== false && (reference.status === "invalid" || reference.status === "duplicate")
@@ -57,7 +59,8 @@ export function resolveStageEligibilities(project: FactoryProject, providerCapab
 }
 
 export function resolveStageEligibility(definition: WorkflowStageDefinition, snapshot: WorkflowStateSnapshot): StageEligibility {
-  const explicitStatus = snapshot.stages.find((stage) => stage.id === definition.id)?.status;
+  const stage = snapshot.stages.find((item) => item.id === definition.id);
+  const explicitStatus = stage?.status;
   if (explicitStatus === "running" || explicitStatus === "queued") {
     return baseEligibility(definition.id, explicitStatus, false, false, false, []);
   }
@@ -65,6 +68,15 @@ export function resolveStageEligibility(definition: WorkflowStageDefinition, sna
     const blockingReasons = referenceBlockingReasons(definition, snapshot)
       .concat(dependencyBlockingReasons(definition, snapshot));
     return baseEligibility(definition.id, "needs_review", false, true, blockingReasons.length === 0, blockingReasons);
+  }
+  if (explicitStatus === "needs_attention") {
+    const attention = stage?.attention;
+    return baseEligibility(definition.id, "needs_attention", false, false, false, [{
+      code: attention?.code ?? "NEEDS_ATTENTION",
+      message: attention?.message ?? `${definition.name} needs attention before the workflow can continue. Review the failed run and retry the stage.`,
+      actionRoute: attention?.actions.find((action) => action.route)?.route ?? definition.screenRoute,
+      actions: attention?.actions ?? [{ label: "Review stage", route: definition.screenRoute }]
+    }]);
   }
   if (explicitStatus === "approved") {
     const blockingReasons = referenceBlockingReasons(definition, snapshot)
@@ -91,7 +103,8 @@ export function firstActionableStage(project: FactoryProject, providerCapabiliti
 }
 
 function dependencyBlockingReasons(definition: WorkflowStageDefinition, snapshot: WorkflowStateSnapshot): StageEligibility["blockingReasons"] {
-  const directReasons = definition.dependsOn
+  const dependencies = effectiveDependencies(definition, snapshot);
+  const directReasons = dependencies
     .filter((dependencyId) => snapshot.stages.find((stage) => stage.id === dependencyId)?.status !== "approved")
     .map((dependencyId) => {
       const dependencyDefinition = workflowStageDefinitions.find((stage) => stage.id === dependencyId);
@@ -101,7 +114,7 @@ function dependencyBlockingReasons(definition: WorkflowStageDefinition, snapshot
         ...(dependencyDefinition?.screenRoute ? { actionRoute: dependencyDefinition.screenRoute } : {})
       };
     });
-  const chainReasons = definition.dependsOn
+  const chainReasons = dependencies
     .filter((dependencyId) => snapshot.stages.find((stage) => stage.id === dependencyId)?.status === "approved")
     .filter((dependencyId) => !dependencyChainApproved(dependencyId, snapshot))
     .map((dependencyId) => {
@@ -121,10 +134,18 @@ function dependencyChainApproved(stageId: string, snapshot: WorkflowStateSnapsho
   nextVisited.add(stageId);
   const definition = workflowStageDefinitions.find((stage) => stage.id === stageId);
   if (definition && hasRequiredInput(definition, "reference-set.approved") && snapshot.referenceSetStatus !== "approved") return false;
-  return !definition || definition.dependsOn.every((dependencyId) =>
+  return !definition || effectiveDependencies(definition, snapshot).every((dependencyId) =>
     snapshot.stages.find((stage) => stage.id === dependencyId)?.status === "approved"
     && dependencyChainApproved(dependencyId, snapshot, nextVisited)
   );
+}
+
+function effectiveDependencies(definition: WorkflowStageDefinition, snapshot: WorkflowStateSnapshot): string[] {
+  const topicMode = (snapshot.inputMode ?? "topic") === "topic";
+  if (definition.id === "idea-lab" && topicMode && snapshot.includedReferenceCount === 0) {
+    return definition.dependsOn.filter((dependencyId) => dependencyId !== "opportunity-map");
+  }
+  return definition.dependsOn;
 }
 
 function hasRequiredInput(definition: WorkflowStageDefinition, inputType: string): boolean {

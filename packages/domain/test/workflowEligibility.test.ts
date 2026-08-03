@@ -2,6 +2,40 @@ import { describe, expect, it } from "vitest";
 import { createFixtureProject, resolveStageEligibilities } from "../src";
 
 describe("workflow eligibility", () => {
+  it("allows Topic Mode to approve ideas without Opportunity Map", () => {
+    const project = createFixtureProject({ topic: "Topic", format: "short", targetLanguage: "Vietnamese", inputMode: "topic" });
+    const ideaReviewProject = {
+      ...project,
+      stages: project.stages.map((stage) => stage.id === "idea-lab" ? { ...stage, status: "needs_review" as const } : stage)
+    };
+    const ideaLab = resolveStageEligibilities(ideaReviewProject, { textVerified: true }).find((stage) => stage.stageId === "idea-lab");
+    expect(ideaLab?.approvable).toBe(true);
+    expect(ideaLab?.blockingReasons).toEqual([]);
+
+    const ideaApprovedProject = {
+      ...ideaReviewProject,
+      stages: ideaReviewProject.stages.map((stage) => stage.id === "idea-lab" ? { ...stage, status: "approved" as const } : stage)
+    };
+    expect(resolveStageEligibilities(ideaApprovedProject, { textVerified: true }).find((stage) => stage.stageId === "originality-review")?.status).toBe("ready");
+  });
+
+  it("keeps Opportunity Map required for Reference Mode Idea Lab", () => {
+    const project = createFixtureProject({
+      topic: "Topic",
+      format: "short",
+      targetLanguage: "Vietnamese",
+      inputMode: "reference",
+      competitorReference: { pastedTranscript: "This transcript is long enough to be locally validated." }
+    });
+    const ideaReviewProject = {
+      ...project,
+      stages: project.stages.map((stage) => stage.id === "idea-lab" ? { ...stage, status: "needs_review" as const } : stage)
+    };
+    const ideaLab = resolveStageEligibilities(ideaReviewProject, { textVerified: true }).find((stage) => stage.stageId === "idea-lab");
+    expect(ideaLab?.approvable).toBe(false);
+    expect(ideaLab?.blockingReasons.map((reason) => reason.code)).toContain("DEPENDENCY_NOT_APPROVED");
+  });
+
   it("blocks reference validation until a reference is included", () => {
     const project = createFixtureProject({ topic: "Topic", format: "long", targetLanguage: "English" });
     const validation = resolveStageEligibilities(project).find((stage) => stage.stageId === "reference-validation");
@@ -85,7 +119,7 @@ describe("workflow eligibility", () => {
     const readyForVoice = {
       ...project,
       referenceSet: { status: "approved" as const },
-      stages: project.stages.map((stage, index) => index < 21 ? { ...stage, status: "approved" as const } : stage)
+      stages: project.stages.map((stage, index) => index < 19 ? { ...stage, status: "approved" as const } : stage)
     };
     const blocked = resolveStageEligibilities(readyForVoice).find((stage) => stage.stageId === "voice-generation");
     const available = resolveStageEligibilities(readyForVoice, { localAudioAvailable: true }).find((stage) => stage.stageId === "voice-generation");
@@ -99,7 +133,7 @@ describe("workflow eligibility", () => {
     const readyForAssets = {
       ...project,
       referenceSet: { status: "approved" as const },
-      stages: project.stages.map((stage, index) => index < 19 ? { ...stage, status: "approved" as const } : stage)
+      stages: project.stages.map((stage, index) => index < 17 ? { ...stage, status: "approved" as const } : stage)
     };
     const blocked = resolveStageEligibilities(readyForAssets, { textVerified: true }).find((stage) => stage.stageId === "asset-acquisition");
     const available = resolveStageEligibilities(readyForAssets, { textVerified: true, imageVerified: true }).find((stage) => stage.stageId === "asset-acquisition");
@@ -114,7 +148,7 @@ describe("workflow eligibility", () => {
     const readyForAssets = {
       ...assetProject,
       referenceSet: { status: "approved" as const },
-      stages: assetProject.stages.map((stage, index) => index < 19 ? { ...stage, status: "approved" as const } : stage)
+      stages: assetProject.stages.map((stage, index) => index < 17 ? { ...stage, status: "approved" as const } : stage)
     };
     const assetEligibility = resolveStageEligibilities(readyForAssets, { textVerified: true, imageVerified: true, localAudioAvailable: true });
     expect(assetEligibility.find((stage) => stage.stageId === "asset-acquisition")?.status).toBe("ready");
@@ -123,7 +157,7 @@ describe("workflow eligibility", () => {
     const readyForVoice = {
       ...voiceProject,
       referenceSet: { status: "approved" as const },
-      stages: voiceProject.stages.map((stage, index) => index < 21 ? { ...stage, status: "approved" as const } : stage)
+      stages: voiceProject.stages.map((stage, index) => index < 19 ? { ...stage, status: "approved" as const } : stage)
     };
     const voiceEligibility = resolveStageEligibilities(readyForVoice, { textVerified: true, imageVerified: true, localAudioAvailable: true });
     expect(voiceEligibility.find((stage) => stage.stageId === "voice-generation")?.status).toBe("ready");
@@ -281,7 +315,7 @@ describe("workflow eligibility", () => {
       stages: project.stages.map((stage) => {
         if (stage.id === "preview-render") return { ...stage, status: "stale" as const };
         if (stage.id === "qa") return { ...stage, status: "blocked" as const };
-        if (["reference-validation", "transcript-cleaning", "reference-segmentation", "competitor-dna", "opportunity-map", "idea-lab", "originality-review", "research-source-intake", "claim-map", "outline", "script", "fact-review", "retention-review", "scene-plan", "shot-plan", "visual-routing", "prompt-preparation", "asset-acquisition", "asset-review", "voice-generation", "subtitle-preparation", "timeline-assembly"].includes(stage.id)) {
+        if (["reference-validation", "transcript-cleaning", "reference-segmentation", "competitor-dna", "opportunity-map", "idea-lab", "originality-review", "outline", "script", "fact-review", "retention-review", "scene-plan", "shot-plan", "visual-routing", "prompt-preparation", "asset-acquisition", "asset-review", "voice-generation", "subtitle-preparation", "timeline-assembly"].includes(stage.id)) {
           return { ...stage, status: "approved" as const };
         }
         return stage;
@@ -300,7 +334,7 @@ describe("workflow eligibility", () => {
       stages: project.stages.map((stage) => {
         if (stage.id === "timeline-assembly") return { ...stage, status: "needs_review" as const };
         if (stage.id === "preview-render") return { ...stage, status: "blocked" as const };
-        if (["project-setup", "reference-intake", "reference-validation", "transcript-cleaning", "reference-segmentation", "competitor-dna", "opportunity-map", "idea-lab", "originality-review", "research-source-intake", "claim-map", "outline", "script", "fact-review", "retention-review", "scene-plan", "shot-plan", "visual-routing", "prompt-preparation", "asset-acquisition", "asset-review", "voice-generation", "subtitle-preparation"].includes(stage.id)) {
+        if (["project-setup", "reference-intake", "reference-validation", "transcript-cleaning", "reference-segmentation", "competitor-dna", "opportunity-map", "idea-lab", "originality-review", "outline", "script", "fact-review", "retention-review", "scene-plan", "shot-plan", "visual-routing", "prompt-preparation", "asset-acquisition", "asset-review", "voice-generation", "subtitle-preparation"].includes(stage.id)) {
           return { ...stage, status: "approved" as const };
         }
         return stage;
@@ -329,8 +363,6 @@ describe("workflow eligibility", () => {
       "opportunity-map",
       "idea-lab",
       "originality-review",
-      "research-source-intake",
-      "claim-map",
       "outline",
       "script",
       "fact-review",
