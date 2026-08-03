@@ -2,7 +2,7 @@
   "jobId": "JOB-VOX-OPTIONAL-CAPCUT-EXPORT-V1",
   "type": "short",
   "title": "Keep CapCut optional for final MP4 export",
-  "status": "active",
+  "status": "review_required",
   "targetBranch": "chore/setup-agent-harness",
   "assignedRole": "builder",
   "description": "Align the V1 final-output path so an approved final preview can produce a final MP4 and manifest without requiring an optional CapCut draft.",
