@@ -51,6 +51,7 @@ Branch: `chore/setup-agent-harness`
 
 - Existing Main Happy Path evidence is recorded in `docs/main-flow/MAIN_HAPPY_PATH_REPORT.md` and `.tmp-main-flow-runtime/full-path-20260802/`.
 - `$env:LSF_UI_MODES='vox-simple-flow'; node scripts/verify-electron-ui.cjs` passed and created `VOX Simple Flow Test` configuration with Topic, Vietnamese, `45-60 seconds`, `16:9`, `vox-documentary`, `vi-VN-HoaiMyNeural`, and `1080p` persisted in SQLite.
+- `$env:LSF_UI_USE_CONFIGURED_KEYCHAIN='1'; $env:LSF_UI_MODES='vox-simple-flow'; node scripts/verify-electron-ui.cjs` also passed without exposing credentials, but the configured runtime stopped at the same verified text-model certification checkpoint.
 - The isolated runtime reached the Scene Review, Final Preview, and Export screens, but preparation stopped at `idea-lab` with the safe reason `A verified text-model certification is required before Idea Lab can run.` Scene and preview artifacts were therefore empty.
 - Final MP4 verification: not reached; no final export completion is claimed.
 

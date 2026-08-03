@@ -40,7 +40,8 @@ function startElectron(workspaceRoot, reportPath, mode) {
       VITE_DEV_SERVER_URL: baseUrl,
       NODE_OPTIONS: "--import tsx",
       WORKSPACE_ROOT: workspaceRoot,
-      LSF_DEV_MEMORY_KEYCHAIN: "1",
+      // Keep isolated tests credential-free unless the caller explicitly opts into the configured OS keychain.
+      LSF_DEV_MEMORY_KEYCHAIN: process.env.LSF_UI_USE_CONFIGURED_KEYCHAIN === "1" ? "" : "1",
       LSF_E2E_UI_REPORT_PATH: reportPath,
       LSF_E2E_UI_MODE: mode
     },
