@@ -1,0 +1,28 @@
+{
+  "jobId": "JOB-VOX-REPORT-UPDATE-V1",
+  "type": "short",
+  "title": "Update the required VOX implementation report",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Update the existing required VOX implementation report with the completed persisted-media runtime and final MP4 evidence.",
+  "businessContext": "The report predates the completed Scene Review, Final Preview, QA, Packaging Export, and final MP4 runtime evidence and must not retain stale completion claims.",
+  "allowedPaths": [
+    "docs/simple-video/IMPLEMENTATION_REPORT.md",
+    ".harness/jobs/JOB-VOX-REPORT-UPDATE-V1.json",
+    ".harness/handoffs/JOB-VOX-REPORT-UPDATE-V1.md",
+    ".harness/locks/JOB-VOX-REPORT-UPDATE-V1.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": ["apps/**", "packages/**", "scripts/**"],
+  "dependencies": ["JOB-VOX-RESUME-FINAL-EXPORT-V1"],
+  "acceptanceCriteria": [
+    "The report reflects completed focused implementation milestones and names the reused services.",
+    "The report records the truthful fresh-runtime certification blocker and the completed persisted-media final MP4 result.",
+    "The report lists commits and remaining manual reviewer/QA work without claiming those gates passed."
+  ],
+  "verificationCommands": ["git diff --check"],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["Runtime evidence cannot be referenced without fabricating a provider or approval result."]
+}
