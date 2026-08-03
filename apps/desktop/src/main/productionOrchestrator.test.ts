@@ -77,4 +77,19 @@ describe("production orchestrator", () => {
       { channel: "approve-packaging-export", input: { projectId: project.id } }
     ]);
   });
+
+  it("leaves preview render at the final review checkpoint", async () => {
+    const project = projectWithStatuses({ "voice-generation": "approved", "subtitle-preparation": "approved", "timeline-assembly": "approved" });
+    const calls: string[] = [];
+    const orchestrator = createProductionOrchestrator({
+      loadProject: async () => project,
+      invoke: async (channel) => {
+        calls.push(channel);
+        return { ...project, stages: project.stages.map((stage) => stage.id === "preview-render" ? { ...stage, status: "needs_review" as const } : stage) } as never;
+      }
+    });
+    const result = await orchestrator.startMediaGeneration(project.id);
+    expect(result.stages.find((stage) => stage.id === "preview-render")?.status).toBe("needs_review");
+    expect(calls).toEqual(["run-preview-render"]);
+  });
 });

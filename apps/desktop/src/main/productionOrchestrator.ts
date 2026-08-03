@@ -41,7 +41,7 @@ export function createProductionOrchestrator(dependencies: ProductionOrchestrato
     }
   }
 
-  async function runStage(projectId: string, stageId: string, runChannel: string, approveChannel: string, runInput: Record<string, unknown> = {}, approveInput: Record<string, unknown> = {}, options: { force?: boolean } = {}): Promise<FactoryProject> {
+  async function runStage(projectId: string, stageId: string, runChannel: string, approveChannel: string, runInput: Record<string, unknown> = {}, approveInput: Record<string, unknown> = {}, options: { force?: boolean; leaveForReview?: boolean } = {}): Promise<FactoryProject> {
     let project = await current(projectId);
     const status = project.stages.find((stage) => stage.id === stageId)?.status;
     if (status === "approved" && !options.force) return project;
@@ -59,6 +59,7 @@ export function createProductionOrchestrator(dependencies: ProductionOrchestrato
     if (generatedStatus !== "needs_review") {
       throw new ProductionOrchestratorError("stage_not_reviewable", `${stageId} did not produce a reviewable result.`);
     }
+    if (options.leaveForReview) return generated;
     return dependencies.invoke<FactoryProject>(approveChannel, { projectId, ...approveInput });
   }
 
@@ -120,7 +121,7 @@ export function createProductionOrchestrator(dependencies: ProductionOrchestrato
       let project = await runStage(projectId, "voice-generation", "run-voice-generation", "approve-voice-generation");
       project = await runStage(projectId, "subtitle-preparation", "run-subtitle-preparation", "approve-subtitle-preparation");
       project = await runStage(projectId, "timeline-assembly", "run-timeline-assembly", "approve-timeline-assembly");
-      return runStage(projectId, "preview-render", "run-preview-render", "approve-preview-render");
+      return runStage(projectId, "preview-render", "run-preview-render", "approve-preview-render", {}, {}, { leaveForReview: true });
     });
   }
 
