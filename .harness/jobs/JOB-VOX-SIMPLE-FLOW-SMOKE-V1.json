@@ -2,7 +2,7 @@
   "jobId": "JOB-VOX-SIMPLE-FLOW-SMOKE-V1",
   "type": "short",
   "title": "Run the isolated VOX Simple Flow smoke",
-  "status": "active",
+  "status": "review_required",
   "targetBranch": "chore/setup-agent-harness",
   "assignedRole": "builder",
   "description": "Exercise the documented VOX Simple Flow Test through the simplified Create screen, persist and verify its configuration, and record the furthest truthful runtime checkpoint available in the configured local environment.",

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
   "updatedAt": "2026-08-03T15:28:00.000+07:00",
-  "activeJobs": ["JOB-VOX-SIMPLE-FLOW-SMOKE-V1"],
-  "notes": "JOB-VOX-SIMPLE-FLOW-SMOKE-V1 is active for the bounded Electron runtime smoke. Prior review-required jobs and unrelated dirty changes are preserved."
+  "activeJobs": [],
+  "notes": "JOB-VOX-SIMPLE-FLOW-SMOKE-V1 builder commit e83ae0c7 is ready for independent review and QA. Prior review-required jobs and unrelated dirty changes are preserved."
 }
