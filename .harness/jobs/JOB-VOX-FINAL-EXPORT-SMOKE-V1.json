@@ -1,0 +1,36 @@
+{
+  "jobId": "JOB-VOX-FINAL-EXPORT-SMOKE-V1",
+  "type": "short",
+  "title": "Verify one complete VOX flow through final export",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Run one fresh configured-keychain VOX Simple Flow project through the documented scene, voice, subtitle, final preview, and final MP4 export checkpoints.",
+  "businessContext": "The implementation now preserves approved scene media, produces voice/subtitles/preview, and leaves Preview Render reviewable. One fresh runtime is needed to provide truthful end-to-end evidence for final MP4 export.",
+  "allowedPaths": [
+    ".harness/jobs/JOB-VOX-FINAL-EXPORT-SMOKE-V1.json",
+    ".harness/handoffs/JOB-VOX-FINAL-EXPORT-SMOKE-V1.md",
+    ".harness/locks/JOB-VOX-FINAL-EXPORT-SMOKE-V1.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": [
+    "apps/desktop/**",
+    "packages/**",
+    "scripts/**"
+  ],
+  "dependencies": ["JOB-VOX-FINAL-PREVIEW-CHECKPOINT-V1"],
+  "acceptanceCriteria": [
+    "The configured-keychain smoke creates the documented Vietnamese VOX topic project and persists the selected existing voice.",
+    "The smoke reaches idea selection, selective scene regeneration, scene approval, voice, Vietnamese subtitles, and a real Final Preview.",
+    "The smoke explicitly approves Final Preview and verifies a non-empty final MP4 export.",
+    "No provider, stage, media, approval, or export evidence is fabricated; failures are handed off with the exact persisted checkpoint."
+  ],
+  "verificationCommands": [
+    "$env:LSF_UI_USE_CONFIGURED_KEYCHAIN='1'; $env:LSF_UI_MODES='vox-simple-flow'; node scripts/verify-electron-ui.cjs",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["The configured runtime cannot resolve a certified existing text, image, or voice path without bypassing a safety gate."]
+}
