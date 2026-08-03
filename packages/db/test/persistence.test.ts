@@ -33,6 +33,8 @@ describe("project persistence", () => {
       expect.objectContaining({ id: "tts-segment-queued", state: "failed", payload: expect.objectContaining({ segmentId: "section-queued", text: "Queued text", errorCode: "interrupted" }) })
     ]));
     expect(store.get("tts-job-queued")?.job.state).toBe("queued");
+    expect(store.listFailed().map((job) => job.id)).toContain("tts-job-01");
+    expect(store.listFailed().map((job) => job.id)).not.toContain("tts-job-queued");
     expect(store.latestForProject(project.id)?.id).toBe("tts-job-01");
     db.close();
   });

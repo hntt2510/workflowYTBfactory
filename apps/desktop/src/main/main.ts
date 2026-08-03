@@ -799,6 +799,11 @@ app.whenReady().then(async () => {
     mergedOutputPathFor: (jobId) => join(workspaceRoot, "assets", "voice", "jobs", jobId, "voiceover.mp3")
   });
   ttsJobStore.recoverInterruptedJobs();
+  for (const storedJob of ttsJobStore.listFailed()) {
+    if (storedJob.payload.errorCode !== "interrupted") continue;
+    const recovered = ttsJobs.get(storedJob.id);
+    if (recovered) void completeManagedVoiceGeneration(recovered).catch((error) => logger.error("tts_job_recovery_attention_failed", { jobId: recovered.id, message: error instanceof Error ? error.message : String(error) }));
+  }
   // Interrupted and queued jobs remain available for explicit user retry; startup never calls a TTS provider.
   if (process.env.LSF_E2E_UI_MODE === "workflow-contract") {
     const topic = "Workflow contract verification project";
@@ -3167,7 +3172,32 @@ async function completeManagedVoiceGeneration(job: TtsJobView): Promise<void> {
   }
 
   const failedSegments = job.segments.filter((segment) => segment.state === "failed");
-  if (failedSegments.length) return;
+  if (failedSegments.length) {
+    if (job.errorMessage?.includes("previous application session")) {
+      const currentStage = project.stages.find((stage) => stage.id === "voice-generation");
+      if (currentStage && (currentStage.status === "queued" || currentStage.status === "running" || currentStage.status === "needs_attention")) {
+        const attention = {
+          code: "TTS_INTERRUPTED",
+          message: job.errorMessage,
+          actions: [{ label: "Retry failed voice segments", route: "voice" }]
+        };
+        const attentionProject = currentStage.status === "needs_attention"
+          ? updateProjectStage(project, "voice-generation", "needs_attention", attention)
+          : currentStage.status === "queued"
+            ? updateProjectStage(transitionProjectStage(transitionProjectStage(project, "voice-generation", "running"), "voice-generation", "needs_attention"), "voice-generation", "needs_attention", attention)
+            : updateProjectStage(transitionProjectStage(project, "voice-generation", "needs_attention"), "voice-generation", "needs_attention", attention);
+        db.exec("BEGIN IMMEDIATE;");
+        try {
+          saveProjectWithWorkflowInvalidation(attentionProject, { withinTransaction: true });
+          db.exec("COMMIT;");
+        } catch (error) {
+          db.exec("ROLLBACK;");
+          throw error;
+        }
+      }
+    }
+    return;
+  }
   const completedSegments = job.segments.filter((segment) => segment.state === "success");
   if (completedSegments.length !== job.segments.length) return;
 
@@ -3947,6 +3977,23 @@ ipcMain.handle("get-project-tts-job", (_event, input: unknown) => {
 
 ipcMain.handle("retry-tts-job-segment", async (_event, input: unknown) => {
   const request = retryTtsJobSegmentRequestSchema.parse(input);
+  const existing = ttsJobs.get(request.jobId);
+  if (!existing) throw new Error("TTS job was not found.");
+  if (existing.projectId) {
+    const project = projectRepository.loadProject(existing.projectId);
+    const stage = project?.stages.find((item) => item.id === "voice-generation");
+    if (project && stage?.status === "needs_attention" && stage.attention?.code === "TTS_INTERRUPTED") {
+      const resumed = transitionProjectStage(project, "voice-generation", "running");
+      db.exec("BEGIN IMMEDIATE;");
+      try {
+        saveProjectWithWorkflowInvalidation(resumed, { withinTransaction: true });
+        db.exec("COMMIT;");
+      } catch (error) {
+        db.exec("ROLLBACK;");
+        throw error;
+      }
+    }
+  }
   const job = await ttsJobs.retrySegment(request.jobId, request.segmentId);
   await completeManagedVoiceGeneration(job);
   return ttsJobResponseSchema.parse(job);

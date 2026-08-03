@@ -51,6 +51,10 @@ export class TtsJobStore {
     return (this.db.prepare("SELECT id, project_id, state, payload_json, created_at, updated_at FROM tts_jobs WHERE state = 'queued' ORDER BY created_at").all() as unknown as TtsJobRow[]).map(toJob);
   }
 
+  listFailed(): StoredTtsJob[] {
+    return (this.db.prepare("SELECT id, project_id, state, payload_json, created_at, updated_at FROM tts_jobs WHERE state = 'failed' ORDER BY created_at").all() as unknown as TtsJobRow[]).map(toJob);
+  }
+
   latestForProject(projectId: string): StoredTtsJob | null {
     const row = this.db.prepare("SELECT id, project_id, state, payload_json, created_at, updated_at FROM tts_jobs WHERE project_id = ? ORDER BY created_at DESC LIMIT 1").get(projectId) as unknown as TtsJobRow | undefined;
     return row ? toJob(row) : null;

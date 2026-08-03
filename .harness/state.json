@@ -1,6 +1,12 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-03T14:59:07.340+07:00",
-  "activeJobs": [],
-  "notes": "JOB-TTS-RESTART-RECOVERY-V1 builder verification passed and is ready for independent review. Commit 18286c56. Prior review-required jobs and unrelated dirty changes are preserved."
+  "updatedAt": "2026-08-03T15:08:00.000+07:00",
+  "activeJobs": [
+    {
+      "jobId": "JOB-TTS-ATTENTION-PROPAGATION-V1",
+      "branch": "chore/setup-agent-harness",
+      "role": "builder"
+    }
+  ],
+  "notes": "JOB-TTS-ATTENTION-PROPAGATION-V1 is active for the bounded project-level TTS interruption attention fix. Prior review-required jobs and unrelated dirty changes are preserved."
 }
