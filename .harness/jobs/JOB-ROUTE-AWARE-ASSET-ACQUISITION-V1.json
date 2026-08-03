@@ -1,0 +1,53 @@
+{
+  "jobId": "JOB-ROUTE-AWARE-ASSET-ACQUISITION-V1",
+  "type": "short",
+  "title": "Make Asset Acquisition route-aware",
+  "status": "active",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Extend the existing Asset Acquisition handler to plan per-shot visual routes, generate only approved AI-image shots, preserve reusable/local image assets, and fail closed for routes without a verified acquisition adapter.",
+  "businessContext": "V1 visual routing already emits reusable, document, diagram, stock, upload, and AI-image routes, but Asset Acquisition currently only accepts AI-image prompts and blocks every project without one. The application must not fabricate media or silently invoke an unrelated provider.",
+  "allowedPaths": [
+    "apps/desktop/src/main/assetAcquisitionService.ts",
+    "apps/desktop/src/main/assetAcquisitionService.test.ts",
+    "apps/desktop/src/main/main.ts",
+    ".harness/jobs/JOB-ROUTE-AWARE-ASSET-ACQUISITION-V1.json",
+    ".harness/state.json",
+    ".harness/locks/JOB-ROUTE-AWARE-ASSET-ACQUISITION-V1.lock",
+    ".harness/handoffs/JOB-ROUTE-AWARE-ASSET-ACQUISITION-V1.md"
+  ],
+  "forbiddenPaths": [
+    "packages/db/**",
+    "packages/providers/**",
+    "packages/domain/**",
+    "apps/desktop/src/renderer/**",
+    "apps/desktop/src/preload/**"
+  ],
+  "dependencies": [
+    "approved Visual Routing artifact",
+    "approved Prompt Preparation artifact",
+    "existing validated image acquisition and local import services",
+    "existing generation job persistence"
+  ],
+  "acceptanceCriteria": [
+    "Asset Acquisition evaluates the selected shots by visual route instead of requiring at least one AI-image prompt for every run.",
+    "AI-image shots still require their exact approved prompt and verified existing image capability before provider work starts.",
+    "Reuse, manual-upload, and uploaded shots preserve their existing approved local image asset without regenerating it; selective scene runs preserve unchanged assets.",
+    "Document, diagram, stock, AI-video, and text-card routes without an existing local asset fail closed with an actionable safe error, create no placeholder asset, and make no provider call.",
+    "Focused route-planning and acquisition tests, typecheck, and diff checks pass."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run apps/desktop/src/main/assetAcquisitionService.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": [
+    "reviewer",
+    "qa"
+  ],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": [
+    "A supported non-AI route requires a new provider, renderer, persistence model, or placeholder media.",
+    "Existing local asset provenance cannot be validated safely."
+  ]
+}

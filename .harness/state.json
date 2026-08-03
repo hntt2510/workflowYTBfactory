@@ -1,6 +1,13 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-03T14:30:00.000Z",
-  "activeJobs": [],
-  "notes": "JOB-SIMPLE-CREATE-VOICE-RUNTIME-V1 builder verification passed: configured voice binding, simplified Create smoke, typecheck, navigation test, and diff check. Full legacy smoke matrix remains blocked by missing text-model certification in its isolated setup."
+  "updatedAt": "2026-08-03T14:40:00.000Z",
+  "activeJobs": [
+    {
+      "jobId": "JOB-ROUTE-AWARE-ASSET-ACQUISITION-V1",
+      "role": "builder",
+      "status": "active",
+      "startedAt": "2026-08-03T14:40:00.000Z"
+    }
+  ],
+  "notes": "JOB-ROUTE-AWARE-ASSET-ACQUISITION-V1 is active. Prior simple Create and Scene Review work remains committed; unrelated dirty changes are preserved."
 }

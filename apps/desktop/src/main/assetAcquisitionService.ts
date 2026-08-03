@@ -9,7 +9,7 @@ const MAX_IMAGE_PIXELS = 80_000_000;
 
 export class AssetAcquisitionError extends Error {
   constructor(
-    readonly category: "capability_not_verified" | "credential_missing" | "provider_failed" | "invalid_response" | "unsafe_asset",
+    readonly category: "capability_not_verified" | "credential_missing" | "provider_failed" | "invalid_response" | "unsafe_asset" | "prompt_missing" | "local_asset_missing" | "route_unavailable",
     message: string
   ) { super(message); }
 }
@@ -25,6 +25,47 @@ export interface AcquiredImageAsset {
   height: number;
 }
 
+export interface AssetAcquisitionPlan {
+  imagePrompts: Array<{
+    shotId: string;
+    promptVersionId: string;
+    positivePrompt: string;
+    aspectRatio: "16:9" | "9:16";
+  }>;
+  preservedAssets: AcquiredImageAsset[];
+}
+
+export function planAssetAcquisition(input: {
+  shots: Array<{ id: string; visualMode: string; promptVersionId?: string; approvedAssetId?: string }>;
+  prompts: Array<{ shotId: string; promptVersionId: string; positivePrompt: string; aspectRatio: "16:9" | "9:16" }>;
+  priorAssets: AcquiredImageAsset[];
+}): AssetAcquisitionPlan {
+  const assetsById = new Map(input.priorAssets.map((asset) => [`asset-${asset.sha256}`, asset]));
+  const imagePrompts: AssetAcquisitionPlan["imagePrompts"] = [];
+  const preservedAssets: AcquiredImageAsset[] = [];
+
+  for (const shot of input.shots) {
+    if (shot.visualMode === "ai_image") {
+      const prompt = input.prompts.find((candidate) => candidate.shotId === shot.id && candidate.promptVersionId === shot.promptVersionId);
+      if (!prompt) throw new AssetAcquisitionError("prompt_missing", `Approved AI-image prompt is missing for shot ${shot.id}.`);
+      imagePrompts.push(prompt);
+      continue;
+    }
+
+    const localRoute = shot.visualMode === "reuse" || shot.visualMode === "manual_upload" || shot.visualMode === "uploaded";
+    const existingAsset = shot.approvedAssetId ? assetsById.get(shot.approvedAssetId) : undefined;
+    const canPreserveLocalAsset = localRoute || shot.visualMode === "document" || shot.visualMode === "diagram" || shot.visualMode === "map" || shot.visualMode === "chart" || shot.visualMode === "stock_image" || shot.visualMode === "stock_video" || shot.visualMode === "text_card";
+    if (canPreserveLocalAsset && existingAsset) {
+      preservedAssets.push(existingAsset);
+      continue;
+    }
+
+    if (localRoute) throw new AssetAcquisitionError("local_asset_missing", `A validated local asset is required for ${shot.visualMode} shot ${shot.id}.`);
+    throw new AssetAcquisitionError("route_unavailable", `No verified asset acquisition adapter is configured for ${shot.visualMode} shot ${shot.id}. Provide a local replacement or choose an available visual route.`);
+  }
+
+  if (imagePrompts.length === 0 && preservedAssets.length === 0) throw new AssetAcquisitionError("route_unavailable", "No supported visual route is available for Asset Acquisition.");
+  return { imagePrompts, preservedAssets };
 interface ImageClient {
   createImage(input: { model: string; prompt: string; aspectRatio: "16:9" | "9:16"; idempotencyKey?: string }): Promise<Array<{ url?: string; b64Json?: string; dataUri?: string }>>;
 }
