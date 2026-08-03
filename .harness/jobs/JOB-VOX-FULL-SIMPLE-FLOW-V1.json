@@ -1,0 +1,49 @@
+{
+  "jobId": "JOB-VOX-FULL-SIMPLE-FLOW-V1",
+  "type": "short",
+  "title": "Drive VOX Simple Flow through final MP4",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Make the isolated VOX Simple Flow smoke able to reuse existing certified runtime state without exposing secrets, then verify the exact Topic project through idea selection, selective scene regeneration, final preview, and MP4 export.",
+  "businessContext": "The simplified UI and production services exist, but the current smoke always starts with an empty database and stops at Idea Lab because provider certification is absent. The goal requires one exact VOX Simple Flow Test to reach a real final MP4.",
+  "allowedPaths": [
+    "apps/desktop/src/main/main.ts",
+    "apps/desktop/src/main/productionOrchestrator.test.ts",
+    "scripts/verify-electron-ui.cjs",
+    "docs/simple-video/IMPLEMENTATION_REPORT.md",
+    ".harness/jobs/JOB-VOX-FULL-SIMPLE-FLOW-V1.json",
+    ".harness/handoffs/JOB-VOX-FULL-SIMPLE-FLOW-V1.md",
+    ".harness/locks/JOB-VOX-FULL-SIMPLE-FLOW-V1.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": [
+    "packages/db/**",
+    "packages/providers/**",
+    "apps/desktop/src/renderer/**",
+    "apps/desktop/src/preload/**"
+  ],
+  "dependencies": [
+    "existing certified provider runtime workspace",
+    "approved simplified Create and orchestration jobs"
+  ],
+  "acceptanceCriteria": [
+    "The VOX smoke can start from a copied existing workspace containing certification metadata while resolving secrets only through the configured OS keychain.",
+    "The exact VOX Simple Flow Test persists Topic, Vietnamese, 45-60 seconds, 16:9, VOX Documentary, an available existing voice, and 1080p.",
+    "The smoke reaches and selects an idea, regenerates exactly one scene, approves scenes, reaches a real final preview, approves it, and verifies a non-empty final MP4 export.",
+    "The smoke never fabricates provider certification, stage approval, scene media, or final export evidence.",
+    "Focused smoke/test checks, typecheck, and diff checks pass."
+  ],
+  "verificationCommands": [
+    "$env:LSF_UI_USE_CONFIGURED_KEYCHAIN='1'; $env:LSF_UI_SEED_WORKSPACE='...'; $env:LSF_UI_MODES='vox-simple-flow'; node scripts/verify-electron-ui.cjs",
+    "corepack pnpm exec vitest run apps/desktop/src/main/productionOrchestrator.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": [
+    "The configured OS keychain cannot resolve the credential referenced by the certified workspace.",
+    "Completing the exact flow requires bypassing an existing certification, approval, or provider safety gate."
+  ]
+}

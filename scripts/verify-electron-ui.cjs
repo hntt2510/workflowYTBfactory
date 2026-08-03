@@ -57,14 +57,35 @@ function startElectron(workspaceRoot, reportPath, mode) {
   return child;
 }
 
+async function createWorkspace() {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "lsf-electron-ui-"));
+  const seedRoot = process.env.LSF_UI_SEED_WORKSPACE;
+  if (!seedRoot) return workspaceRoot;
+
+  const resolvedSeedRoot = path.resolve(seedRoot);
+  for (const suffix of ["", "-wal", "-shm"]) {
+    const source = path.join(resolvedSeedRoot, `long-short-factory.sqlite${suffix}`);
+    const target = path.join(workspaceRoot, `long-short-factory.sqlite${suffix}`);
+    try {
+      await fs.copyFile(source, target);
+    } catch (error) {
+      if (suffix === "") throw new Error(`Could not seed Electron UI workspace from ${resolvedSeedRoot}: ${error.message}`);
+    }
+  }
+  return workspaceRoot;
+}
+
 async function runElectronMode(workspaceRoot, mode) {
   const reportPath = path.join(workspaceRoot, `ui-${mode}.json`);
   const electron = startElectron(workspaceRoot, reportPath, mode);
   const exitCode = await new Promise((resolve) => {
+    const timeoutMs = mode === "vox-simple-flow"
+      ? Number(process.env.LSF_UI_TIMEOUT_MS || 900000)
+      : 45000;
     const timeout = setTimeout(() => {
       electron.kill();
       resolve("timeout");
-    }, mode === "vox-simple-flow" ? 90000 : 45000);
+    }, timeoutMs);
     electron.on("exit", (code) => {
       clearTimeout(timeout);
       resolve(code);
@@ -83,7 +104,7 @@ async function runElectronMode(workspaceRoot, mode) {
 }
 
 async function main() {
-  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "lsf-electron-ui-"));
+  const workspaceRoot = await createWorkspace();
   const vite = startVite();
   try {
     await waitForHttp(baseUrl);

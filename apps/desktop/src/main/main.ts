@@ -977,10 +977,16 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
     persistedConfiguration: "not_reached",
     ideaSelection: "not_reached",
     sceneReview: "not_reached",
+    sceneRegeneration: "not_reached",
+    voiceGeneration: "not_reached",
+    subtitles: "not_reached",
+    previewApproval: "not_reached",
+    packagingExport: "not_reached",
     finalPreview: "not_reached",
     export: "not_reached"
   };
   const runtimeNotes: string[] = [];
+  const requireFullFlow = process.env.LSF_UI_REQUIRE_FULL_FLOW === "1" || Boolean(process.env.LSF_UI_SEED_WORKSPACE);
 
   await assertText(win, "Long/Short Factory");
   await clickText(win, "Create");
@@ -1033,7 +1039,13 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
     await clickText(win, "Projects");
     await assertText(win, topic);
     await clickProjectOpen(win, topic);
-    const checkpointText = await waitForOneOfPageText(win, ["Idea candidates", "Project command center", "Retry automatic workflow"], 20_000);
+    const checkpointText = await waitForOneOfPageText(
+      win,
+      requireFullFlow
+        ? ["Idea candidates", "Idea Lab", "Retry automatic workflow", "needs attention"]
+        : ["Idea candidates", "Project command center", "Retry automatic workflow", "Preparing your video"],
+      requireFullFlow ? 900_000 : 20_000
+    );
     if (checkpointText.includes("Idea candidates")) {
       phases.ideaSelection = "reached";
       if (checkpointText.includes("Approve this idea")) {
@@ -1041,7 +1053,7 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
         phases.ideaSelection = "approved";
       } else if (checkpointText.includes("Generate ideas")) {
         await clickText(win, "Generate ideas");
-        const generatedText = await waitForOneOfPageText(win, ["Approve this idea", "Idea generation failed", "needs attention"], 20_000);
+        const generatedText = await waitForOneOfPageText(win, ["Approve this idea", "Idea generation failed", "needs attention"], 900_000);
         if (generatedText.includes("Approve this idea")) {
           await clickText(win, "Approve this idea");
           phases.ideaSelection = "approved";
@@ -1053,21 +1065,97 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
       phases.ideaSelection = "blocked_or_not_reached";
       runtimeNotes.push("Preparation stopped before the Idea Lab checkpoint; the persisted stage status and safe reason are recorded below.");
     }
+
+    if (requireFullFlow && phases.ideaSelection !== "approved") {
+      throw new Error(`VOX Simple Flow did not reach an approved idea. Page: ${(await pageText(win)).slice(0, 600)}`);
+    }
+
+    if (phases.ideaSelection === "approved") {
+      const prepared = await waitForProjectStageStatus(summary.id, "asset-review", ["needs_review"], 900_000);
+      if (!prepared.scenes.length) throw new Error("VOX Simple Flow produced no scenes for Scene Review.");
+      const retryScene = prepared.scenes[0]!;
+      const acquisitionRunsBefore = workflowRunStore.listRuns(summary.id, "asset-acquisition").length;
+
+      await clickText(win, "Scene Review");
+      await waitForText(win, "Scene Review", 15_000);
+      await waitForEnabledControl(win, "Regenerate Scene", 30_000);
+      await clickText(win, "Regenerate Scene");
+      await waitForText(win, "Scene regeneration is ready for review.", 900_000);
+      await waitForProjectStageStatus(summary.id, "asset-review", ["needs_review"], 900_000);
+      const acquisitionRunsAfter = workflowRunStore.listRuns(summary.id, "asset-acquisition").length;
+      if (acquisitionRunsAfter - acquisitionRunsBefore !== 1) {
+        throw new Error(`Expected exactly one scene regeneration run, observed ${acquisitionRunsAfter - acquisitionRunsBefore}.`);
+      }
+      phases.sceneRegeneration = `approved-scene-retry:${retryScene.id}`;
+
+      let safety = 0;
+      while (true) {
+        const reviewArtifact = workflowRunStore.listArtifacts(summary.id, "asset-review").find((artifact) => artifact.status === "needs_review");
+        if (!reviewArtifact?.payloadJson) throw new Error("Scene Review lost its reviewable asset artifact.");
+        const pending = assetReviewOutputSchema.parse(reviewArtifact.payloadJson).assets.filter((item) => item.reviewStatus === "needs_review");
+        if (!pending.length) break;
+        await waitForEnabledControl(win, "Approve Asset", 30_000);
+        await clickText(win, "Approve Asset");
+        if (++safety > 500) throw new Error("Scene Review asset approval did not converge.");
+      }
+
+      safety = 0;
+      while (true) {
+        const reviewArtifact = workflowRunStore.listArtifacts(summary.id, "asset-review").find((artifact) => artifact.status === "needs_review");
+        if (!reviewArtifact?.payloadJson) throw new Error("Scene Review lost its reviewable assignment artifact.");
+        const unassigned = assetReviewOutputSchema.parse(reviewArtifact.payloadJson).assets.filter((item) => item.reviewStatus === "approved" && !item.assignedShotId);
+        if (!unassigned.length) break;
+        await waitForEnabledControl(win, "Assign Asset", 30_000);
+        await clickText(win, "Assign Asset");
+        if (++safety > 500) throw new Error("Scene Review asset assignment did not converge.");
+      }
+
+      const sceneCount = prepared.scenes.length;
+      for (let index = 0; index < sceneCount; index += 1) {
+        await waitForEnabledControl(win, "Approve Scene", 30_000);
+        await clickText(win, "Approve Scene");
+      }
+      await waitForProjectStageStatus(summary.id, "asset-review", ["approved"], 60_000);
+      phases.sceneReview = `approved:${sceneCount}`;
+
+      const mediaProject = await waitForProjectStageStatus(summary.id, "preview-render", ["needs_review"], 900_000);
+      phases.voiceGeneration = mediaProject.stages.find((stage) => stage.id === "voice-generation")?.status === "approved" ? "approved" : "not_approved";
+      phases.subtitles = mediaProject.stages.find((stage) => stage.id === "subtitle-preparation")?.status === "approved" ? "approved" : "not_approved";
+      if (requireFullFlow && (phases.voiceGeneration !== "approved" || phases.subtitles !== "approved")) {
+        throw new Error(`Automatic media generation did not approve Voice and Subtitles (${phases.voiceGeneration}, ${phases.subtitles}).`);
+      }
+
+      await waitForText(win, "Final Preview", 900_000);
+      await waitForText(win, "Approve Final Video", 900_000);
+      const previewText = await pageText(win);
+      phases.finalPreview = previewText.includes("No reviewable preview yet") ? "screen_reached_empty" : "real_preview_visible";
+      if (requireFullFlow && phases.finalPreview !== "real_preview_visible") throw new Error("Final Preview did not contain a real reviewable video.");
+      await clickText(win, "Approve Final Video");
+      await waitForProjectStageStatus(summary.id, "packaging-export", ["approved"], 900_000);
+      phases.previewApproval = "approved";
+      phases.packagingExport = "approved";
+      await clickText(win, "Export");
+      await waitForText(win, "Final MP4", 30_000);
+      phases.export = "verified";
+    }
   } catch (error) {
+    if (requireFullFlow) throw error;
     phases.ideaSelection = "blocked_or_not_reached";
     runtimeNotes.push("Preparation checkpoint was unavailable; the persisted stage status and safe reason are recorded below.");
   }
 
-  for (const route of ["Scene Review", "Final Preview", "Export"] as const) {
-    try {
-      await clickText(win, route);
-      await assertText(win, route);
-      const routeText = await pageText(win);
-      if (route === "Scene Review") phases.sceneReview = routeText.includes("Scenes are not ready yet") ? "screen_reached_empty" : "reviewable_assets_visible";
-      if (route === "Final Preview") phases.finalPreview = routeText.includes("No reviewable preview yet") ? "screen_reached_empty" : "reviewable_preview_visible";
-      if (route === "Export") phases.export = "screen_reached";
-    } catch (error) {
-      runtimeNotes.push(`${route} screen unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  if (phases.export !== "verified") {
+    for (const route of ["Scene Review", "Final Preview", "Export"] as const) {
+      try {
+        await clickText(win, route);
+        await assertText(win, route);
+        const routeText = await pageText(win);
+        if (route === "Scene Review") phases.sceneReview = routeText.includes("Scenes are not ready yet") ? "screen_reached_empty" : "reviewable_assets_visible";
+        if (route === "Final Preview") phases.finalPreview = routeText.includes("No reviewable preview yet") ? "screen_reached_empty" : "reviewable_preview_visible";
+        if (route === "Export") phases.export = "screen_reached";
+      } catch (error) {
+        runtimeNotes.push(`${route} screen unavailable: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
   }
 
@@ -1088,6 +1176,7 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
     }
   }
   if (!finalMp4Verified) runtimeNotes.push("Final MP4 was not verified in the isolated runtime; no export completion is claimed.");
+  if (requireFullFlow && !finalMp4Verified) throw new Error("VOX Simple Flow did not produce a verified final MP4.");
 
   return {
     phase: "runtime_evidence_recorded",
@@ -1098,6 +1187,43 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
     finalMp4: { verified: finalMp4Verified, ...(mp4RelativeFilePath ? { relativeFilePath: mp4RelativeFilePath } : {}) },
     runtimeNotes
   };
+}
+
+async function waitForProjectStageStatus(
+  projectId: string,
+  stageId: string,
+  expected: WorkflowStageStatus[],
+  timeoutMs: number
+): Promise<FactoryProject> {
+  const started = Date.now();
+  let latest: FactoryProject | undefined;
+  while (Date.now() - started < timeoutMs) {
+    latest = projectRepository.loadProject(projectId) ?? undefined;
+    const stage = latest?.stages.find((item) => item.id === stageId);
+    if (stage && expected.includes(stage.status)) return latest!;
+    if (stage && (stage.status === "failed" || stage.status === "needs_attention")) {
+      throw new Error(`${stageId} stopped with status ${stage.status}: ${stage.attention?.message ?? "no safe reason recorded"}`);
+    }
+    await delay(500);
+  }
+  const stage = latest?.stages.find((item) => item.id === stageId);
+  throw new Error(`Timed out waiting for ${stageId} to reach ${expected.join(" or ")}; current status ${stage?.status ?? "missing"}.`);
+}
+
+async function waitForEnabledControl(win: BrowserWindow, label: string, timeoutMs: number): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const count = await win.webContents.executeJavaScript(
+      `(() => Array.from(document.querySelectorAll("button,a")).filter((element) => {
+        const text = [element.innerText, element.textContent, element.getAttribute("aria-label"), element.getAttribute("title")].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim();
+        return !element.disabled && (text === ${JSON.stringify(label)} || text.includes(${JSON.stringify(label)}));
+      }).length)()`,
+      true
+    ) as number;
+    if (count > 0) return;
+    await delay(500);
+  }
+  throw new Error(`Timed out waiting for enabled control: ${label}`);
 }
 
 async function waitForPersistedProject(topic: string): Promise<ReturnType<ProjectRepository["listProjects"]>[number]> {
