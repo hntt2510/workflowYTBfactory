@@ -2,7 +2,7 @@
   "jobId": "JOB-VOX-CONFIGURED-KEYCHAIN-SMOKE-V1",
   "type": "short",
   "title": "Run VOX smoke with configured local providers",
-  "status": "active",
+  "status": "review_required",
   "targetBranch": "chore/setup-agent-harness",
   "assignedRole": "builder",
   "description": "Allow the isolated VOX Electron smoke to use the existing configured OS keychain only when explicitly requested, so the runtime can prove the real provider-backed checkpoint without weakening the safe default test setup.",

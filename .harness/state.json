@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-03T15:50:00.000+07:00",
-  "activeJobs": ["JOB-VOX-CONFIGURED-KEYCHAIN-SMOKE-V1"],
-  "notes": "JOB-VOX-CONFIGURED-KEYCHAIN-SMOKE-V1 is active for an explicit configured-keychain runtime check. Prior review-required jobs and unrelated dirty changes are preserved."
+  "updatedAt": "2026-08-03T15:56:00.000+07:00",
+  "activeJobs": [],
+  "notes": "JOB-VOX-CONFIGURED-KEYCHAIN-SMOKE-V1 builder commit 88edd621 is ready for independent review and QA. Prior review-required jobs and unrelated dirty changes are preserved."
 }
