@@ -9,6 +9,7 @@ Branch: `chore/setup-agent-harness`
 - Added a bounded Scene Review revision route in the main process. Prompt, direction, scene type, and scene removal actions create immutable stage artifacts and record user approval metadata.
 - Added safe workspace media URLs for reviewable image assets. The renderer cannot choose arbitrary filesystem paths.
 - Packaging now copies the approved preview into a workspace-relative final MP4 and records that path in the reviewed manifest.
+- CapCut Draft is an explicit optional export action; approved QA and production artifacts are sufficient for Packaging Export.
 
 ## Reused services
 
@@ -20,7 +21,7 @@ Branch: `chore/setup-agent-harness`
 
 - Primary `Scene Review` now exposes scene previews, narration, duration, VOX scene type, generation prompt, voice segment status, asset status, prompt editing, direction editing, scene regeneration, replacement upload, scene approval, and removal.
 - Existing detailed Visuals and internal workflow screens remain available as advanced controls.
-- Renderer-side Semi-automatic execution stops at CapCut Draft until the user confirms the desktop review.
+- Renderer-side Semi-automatic execution runs QA and Packaging Export after final-preview approval; CapCut Draft remains an optional manual export.
 
 ## Orchestrator behavior
 
@@ -32,6 +33,7 @@ Branch: `chore/setup-agent-harness`
 
 - The existing `vox-documentary` style profile remains the only V1 style.
 - Important Vietnamese text stays in the local subtitle/compositing path; generated visual prompts do not require models to draw Vietnamese typography.
+- Simple Create derives its language picker from stored channel-profile and TTS configuration, including the configured voice locale when present.
 
 ## Voice integration
 
@@ -43,16 +45,19 @@ Branch: `chore/setup-agent-harness`
 - Focused checks: 49 tests passed across IPC schemas, Semi-automatic flow, and packaging verifier suites.
 - `corepack pnpm typecheck`: passed.
 - `git diff --check`: passed.
+- `node --check scripts/verify-electron-ui.cjs`: passed.
 
 ## Runtime result
 
 - Existing Main Happy Path evidence is recorded in `docs/main-flow/MAIN_HAPPY_PATH_REPORT.md` and `.tmp-main-flow-runtime/full-path-20260802/`.
-- The exact isolated `VOX Simple Flow Test` path was not rerun in this bounded change.
-- The repository Electron smoke helper is currently stale: it expects the removed `New Project` route, while the simplified shell exposes `Create`. The compatible smoke therefore remains a blocker for independent runtime confirmation.
+- `$env:LSF_UI_MODES='vox-simple-flow'; node scripts/verify-electron-ui.cjs` passed and created `VOX Simple Flow Test` configuration with Topic, Vietnamese, `45-60 seconds`, `16:9`, `vox-documentary`, `vi-VN-HoaiMyNeural`, and `1080p` persisted in SQLite.
+- The isolated runtime reached the Scene Review, Final Preview, and Export screens, but preparation stopped at `idea-lab` with the safe reason `A verified text-model certification is required before Idea Lab can run.` Scene and preview artifacts were therefore empty.
+- Final MP4 verification: not reached; no final export completion is claimed.
 
 ## Known blockers
 
-- Add or update an Electron smoke mode for `VOX Simple Flow Test` and rerun the complete Topic -> idea -> scene retry -> voice -> Vietnamese subtitles -> preview -> final MP4 path.
+- Complete the provider-certified runtime path from Idea Lab through scene media, voice, subtitles, preview, and final MP4 export.
+- Harness-wide JSON validation remains blocked by the pre-existing `.harness/jobs/JOB-SEMI-AUTOMATIC-STAGES.json` missing `businessContext`.
 - Run independent Reviewer and QA harness gates after the builder commit.
 
 ## Manual user test

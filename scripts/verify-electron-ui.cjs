@@ -63,7 +63,7 @@ async function runElectronMode(workspaceRoot, mode) {
     const timeout = setTimeout(() => {
       electron.kill();
       resolve("timeout");
-    }, 45000);
+    }, mode === "vox-simple-flow" ? 90000 : 45000);
     electron.on("exit", (code) => {
       clearTimeout(timeout);
       resolve(code);
@@ -86,7 +86,7 @@ async function main() {
   const vite = startVite();
   try {
     await waitForHttp(baseUrl);
-    const modes = (process.env.LSF_UI_MODES || "workflow-contract,reference-restart,reference-invalidation,create,verify").split(",").map((mode) => mode.trim()).filter(Boolean);
+    const modes = (process.env.LSF_UI_MODES || "workflow-contract,reference-restart,reference-invalidation,vox-simple-flow,verify").split(",").map((mode) => mode.trim()).filter(Boolean);
     const reports = {};
     for (const mode of modes) reports[mode] = await runElectronMode(workspaceRoot, mode);
     console.log(JSON.stringify({ ok: true, workspaceRoot, reports }, null, 2));

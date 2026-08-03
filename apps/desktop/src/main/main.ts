@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain as electronIpcMain, protocol } from "electron";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -917,6 +917,11 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
       await clickProjectOpen(win, topic);
       await assertText(win, "Project command center");
       await assertText(win, "Retry automatic workflow");
+    } else if (mode === "vox-simple-flow") {
+      const evidence = await runVoxSimpleFlowVerification(win, topic);
+      writeUiVerificationReport(reportPath, { ok: true, mode, workspaceRoot, databasePath, ...evidence });
+      app.quit();
+      return;
     } else if (mode === "verify") {
       await clickText(win, "Projects");
       await assertText(win, topic);
@@ -964,6 +969,156 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
     });
     app.exit(1);
   }
+}
+
+async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): Promise<Record<string, unknown>> {
+  const phases: Record<string, string> = {
+    createScreen: "not_reached",
+    persistedConfiguration: "not_reached",
+    ideaSelection: "not_reached",
+    sceneReview: "not_reached",
+    finalPreview: "not_reached",
+    export: "not_reached"
+  };
+  const runtimeNotes: string[] = [];
+
+  await assertText(win, "Long/Short Factory");
+  await clickText(win, "Create");
+  await assertText(win, "Create Video Project");
+  phases.createScreen = "reached";
+  await setInputValue(win, "#simple-topic", topic);
+  await setSelectValue(win, "#simple-language", "Vietnamese");
+  await setSelectValue(win, "#simple-duration", "45-60 seconds");
+  await setSelectValue(win, "#simple-aspect-ratio", "16:9");
+  await setSelectValue(win, "#simple-resolution", "1080p");
+  const selectedVoice = await selectFirstAvailableOption(win, "#simple-voice");
+  if (!selectedVoice) throw new Error("The simplified Create screen did not expose an available voice.");
+  const selectedStyle = await readSelectValue(win, "#simple-visual-style");
+  if (selectedStyle !== "vox-documentary") throw new Error(`Unexpected visual style: ${selectedStyle}`);
+  await clickText(win, "Create Video Project");
+  await assertText(win, "Preparing your video");
+
+  const summary = await waitForPersistedProject(topic);
+  const persisted = projectRepository.loadProject(summary.id);
+  if (!persisted) throw new Error("Created project was not loadable from SQLite.");
+  const setup = persisted.setup;
+  const selectedVoiceId = selectedVoice.startsWith("configured:") ? selectedVoice.slice("configured:".length) : selectedVoice;
+  const configuration = {
+    projectName: setup.projectName,
+    inputMode: setup.inputMode,
+    language: setup.language,
+    targetDuration: setup.targetDuration,
+    aspectRatio: setup.aspectRatio,
+    visualStyle: setup.visualStyle,
+    voiceId: setup.voiceId,
+    outputResolution: setup.outputResolution,
+    workflowMode: setup.workflowMode
+  };
+  const configurationMismatches = [
+    persisted.topic !== topic ? `topic=${persisted.topic}` : "",
+    setup.inputMode !== "topic" ? `inputMode=${setup.inputMode}` : "",
+    setup.language !== "Vietnamese" ? `language=${setup.language}` : "",
+    setup.targetDuration !== "45-60 seconds" ? `targetDuration=${setup.targetDuration}` : "",
+    setup.aspectRatio !== "16:9" ? `aspectRatio=${setup.aspectRatio}` : "",
+    setup.visualStyle !== "vox-documentary" ? `visualStyle=${setup.visualStyle}` : "",
+    setup.voiceId !== selectedVoiceId ? `voiceId=${setup.voiceId};selectedVoice=${selectedVoiceId}` : "",
+    setup.outputResolution !== "1080p" ? `outputResolution=${setup.outputResolution}` : ""
+  ].filter(Boolean);
+  if (configurationMismatches.length) {
+    throw new Error(`Persisted VOX configuration did not match the selected Create values (${configurationMismatches.join(", ")}): ${JSON.stringify(configuration)}`);
+  }
+  phases.persistedConfiguration = "verified";
+
+  try {
+    await clickText(win, "Projects");
+    await assertText(win, topic);
+    await clickProjectOpen(win, topic);
+    const checkpointText = await waitForOneOfPageText(win, ["Idea candidates", "Project command center", "Retry automatic workflow"], 20_000);
+    if (checkpointText.includes("Idea candidates")) {
+      phases.ideaSelection = "reached";
+      if (checkpointText.includes("Approve this idea")) {
+        await clickText(win, "Approve this idea");
+        phases.ideaSelection = "approved";
+      } else if (checkpointText.includes("Generate ideas")) {
+        await clickText(win, "Generate ideas");
+        const generatedText = await waitForOneOfPageText(win, ["Approve this idea", "Idea generation failed", "needs attention"], 20_000);
+        if (generatedText.includes("Approve this idea")) {
+          await clickText(win, "Approve this idea");
+          phases.ideaSelection = "approved";
+        } else {
+          runtimeNotes.push(`Idea checkpoint was reached but generation did not produce a selectable candidate: ${generatedText.slice(0, 300)}`);
+        }
+      }
+    } else {
+      phases.ideaSelection = "blocked_or_not_reached";
+      runtimeNotes.push("Preparation stopped before the Idea Lab checkpoint; the persisted stage status and safe reason are recorded below.");
+    }
+  } catch (error) {
+    phases.ideaSelection = "blocked_or_not_reached";
+    runtimeNotes.push("Preparation checkpoint was unavailable; the persisted stage status and safe reason are recorded below.");
+  }
+
+  for (const route of ["Scene Review", "Final Preview", "Export"] as const) {
+    try {
+      await clickText(win, route);
+      await assertText(win, route);
+      const routeText = await pageText(win);
+      if (route === "Scene Review") phases.sceneReview = routeText.includes("Scenes are not ready yet") ? "screen_reached_empty" : "reviewable_assets_visible";
+      if (route === "Final Preview") phases.finalPreview = routeText.includes("No reviewable preview yet") ? "screen_reached_empty" : "reviewable_preview_visible";
+      if (route === "Export") phases.export = "screen_reached";
+    } catch (error) {
+      runtimeNotes.push(`${route} screen unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const finalProject = projectRepository.loadProject(summary.id);
+  const stageStatuses = Object.fromEntries((finalProject?.stages ?? []).map((stage) => [stage.id, stage.status]));
+  const ideaStage = finalProject?.stages.find((stage) => stage.id === "idea-lab");
+  const safeBlocker = ideaStage?.attention?.message;
+  if (safeBlocker) runtimeNotes.push(`Idea Lab blocker: ${safeBlocker}`);
+  const exportArtifact = workflowRunStore.listArtifacts(summary.id, "packaging-export").find((artifact) => artifact.status === "approved");
+  const mp4RelativeFilePath = typeof exportArtifact?.payloadJson?.mp4RelativeFilePath === "string" ? exportArtifact.payloadJson.mp4RelativeFilePath : undefined;
+  let finalMp4Verified = false;
+  if (mp4RelativeFilePath) {
+    try {
+      const absolutePath = resolve(workspaceRoot, mp4RelativeFilePath);
+      finalMp4Verified = statSync(absolutePath).isFile() && statSync(absolutePath).size > 0;
+    } catch {
+      finalMp4Verified = false;
+    }
+  }
+  if (!finalMp4Verified) runtimeNotes.push("Final MP4 was not verified in the isolated runtime; no export completion is claimed.");
+
+  return {
+    phase: "runtime_evidence_recorded",
+    configuration,
+    selectedVoice: selectedVoiceId,
+    phases,
+    stageStatuses,
+    finalMp4: { verified: finalMp4Verified, ...(mp4RelativeFilePath ? { relativeFilePath: mp4RelativeFilePath } : {}) },
+    runtimeNotes
+  };
+}
+
+async function waitForPersistedProject(topic: string): Promise<ReturnType<ProjectRepository["listProjects"]>[number]> {
+  const started = Date.now();
+  while (Date.now() - started < 10_000) {
+    const project = projectRepository.listProjects().find((item) => item.topic === topic);
+    if (project) return project;
+    await delay(250);
+  }
+  throw new Error(`Timed out waiting for persisted project: ${topic}`);
+}
+
+async function waitForOneOfPageText(win: BrowserWindow, expected: string[], timeoutMs: number): Promise<string> {
+  const started = Date.now();
+  let text = "";
+  while (Date.now() - started < timeoutMs) {
+    text = await pageText(win).catch(() => "");
+    if (expected.some((value) => text.includes(value))) return text;
+    await delay(250);
+  }
+  throw new Error(`Timed out waiting for one of: ${expected.join(", ")}. Page text: ${text.slice(0, 600)}`);
 }
 
 async function waitForRenderer(win: BrowserWindow): Promise<void> {
@@ -1409,6 +1564,62 @@ async function setInputValue(win: BrowserWindow, selector: string, value: string
     throw new Error(`Could not set input: ${selector}`);
   }
   await delay(200);
+}
+
+async function setSelectValue(win: BrowserWindow, selector: string, value: string): Promise<string> {
+  const selected = await win.webContents.executeJavaScript(
+    `(() => {
+      const select = document.querySelector(${JSON.stringify(selector)});
+      if (!(select instanceof HTMLSelectElement)) return "";
+      const option = Array.from(select.options).find((item) => item.value === ${JSON.stringify(value)} && !item.disabled);
+      if (!option) return "";
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value");
+      descriptor?.set?.call(select, option.value);
+      select.dispatchEvent(new Event("input", { bubbles: true }));
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+      return select.value;
+    })()`,
+    true
+  ) as string;
+  if (selected !== value) throw new Error(`Could not set select ${selector} to ${value}.`);
+  await delay(300);
+  return selected;
+}
+
+async function selectFirstAvailableOption(win: BrowserWindow, selector: string): Promise<string> {
+  const started = Date.now();
+  while (Date.now() - started < 15_000) {
+    const selected = await win.webContents.executeJavaScript(
+      `(() => {
+        const select = document.querySelector(${JSON.stringify(selector)});
+        if (!(select instanceof HTMLSelectElement)) return "";
+        const option = Array.from(select.options).find((item) => item.value && !item.disabled);
+        if (!option) return "";
+        const descriptor = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value");
+        descriptor?.set?.call(select, option.value);
+        select.dispatchEvent(new Event("input", { bubbles: true }));
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        return select.value;
+      })()`,
+      true
+    ) as string;
+    if (selected) {
+      await delay(300);
+      return selected;
+    }
+    await delay(250);
+  }
+  return "";
+}
+
+async function readSelectValue(win: BrowserWindow, selector: string): Promise<string> {
+  return await win.webContents.executeJavaScript(
+    `(() => {
+      const select = document.querySelector(${JSON.stringify(selector)});
+      return select instanceof HTMLSelectElement ? select.value : "";
+    })()`,
+    true
+  ) as string;
 }
 
 function delay(ms: number): Promise<void> {

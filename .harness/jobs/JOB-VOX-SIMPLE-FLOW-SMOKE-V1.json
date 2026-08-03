@@ -1,0 +1,49 @@
+{
+  "jobId": "JOB-VOX-SIMPLE-FLOW-SMOKE-V1",
+  "type": "short",
+  "title": "Run the isolated VOX Simple Flow smoke",
+  "status": "active",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Exercise the documented VOX Simple Flow Test through the simplified Create screen, persist and verify its configuration, and record the furthest truthful runtime checkpoint available in the configured local environment.",
+  "businessContext": "The V1 acceptance path requires one isolated Vietnamese topic project to reach idea selection and continue through scene review, preview, and export when the configured providers and media runtime support those phases. Runtime evidence must distinguish completed phases from unavailable-provider blockers.",
+  "allowedPaths": [
+    "apps/desktop/src/main/main.ts",
+    "apps/desktop/src/renderer/App.tsx",
+    "scripts/verify-electron-ui.cjs",
+    "docs/simple-video/IMPLEMENTATION_REPORT.md",
+    ".harness/jobs/JOB-VOX-SIMPLE-FLOW-SMOKE-V1.json",
+    ".harness/handoffs/JOB-VOX-SIMPLE-FLOW-SMOKE-V1.md",
+    ".harness/locks/JOB-VOX-SIMPLE-FLOW-SMOKE-V1.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": [
+    "packages/db/**",
+    "packages/providers/**",
+    "python/**",
+    "apps/desktop/src/preload/**"
+  ],
+  "dependencies": [
+    "simplified Create screen",
+    "existing production orchestrator",
+    "Electron UI verification harness"
+  ],
+  "acceptanceCriteria": [
+    "The vox-simple-flow Electron mode selects the documented topic, Vietnamese language, duration, aspect ratio, VOX Documentary style, available voice, and 1080p resolution through the simplified Create screen.",
+    "The mode creates VOX Simple Flow Test, verifies the persisted configuration, and records the first truthful production checkpoint or safe attention state.",
+    "When preparation reaches idea selection, the mode verifies the Idea Lab checkpoint and records scene-review, final-preview, and export evidence only when those phases are actually reached.",
+    "Export copy no longer describes CapCut as a packaging dependency, and Simple Create language choices are derived from available stored configuration rather than a component-local hardcoded list.",
+    "Targeted Electron verification, typecheck, and diff checks pass, or an environment blocker is recorded without claiming final MP4 completion."
+  ],
+  "verificationCommands": [
+    "$env:LSF_UI_MODES='vox-simple-flow'; node scripts/verify-electron-ui.cjs",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": [
+    "The configured runtime cannot expose an available existing voice or cannot persist the documented project configuration.",
+    "A provider-backed phase fails for a reason that cannot be represented as a truthful runtime blocker without changing product behavior."
+  ]
+}
