@@ -1,12 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-03T15:08:00.000+07:00",
-  "activeJobs": [
-    {
-      "jobId": "JOB-TTS-ATTENTION-PROPAGATION-V1",
-      "branch": "chore/setup-agent-harness",
-      "role": "builder"
-    }
-  ],
-  "notes": "JOB-TTS-ATTENTION-PROPAGATION-V1 is active for the bounded project-level TTS interruption attention fix. Prior review-required jobs and unrelated dirty changes are preserved."
+  "updatedAt": "2026-08-03T15:12:00.000+07:00",
+  "activeJobs": [],
+  "notes": "JOB-TTS-ATTENTION-PROPAGATION-V1 builder commit e3c4c08b is ready for independent review and QA. Prior review-required jobs and unrelated dirty changes are preserved."
 }

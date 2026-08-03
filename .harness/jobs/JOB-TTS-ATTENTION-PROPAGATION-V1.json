@@ -2,7 +2,7 @@
   "jobId": "JOB-TTS-ATTENTION-PROPAGATION-V1",
   "type": "short",
   "title": "Surface interrupted TTS as project attention",
-  "status": "active",
+  "status": "review_required",
   "targetBranch": "chore/setup-agent-harness",
   "assignedRole": "builder",
   "description": "Propagate an interrupted persisted TTS job into the project-level Voice Generation needs_attention state while keeping the existing explicit failed-segment retry lifecycle valid.",
