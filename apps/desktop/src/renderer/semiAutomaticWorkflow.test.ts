@@ -179,7 +179,7 @@ describe("semi-automatic reference chain", () => {
     expect(result.stages.find((stage) => stage.id === "preview-render")?.status).toBe("needs_review");
   });
 
-  it("stops at the CapCut manual review checkpoint", async () => {
+  it("runs packaging directly after QA without invoking CapCut", async () => {
     const project = projectWithApprovedReferences();
     const checkpointed = ["idea-lab", "asset-review", "preview-render", "qa"].reduce(
       (current, stageId) => setStatus(current, stageId, "approved"),
@@ -187,8 +187,8 @@ describe("semi-automatic reference chain", () => {
     );
     const events: string[] = [];
     const result = await runPreviewChain(referenceClient(checkpointed, events), { project: checkpointed });
-    expect(result.stages.find((stage) => stage.id === "capcut-draft")?.status).toBe("needs_review");
-    expect(events).toEqual(["run:capcut-draft"]);
+    expect(result.stages.find((stage) => stage.id === "packaging-export")?.status).toBe("approved");
+    expect(events).toEqual(["run:packaging-export", "approve:packaging-export"]);
   });
 
   it("continues to packaging only after CapCut is already approved", async () => {

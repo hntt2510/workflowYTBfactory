@@ -87,7 +87,7 @@ export class SemiAutomaticAttentionError extends Error {
 const referenceStages = ["Transcript Cleaning", "Reference Segmentation", "Competitor DNA", "Opportunity Map", "Idea Lab"];
 const ideaStages = ["Originality Review", "Outline", "Script", "Fact Review", "Retention Review", "Scene Plan", "Shot Plan", "Visual Routing", "Prompt Preparation", "Asset Acquisition", "Asset Review"];
 const assetStages = ["Voice Generation", "Subtitle Preparation", "Timeline Assembly", "Preview Render"];
-const previewStages = ["QA", "CapCut Draft", "Packaging Export"];
+const previewStages = ["QA", "Packaging Export"];
 const automaticRecoveryMaxAttempts = 2;
 const automaticRecoveryBaseDelayMs = 250;
 
@@ -337,9 +337,5 @@ export async function runPreviewChain(
   assertSemiAutomatic(input.project);
   let current = input.project;
   current = await runAndApprove(client, current, "qa", () => client.runQa({ projectId: current.id }), () => client.approveQa({ projectId: current.id }), "preview", 0, previewStages.length, input.onProgress);
-  if (!isApproved(current, "capcut-draft")) {
-    current = await runCheckpoint(client, current, "capcut-draft", () => client.runCapCutDraft({ projectId: current.id }), "preview", 1, previewStages.length, "CapCut Draft is ready for manual desktop review.", input.onProgress);
-    if (!isApproved(current, "capcut-draft")) return current;
-  }
-  return runAndApprove(client, current, "packaging-export", () => client.runPackagingExport({ projectId: current.id }), () => client.approvePackagingExport({ projectId: current.id }), "preview", 2, previewStages.length, input.onProgress);
+  return runAndApprove(client, current, "packaging-export", () => client.runPackagingExport({ projectId: current.id }), () => client.approvePackagingExport({ projectId: current.id }), "preview", 1, previewStages.length, input.onProgress);
 }

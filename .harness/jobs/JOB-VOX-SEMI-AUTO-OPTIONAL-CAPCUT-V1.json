@@ -1,0 +1,44 @@
+{
+  "jobId": "JOB-VOX-SEMI-AUTO-OPTIONAL-CAPCUT-V1",
+  "type": "short",
+  "title": "Remove CapCut from the automatic packaging checkpoint",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Align the renderer-side Semi-automatic preview chain with the V1 output contract so QA and Packaging Export run after final-preview approval without requiring an optional CapCut Draft.",
+  "businessContext": "The main-process orchestrator, workflow registry, and Export screen already treat CapCut Draft as optional, but the reusable renderer workflow helper still runs CapCut as a mandatory manual checkpoint.",
+  "allowedPaths": [
+    "apps/desktop/src/renderer/semiAutomaticWorkflow.ts",
+    "apps/desktop/src/renderer/semiAutomaticWorkflow.test.ts",
+    ".harness/jobs/JOB-VOX-SEMI-AUTO-OPTIONAL-CAPCUT-V1.json",
+    ".harness/handoffs/JOB-VOX-SEMI-AUTO-OPTIONAL-CAPCUT-V1.md",
+    ".harness/locks/JOB-VOX-SEMI-AUTO-OPTIONAL-CAPCUT-V1.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": [
+    "packages/db/**",
+    "packages/providers/**",
+    "apps/desktop/src/main/**",
+    "apps/desktop/src/renderer/App.tsx"
+  ],
+  "dependencies": [
+    "approved optional CapCut packaging job",
+    "existing Semi-automatic workflow tests"
+  ],
+  "acceptanceCriteria": [
+    "runPreviewChain runs QA and Packaging Export directly after final-preview approval when no CapCut Draft exists.",
+    "runPreviewChain does not invoke CapCut, while an already-approved CapCut artifact remains compatible with packaging.",
+    "Progress totals and messages describe QA plus Packaging Export rather than a mandatory CapCut checkpoint.",
+    "Focused Semi-automatic workflow tests, typecheck, and diff checks pass."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run apps/desktop/src/renderer/semiAutomaticWorkflow.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": [
+    "Removing the automatic CapCut checkpoint would break explicit optional CapCut export or package invalidation semantics."
+  ]
+}
