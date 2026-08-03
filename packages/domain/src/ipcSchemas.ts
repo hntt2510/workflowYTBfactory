@@ -622,7 +622,7 @@ export const originalityReviewOutputSchema = z.object({
   flaggedMatches: z.array(z.string().min(1).max(1000)).max(100),
   requiredChanges: z.array(z.string().min(1).max(1000)).max(100),
   status: z.enum(["pass", "needs_changes", "blocked"]),
-  competitorDnaArtifactIds: z.array(idSchema).min(1).max(100)
+  competitorDnaArtifactIds: z.array(idSchema).max(100)
 }).strict();
 export const originalityReviewRequestSchema = z.object({ projectId: idSchema }).strict();
 export const originalityReviewArtifactResponseSchema = z.object({

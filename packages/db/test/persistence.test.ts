@@ -159,6 +159,116 @@ describe("project persistence", () => {
     reopened.close();
   });
 
+  it("persists synthetic project markers and records guarded approval metadata", () => {
+    const { db, repo } = openTemp();
+    const project = createFixtureProject({ topic: "synthetic approval audit", format: "short", targetLanguage: "English", synthetic: true });
+    repo.saveProject(project);
+    expect(repo.loadProject(project.id)?.synthetic).toBe(true);
+    const store = new WorkflowRunStore(db);
+    const now = "2026-07-30T00:00:00.000Z";
+    store.completeRun({
+      id: "run-synthetic-approval", projectId: project.id, stageId: "reference-validation", status: "needs_review",
+      runnerId: "reference-validation-local", runnerVersion: "v1", inputArtifactIds: [],
+      inputFingerprint: "s".repeat(64), outputArtifactIds: ["artifact-synthetic-approval"], startedAt: now, finishedAt: now
+    }, {
+      id: "artifact-synthetic-approval", projectId: project.id, stageId: "reference-validation", stageRunId: "run-synthetic-approval",
+      type: "reference-set.validated", version: 1, status: "needs_review", payloadJson: { valid: true }, createdAt: now, updatedAt: now
+    });
+    const previous = process.env.LSF_MAIN_FLOW_SYNTHETIC_APPROVALS;
+    process.env.LSF_MAIN_FLOW_SYNTHETIC_APPROVALS = "1";
+    try {
+      store.approveReviewRun("run-synthetic-approval");
+    } finally {
+      if (previous === undefined) delete process.env.LSF_MAIN_FLOW_SYNTHETIC_APPROVALS;
+      else process.env.LSF_MAIN_FLOW_SYNTHETIC_APPROVALS = previous;
+    }
+    expect(store.listRuns(project.id, "reference-validation")[0]?.payloadJson?.approval).toMatchObject({
+      actor: "main-flow-test-agent", mode: "synthetic-regression", isUserApproval: false
+    });
+    db.close();
+  });
+
+  it("records system automatic approval metadata only for Semi-automatic intermediate stages", () => {
+    const { db, repo } = openTemp();
+    const project = createFixtureProject({ topic: "automatic approval audit", format: "short", targetLanguage: "English", workflowMode: "semi_automatic" });
+    repo.saveProject(project);
+    const store = new WorkflowRunStore(db);
+    const now = "2026-07-30T00:00:00.000Z";
+    store.completeRun({
+      id: "run-shot-plan-approved", projectId: project.id, stageId: "shot-plan", status: "approved",
+      runnerId: "shot-plan-9router", runnerVersion: "v1", inputArtifactIds: [], inputFingerprint: "u".repeat(64), outputArtifactIds: ["artifact-shot-plan-approved"], startedAt: now, finishedAt: now
+    }, {
+      id: "artifact-shot-plan-approved", projectId: project.id, stageId: "shot-plan", stageRunId: "run-shot-plan-approved",
+      type: "shot-plan", version: 1, status: "approved", payloadJson: { shots: [] }, createdAt: now, updatedAt: now
+    });
+    store.completeRun({
+      id: "run-visual-routing-automatic", projectId: project.id, stageId: "visual-routing", status: "needs_review",
+      runnerId: "visual-routing-local", runnerVersion: "v1", inputArtifactIds: ["artifact-shot-plan-approved"], inputFingerprint: "v".repeat(64), outputArtifactIds: ["artifact-visual-routing-automatic"], startedAt: now, finishedAt: now
+    }, {
+      id: "artifact-visual-routing-automatic", projectId: project.id, stageId: "visual-routing", stageRunId: "run-visual-routing-automatic",
+      type: "visual-routing", version: 1, status: "needs_review", payloadJson: { shots: [] }, createdAt: now, updatedAt: now
+    });
+    store.approveReviewRun("run-visual-routing-automatic");
+    expect(store.listRuns(project.id, "visual-routing")[0]?.payloadJson?.approval).toMatchObject({
+      approvedBy: "system", approvalMode: "automatic", actor: "system", mode: "automatic", isUserApproval: false
+    });
+    db.close();
+  });
+
+  it("allows Topic Mode Idea Lab approval without reference input artifacts", () => {
+    const { db, repo } = openTemp();
+    const topicProject = createFixtureProject({ topic: "topic idea approval", format: "short", targetLanguage: "Vietnamese", inputMode: "topic" });
+    repo.saveProject(topicProject);
+    const store = new WorkflowRunStore(db);
+    const now = "2026-07-30T00:00:00.000Z";
+    store.completeRun({
+      id: "run-topic-idea-approval", projectId: topicProject.id, stageId: "idea-lab", status: "needs_review",
+      runnerId: "idea-lab-9router", runnerVersion: "v1", inputArtifactIds: [], inputFingerprint: "t".repeat(64), outputArtifactIds: ["artifact-topic-idea-approval"], startedAt: now, finishedAt: now
+    }, {
+      id: "artifact-topic-idea-approval", projectId: topicProject.id, stageId: "idea-lab", stageRunId: "run-topic-idea-approval",
+      type: "idea-candidates", version: 1, status: "needs_review", payloadJson: { candidates: [] }, createdAt: now, updatedAt: now
+    });
+
+    expect(() => store.approveReviewRun("run-topic-idea-approval")).not.toThrow();
+    expect(store.listRuns(topicProject.id, "idea-lab")[0]?.status).toBe("approved");
+
+    const referenceProject = createFixtureProject({ topic: "reference idea approval", format: "short", targetLanguage: "Vietnamese", inputMode: "reference" });
+    repo.saveProject(referenceProject);
+    store.completeRun({
+      id: "run-reference-idea-approval", projectId: referenceProject.id, stageId: "idea-lab", status: "needs_review",
+      runnerId: "idea-lab-9router", runnerVersion: "v1", inputArtifactIds: [], inputFingerprint: "r".repeat(64), outputArtifactIds: ["artifact-reference-idea-approval"], startedAt: now, finishedAt: now
+    }, {
+      id: "artifact-reference-idea-approval", projectId: referenceProject.id, stageId: "idea-lab", stageRunId: "run-reference-idea-approval",
+      type: "idea-candidates", version: 1, status: "needs_review", payloadJson: { candidates: [] }, createdAt: now, updatedAt: now
+    });
+
+    expect(() => store.approveReviewRun("run-reference-idea-approval")).toThrow("Stage run inputs are no longer approved.");
+    db.close();
+  });
+
+  it("persists exact stage attention for a blocked automatic approval", () => {
+    const { db, repo } = openTemp();
+    const project = createFixtureProject({ topic: "automatic attention audit", format: "short", targetLanguage: "English", workflowMode: "semi_automatic" });
+    repo.saveProject(project);
+    const store = new WorkflowRunStore(db);
+    const now = "2026-07-30T00:00:00.000Z";
+    store.completeRun({
+      id: "run-fact-attention", projectId: project.id, stageId: "fact-review", status: "needs_review",
+      runnerId: "fact-review-local", runnerVersion: "v1", inputArtifactIds: [], inputFingerprint: "a".repeat(64), outputArtifactIds: ["artifact-fact-attention"], startedAt: now, finishedAt: now
+    }, {
+      id: "artifact-fact-attention", projectId: project.id, stageId: "fact-review", stageRunId: "run-fact-attention",
+      type: "fact-review", version: 1, status: "needs_review", payloadJson: { findings: [] }, createdAt: now, updatedAt: now
+    });
+    store.markReviewAttention("run-fact-attention", "AUTO_APPROVAL_BLOCKED", "Blocked fact-review findings must be resolved.");
+    expect(store.listRuns(project.id, "fact-review")[0]).toMatchObject({ status: "needs_attention", safeErrorCategory: "AUTO_APPROVAL_BLOCKED" });
+    expect(store.listArtifacts(project.id, "fact-review")[0]?.status).toBe("needs_attention");
+    expect(repo.loadProject(project.id)?.stages.find((stage) => stage.id === "fact-review")).toMatchObject({
+      status: "needs_attention",
+      attention: { code: "AUTO_APPROVAL_BLOCKED", message: "Blocked fact-review findings must be resolved." }
+    });
+    db.close();
+  });
+
   it("rolls back the project transaction on a partial save failure", () => {
     const { db, repo } = openTemp();
     const project = createFixtureProject({ topic: "term life vs whole life", format: "long", targetLanguage: "English" });
@@ -252,9 +362,29 @@ describe("project persistence", () => {
     repo.saveProject(project);
     const store = new WorkflowRunStore(db);
     const now = "2026-07-30T00:00:00.000Z";
-    store.createRun({ id: "run-original", projectId: project.id, stageId: "script", status: "running", runnerId: "script-9router", runnerVersion: "v1", inputArtifactIds: [], inputFingerprint: "c".repeat(64), outputArtifactIds: [], startedAt: now });
-    expect(() => store.createRun({ id: "run-duplicate", projectId: project.id, stageId: "script", status: "running", runnerId: "script-9router", runnerVersion: "v1", inputArtifactIds: [], inputFingerprint: "c".repeat(64), outputArtifactIds: [], startedAt: now })).toThrow("A pending or accepted stage run already exists for this input.");
-    expect(store.listRuns(project.id, "script")).toHaveLength(1);
+    store.createRun({ id: "run-original", projectId: project.id, stageId: "transcript-cleaning", status: "running", runnerId: "transcript-cleaning-9router", runnerVersion: "transcript-cleaning-v3", inputArtifactIds: [], inputFingerprint: "c".repeat(64), outputArtifactIds: [], startedAt: now });
+    expect(() => store.createRun({ id: "run-duplicate", projectId: project.id, stageId: "transcript-cleaning", status: "running", runnerId: "transcript-cleaning-9router", runnerVersion: "transcript-cleaning-v3", inputArtifactIds: [], inputFingerprint: "c".repeat(64), outputArtifactIds: [], startedAt: now })).toThrow("A pending or accepted stage run already exists for this input.");
+    expect(store.listRuns(project.id, "transcript-cleaning")).toHaveLength(1);
+    db.close();
+  });
+
+  it("rejects a second active Transcript Cleaning run for the same reference", () => {
+    const { db, repo } = openTemp();
+    const project = createFixtureProject({ topic: "duplicate reference run guard", format: "short", targetLanguage: "English" });
+    repo.saveProject(project);
+    const store = new WorkflowRunStore(db);
+    const now = "2026-07-30T00:00:00.000Z";
+    store.createRun({
+      id: "run-reference-original", projectId: project.id, stageId: "transcript-cleaning", status: "running",
+      runnerId: "transcript-cleaning-9router", runnerVersion: "transcript-cleaning-v3", inputArtifactIds: [],
+      inputFingerprint: "f".repeat(64), outputArtifactIds: [], payloadJson: { referenceId: "reference-01" }, startedAt: now
+    });
+    expect(() => store.createRun({
+      id: "run-reference-duplicate", projectId: project.id, stageId: "transcript-cleaning", status: "running",
+      runnerId: "transcript-cleaning-9router", runnerVersion: "transcript-cleaning-v3", inputArtifactIds: [],
+      inputFingerprint: "g".repeat(64), outputArtifactIds: [], payloadJson: { referenceId: "reference-01" }, startedAt: now
+    })).toThrow("A pending or accepted stage run already exists for this input.");
+    expect(store.listRuns(project.id, "transcript-cleaning")).toHaveLength(1);
     db.close();
   });
 
@@ -580,6 +710,82 @@ describe("project persistence", () => {
     db.close();
   });
 
+  it("approves a review run through the full approved artifact chain without repeated recursion", () => {
+    const { db, repo } = openTemp();
+    const project = createFixtureProject({ topic: "long approved artifact chain", format: "short", targetLanguage: "English" });
+    repo.saveProject(project);
+    const store = new WorkflowRunStore(db);
+    const now = "2026-07-30T00:00:00.000Z";
+    const stages = [
+      "reference-validation", "transcript-cleaning", "reference-segmentation", "competitor-dna",
+      "opportunity-map", "idea-lab", "originality-review",
+      "outline", "script", "fact-review", "retention-review", "scene-plan", "shot-plan",
+      "visual-routing", "prompt-preparation", "asset-acquisition"
+    ] as const;
+    const perReferenceStages = new Set(["transcript-cleaning", "reference-segmentation", "competitor-dna"]);
+    let previousArtifactId: string | undefined;
+
+    stages.forEach((stageId, index) => {
+      const artifactId = `chain-artifact-${index}`;
+      store.completeRun({
+        id: `chain-run-${index}`, projectId: project.id, stageId, status: "approved", runnerId: "test-runner",
+        runnerVersion: "test-v1", inputArtifactIds: previousArtifactId ? [previousArtifactId] : [],
+        inputFingerprint: `chain-fingerprint-${index}`, outputArtifactIds: [artifactId], startedAt: now, finishedAt: now
+      }, {
+        id: artifactId, projectId: project.id, stageId, stageRunId: `chain-run-${index}`,
+        type: `${stageId}.output`, version: 1, status: "approved",
+        payloadJson: perReferenceStages.has(stageId) ? { referenceId: "ref-1" } : {}, createdAt: now, updatedAt: now
+      });
+      previousArtifactId = artifactId;
+    });
+
+    store.completeRun({
+      id: "chain-asset-review-run", projectId: project.id, stageId: "asset-review", status: "needs_review", runnerId: "test-runner",
+      runnerVersion: "test-v1", inputArtifactIds: [previousArtifactId!], inputFingerprint: "chain-review-fingerprint",
+      outputArtifactIds: ["chain-asset-review-artifact"], startedAt: now, finishedAt: now
+    }, {
+      id: "chain-asset-review-artifact", projectId: project.id, stageId: "asset-review", stageRunId: "chain-asset-review-run",
+      type: "asset-review", version: 1, status: "needs_review", payloadJson: {}, createdAt: now, updatedAt: now
+    });
+
+    store.approveReviewRun("chain-asset-review-run");
+    expect(store.listRuns(project.id, "asset-review")[0]?.status).toBe("approved");
+    db.close();
+  });
+
+  it("rejects cyclic approved artifact inputs without recursing indefinitely", () => {
+    const { db, repo } = openTemp();
+    const project = createFixtureProject({ topic: "cyclic approved artifact inputs", format: "short", targetLanguage: "English" });
+    repo.saveProject(project);
+    const store = new WorkflowRunStore(db);
+    const now = "2026-07-30T00:00:00.000Z";
+    store.completeRun({
+      id: "cycle-run-a", projectId: project.id, stageId: "asset-acquisition", status: "approved", runnerId: "test-runner",
+      runnerVersion: "test-v1", inputArtifactIds: ["cycle-artifact-b"], inputFingerprint: "cycle-a", outputArtifactIds: ["cycle-artifact-a"], startedAt: now, finishedAt: now
+    }, {
+      id: "cycle-artifact-a", projectId: project.id, stageId: "asset-acquisition", stageRunId: "cycle-run-a",
+      type: "asset", version: 1, status: "approved", payloadJson: {}, createdAt: now, updatedAt: now
+    });
+    store.completeRun({
+      id: "cycle-run-b", projectId: project.id, stageId: "prompt-preparation", status: "approved", runnerId: "test-runner",
+      runnerVersion: "test-v1", inputArtifactIds: ["cycle-artifact-a"], inputFingerprint: "cycle-b", outputArtifactIds: ["cycle-artifact-b"], startedAt: now, finishedAt: now
+    }, {
+      id: "cycle-artifact-b", projectId: project.id, stageId: "prompt-preparation", stageRunId: "cycle-run-b",
+      type: "visual-prompts", version: 1, status: "approved", payloadJson: {}, createdAt: now, updatedAt: now
+    });
+    store.completeRun({
+      id: "cycle-review-run", projectId: project.id, stageId: "asset-review", status: "needs_review", runnerId: "test-runner",
+      runnerVersion: "test-v1", inputArtifactIds: ["cycle-artifact-a"], inputFingerprint: "cycle-review", outputArtifactIds: ["cycle-review-artifact"], startedAt: now, finishedAt: now
+    }, {
+      id: "cycle-review-artifact", projectId: project.id, stageId: "asset-review", stageRunId: "cycle-review-run",
+      type: "asset-review", version: 1, status: "needs_review", payloadJson: {}, createdAt: now, updatedAt: now
+    });
+
+    expect(() => store.approveReviewRun("cycle-review-run")).toThrow("Stage run inputs are no longer approved.");
+    expect(store.listRuns(project.id, "asset-review")[0]?.status).toBe("needs_review");
+    db.close();
+  });
+
   it("approves a revised visual routing run backed by the approved shot plan", () => {
     const { db, repo } = openTemp();
     const project = createFixtureProject({ topic: "visual routing revision", format: "short", targetLanguage: "English" });
@@ -765,6 +971,35 @@ describe("project persistence", () => {
     expect(store.listRuns(project.id, "script")[0]).toMatchObject({ id: "run-running", status: "stale" });
     expect(store.listRuns(project.id, "outline")[0]).toMatchObject({ id: "run-queued", status: "stale" });
     expect(() => store.finishRun({ id: "run-running", projectId: project.id, stageId: "script", status: "needs_review", runnerId: "script-9router", runnerVersion: "v1", inputArtifactIds: [], inputFingerprint: "e".repeat(64), outputArtifactIds: [], finishedAt: "2026-07-30T00:01:00.000Z" })).toThrow();
+    db.close();
+  });
+
+  it("recovers interrupted workflow runs without deleting chunk progress", () => {
+    const { db, repo } = openTemp();
+    const project = createFixtureProject({ topic: "workflow restart", format: "short", targetLanguage: "English" });
+    repo.saveProject(project);
+    const store = new WorkflowRunStore(db);
+    store.createRun({
+      id: "run-cleaning-interrupted",
+      projectId: project.id,
+      stageId: "transcript-cleaning",
+      status: "running",
+      runnerId: "transcript-cleaning-9router",
+      runnerVersion: "transcript-cleaning-v2",
+      inputArtifactIds: [],
+      inputFingerprint: "a".repeat(64),
+      outputArtifactIds: [],
+      payloadJson: { chunks: [{ chunkIndex: 0, status: "completed", chunkFingerprint: "b".repeat(64) }] }
+    });
+
+    const recovered = store.recoverInterruptedRuns();
+
+    expect(recovered).toHaveLength(1);
+    expect(recovered[0]).toMatchObject({ id: "run-cleaning-interrupted", status: "failed", safeErrorCategory: "interrupted" });
+    expect(store.listRuns(project.id, "transcript-cleaning")[0]).toMatchObject({
+      status: "failed",
+      payloadJson: { chunks: [{ chunkIndex: 0, status: "completed", chunkFingerprint: "b".repeat(64) }] }
+    });
     db.close();
   });
 

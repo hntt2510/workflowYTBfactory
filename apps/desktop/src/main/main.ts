@@ -1039,13 +1039,17 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
     await clickText(win, "Projects");
     await assertText(win, topic);
     await clickProjectOpen(win, topic);
-    const checkpointText = await waitForOneOfPageText(
+    let checkpointText = await waitForOneOfPageText(
       win,
       requireFullFlow
-        ? ["Idea candidates", "Idea Lab", "Retry automatic workflow", "needs attention"]
+        ? ["Idea candidates", "Idea Lab", "Open next step", "Retry automatic workflow", "needs attention"]
         : ["Idea candidates", "Project command center", "Retry automatic workflow", "Preparing your video"],
       requireFullFlow ? 900_000 : 20_000
     );
+    if (checkpointText.includes("Open next step")) {
+      await clickText(win, "Open next step");
+      checkpointText = await waitForOneOfPageText(win, ["Idea candidates", "Idea Lab", "Retry automatic workflow", "needs attention"], requireFullFlow ? 900_000 : 20_000);
+    }
     if (checkpointText.includes("Idea candidates")) {
       phases.ideaSelection = "reached";
       if (checkpointText.includes("Approve this idea")) {
@@ -1201,8 +1205,9 @@ async function waitForProjectStageStatus(
     latest = projectRepository.loadProject(projectId) ?? undefined;
     const stage = latest?.stages.find((item) => item.id === stageId);
     if (stage && expected.includes(stage.status)) return latest!;
-    if (stage && (stage.status === "failed" || stage.status === "needs_attention")) {
-      throw new Error(`${stageId} stopped with status ${stage.status}: ${stage.attention?.message ?? "no safe reason recorded"}`);
+    const failedStage = latest?.stages.find((item) => item.status === "failed" || item.status === "needs_attention");
+    if (failedStage) {
+      throw new Error(`${failedStage.id} stopped with status ${failedStage.status}: ${failedStage.attention?.message ?? "no safe reason recorded"}`);
     }
     await delay(500);
   }
@@ -1305,6 +1310,7 @@ function stageDependencyChainApproved(
   stages: ReturnType<typeof normalizeProjectStages>,
   stageId: string,
   referenceSetStatus: ReferenceSetState["status"] | undefined,
+  topicModeWithoutReferences = false,
   visited = new Set<string>()
 ): boolean {
   if (visited.has(stageId)) return false;
@@ -1312,9 +1318,10 @@ function stageDependencyChainApproved(
   nextVisited.add(stageId);
   const definition = getWorkflowStageDefinition(stageId);
   if (definition?.requiredInputTypes.includes("reference-set.approved") && referenceSetStatus !== "approved") return false;
-  return !definition || definition.dependsOn.every((dependencyId) =>
+  const dependencies = topicModeWithoutReferences && stageId === "idea-lab" ? [] : definition?.dependsOn ?? [];
+  return !definition || dependencies.every((dependencyId) =>
     stages.find((item) => item.id === dependencyId)?.status === "approved"
-    && stageDependencyChainApproved(stages, dependencyId, referenceSetStatus, nextVisited)
+    && stageDependencyChainApproved(stages, dependencyId, referenceSetStatus, topicModeWithoutReferences, nextVisited)
   );
 }
 
@@ -1324,8 +1331,10 @@ function currentApprovedArtifacts(project: FactoryProject, stageId: string): Wor
   if (stage?.status !== "approved") return [];
   const definition = getWorkflowStageDefinition(stageId);
   if (definition?.requiredInputTypes.includes("reference-set.approved") && project.referenceSet?.status !== "approved") return [];
-  if (!stageDependencyChainApproved(stages, stageId, project.referenceSet?.status)) return [];
-  return backedApprovedArtifacts(project.id, stageId);
+  const topicModeWithoutReferences = project.setup.inputMode === "topic"
+    && project.competitorReferences.every((reference) => reference.included === false);
+  if (!stageDependencyChainApproved(stages, stageId, project.referenceSet?.status, topicModeWithoutReferences)) return [];
+  return backedApprovedArtifacts(project.id, stageId, topicModeWithoutReferences);
 }
 
 type ClaimMapSource = {
@@ -1361,8 +1370,11 @@ function buildClaimMapReferenceSources(project: FactoryProject): { sources: Clai
   };
 }
 
-function backedApprovedArtifacts(projectId: string, stageId: string): WorkflowArtifact[] {
-  return selectCurrentBackedApprovedArtifacts(projectId, stageId, workflowRunStore, { perReferenceStages: perReferenceArtifactStages });
+function backedApprovedArtifacts(projectId: string, stageId: string, allowTopicIdeaWithoutReferences = false): WorkflowArtifact[] {
+  return selectCurrentBackedApprovedArtifacts(projectId, stageId, workflowRunStore, {
+    perReferenceStages: perReferenceArtifactStages,
+    ...(allowTopicIdeaWithoutReferences ? { allowTopicIdeaWithoutReferences: true } : {})
+  });
 }
 
 function markReferenceChangeStale(project: FactoryProject): FactoryProject {
@@ -2833,7 +2845,7 @@ ipcMain.handle("run-idea-lab", async (_event, input: unknown) => {
   const { projectId } = ideaLabRequestSchema.parse(input); const project = projectRepository.loadProject(projectId);
   if (!project) throw new Error(`Project not found: ${projectId}`);
   const opportunity = currentApprovedArtifacts(project, "opportunity-map")[0];
-  const topicOpportunityMap = project.setup.inputMode === "topic" && project.competitorReferences.length === 0
+  const topicOpportunityMap = project.setup.inputMode === "topic" && project.competitorReferences.every((reference) => reference.included === false)
     ? {
         recommendedContentSpaces: [{ text: `Original explanatory video about ${project.topic}`, sourceReferenceIds: [], sourceArtifactIds: [], confidence: "low" }],
         sharedPatterns: [],

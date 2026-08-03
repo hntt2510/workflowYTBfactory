@@ -8,7 +8,7 @@ export function selectCurrentBackedApprovedArtifacts(
     listArtifacts(projectId: string, stageId: string): WorkflowArtifact[];
     getArtifact(projectId: string, artifactId: string): WorkflowArtifact | null;
   },
-  options: { perReferenceStages?: ReadonlySet<string>; visitedRunIds?: ReadonlySet<string> } = {}
+  options: { perReferenceStages?: ReadonlySet<string>; visitedRunIds?: ReadonlySet<string>; allowTopicIdeaWithoutReferences?: boolean } = {}
 ): WorkflowArtifact[] {
   const approvedRunsById = new Map(
     dependencies.listRuns(projectId, stageId)
@@ -40,12 +40,15 @@ function runInputArtifactsCurrent(
     listArtifacts(projectId: string, stageId: string): WorkflowArtifact[];
     getArtifact(projectId: string, artifactId: string): WorkflowArtifact | null;
   },
-  options: { perReferenceStages?: ReadonlySet<string>; visitedRunIds?: ReadonlySet<string> }
+  options: { perReferenceStages?: ReadonlySet<string>; visitedRunIds?: ReadonlySet<string>; allowTopicIdeaWithoutReferences?: boolean }
 ): boolean {
   const visitedRunIds = options.visitedRunIds ?? new Set<string>();
   if (visitedRunIds.has(run.id)) return false;
   if (run.stageId === "reference-validation") return true;
-  if (run.inputArtifactIds.length === 0) return !getWorkflowStageDefinition(run.stageId)?.dependsOn.length;
+  if (run.inputArtifactIds.length === 0) {
+    return (options.allowTopicIdeaWithoutReferences && run.stageId === "idea-lab")
+      || !getWorkflowStageDefinition(run.stageId)?.dependsOn.length;
+  }
   const nextVisitedRunIds = new Set(visitedRunIds);
   nextVisitedRunIds.add(run.id);
   return run.inputArtifactIds.every((artifactId) => {

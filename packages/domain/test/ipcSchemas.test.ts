@@ -174,6 +174,21 @@ describe("ipc schemas", () => {
     }).status).toBe("pass");
   });
 
+  it("allows Topic Mode originality reviews without competitor DNA artifacts", () => {
+    expect(originalityReviewOutputSchema.parse({
+      ideaId: "idea-topic-1",
+      reviewer: "local_deterministic",
+      phraseOverlapRisk: 0,
+      structuralOverlapRisk: 0,
+      thumbnailOverlapRisk: 0,
+      conceptOverlapRisk: 0,
+      flaggedMatches: [],
+      requiredChanges: [],
+      status: "pass",
+      competitorDnaArtifactIds: []
+    }).competitorDnaArtifactIds).toEqual([]);
+  });
+
   it("requires unique cited research source identifiers and URLs", () => {
     expect(researchSourcesOutputSchema.parse({ sources: [{ id: "source-1", title: "Primary document", url: "https://example.com/source", publisher: "Example publisher", excerpt: "A quoted source excerpt.", sourceType: "primary" }] }).sources).toHaveLength(1);
     expect(() => researchSourcesOutputSchema.parse({ sources: [{ id: "source-1", title: "One", url: "https://example.com/source", publisher: "Example", excerpt: "First excerpt.", sourceType: "primary" }, { id: "source-1", title: "Two", url: "https://example.com/source", publisher: "Example", excerpt: "Second excerpt.", sourceType: "secondary" }] })).toThrow();

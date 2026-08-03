@@ -182,6 +182,16 @@ describe("workflow artifact selection", () => {
     expect(selectCurrentBackedApprovedArtifacts("project-1", "project-setup", dependencies).map((item) => item.id)).toEqual(["project-setup-current"]);
   });
 
+  it("allows Topic Mode Idea Lab artifacts without reference inputs when explicitly enabled", () => {
+    const dependencies = store(
+      [run({ id: "run-topic-idea", stageId: "idea-lab", inputArtifactIds: [], outputArtifactIds: ["topic-idea"] })],
+      [artifact({ id: "topic-idea", stageId: "idea-lab", stageRunId: "run-topic-idea", version: 1 })]
+    );
+
+    expect(selectCurrentBackedApprovedArtifacts("project-1", "idea-lab", dependencies)).toEqual([]);
+    expect(selectCurrentBackedApprovedArtifacts("project-1", "idea-lab", dependencies, { allowTopicIdeaWithoutReferences: true }).map((item) => item.id)).toEqual(["topic-idea"]);
+  });
+
   it("ignores approved artifacts missing from their stage run outputs", () => {
     const input = approvedInput("claim-map", "claim-map-for-detached");
     const dependencies = store(
