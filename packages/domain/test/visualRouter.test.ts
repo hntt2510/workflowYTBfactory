@@ -7,4 +7,13 @@ function shot(overrides: Partial<Shot>): Shot { return { id: "shot-1", sceneId: 
 describe("visual router", () => {
   it("prioritizes approved assets and evidence shots over generated images", () => { expect(applyVisualRouting([shot({ approvedAssetId: "asset-1" }), shot({ id: "shot-2", purpose: "Quote from source" })]).map((item) => item.visualMode)).toEqual(["reuse", "document"]); });
   it("uses stock video for long motion shots", () => { expect(applyVisualRouting([shot({ durationFrames: 361 })])[0]?.visualMode).toBe("stock_video"); });
+  it("keeps new VOX shots on the supported image-asset path", () => {
+    expect(applyVisualRouting([
+      shot({ purpose: "Quote from source", durationFrames: 361 }),
+      shot({ id: "shot-3", durationFrames: 361 })
+    ], { visualStyle: "vox-documentary" }).map((item) => item.visualMode)).toEqual(["ai_image", "ai_image"]);
+  });
+  it("preserves an approved asset in VOX mode", () => {
+    expect(applyVisualRouting([shot({ approvedAssetId: "asset-1", purpose: "Quote from source" })], { visualStyle: "vox-documentary" })[0]?.visualMode).toBe("reuse");
+  });
 });

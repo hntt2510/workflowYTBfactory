@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-03T17:36:00.000+07:00",
+  "updatedAt": "2026-08-03T18:02:00.000+07:00",
   "activeJobs": [],
-  "notes": "JOB-VOX-TOPIC-IDEA-ELIGIBILITY-V1, JOB-VOX-TOPIC-APPROVAL-RUNTIME-V1, and JOB-VOX-ASSET-PREFLIGHT-ATTENTION-V1 are review_required after focused verification. Prior review-required jobs and unrelated dirty changes are preserved."
+  "notes": "JOB-VOX-TOPIC-IDEA-ELIGIBILITY-V1, JOB-VOX-TOPIC-APPROVAL-RUNTIME-V1, JOB-VOX-ASSET-PREFLIGHT-ATTENTION-V1, and JOB-VOX-CAPABILITY-ROUTING-V1 are review_required after focused verification. Prior review-required jobs and unrelated dirty changes are preserved."
 }
