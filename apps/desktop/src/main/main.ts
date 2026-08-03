@@ -988,23 +988,36 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
   const runtimeNotes: string[] = [];
   const requireFullFlow = process.env.LSF_UI_REQUIRE_FULL_FLOW === "1" || Boolean(process.env.LSF_UI_SEED_WORKSPACE);
 
+  const resumeProject = process.env.LSF_UI_RESUME_PROJECT === "1";
   await assertText(win, "Long/Short Factory");
-  await clickText(win, "Create");
-  await assertText(win, "Create Video Project");
-  phases.createScreen = "reached";
-  await setInputValue(win, "#simple-topic", topic);
-  await setSelectValue(win, "#simple-language", "Vietnamese");
-  await setSelectValue(win, "#simple-duration", "45-60 seconds");
-  await setSelectValue(win, "#simple-aspect-ratio", "16:9");
-  await setSelectValue(win, "#simple-resolution", "1080p");
-  const selectedVoice = await selectFirstAvailableOption(win, "#simple-voice");
-  if (!selectedVoice) throw new Error("The simplified Create screen did not expose an available voice.");
-  const selectedStyle = await readSelectValue(win, "#simple-visual-style");
-  if (selectedStyle !== "vox-documentary") throw new Error(`Unexpected visual style: ${selectedStyle}`);
-  await clickText(win, "Create Video Project");
-  await assertText(win, "Preparing your video");
-
-  const summary = await waitForPersistedProject(topic);
+  let summary: ReturnType<ProjectRepository["listProjects"]>[number];
+  let selectedVoice = "";
+  if (resumeProject) {
+    await clickText(win, "Projects");
+    await assertText(win, topic);
+    await clickProjectOpen(win, topic);
+    summary = await waitForPersistedProject(topic);
+    const existingProject = projectRepository.loadProject(summary.id);
+    if (!existingProject) throw new Error("The explicitly resumed VOX project was not loadable from SQLite.");
+    selectedVoice = existingProject.setup.voiceId ?? "";
+    phases.createScreen = "resumed";
+  } else {
+    await clickText(win, "Create");
+    await assertText(win, "Create Video Project");
+    phases.createScreen = "reached";
+    await setInputValue(win, "#simple-topic", topic);
+    await setSelectValue(win, "#simple-language", "Vietnamese");
+    await setSelectValue(win, "#simple-duration", "45-60 seconds");
+    await setSelectValue(win, "#simple-aspect-ratio", "16:9");
+    await setSelectValue(win, "#simple-resolution", "1080p");
+    selectedVoice = await selectFirstAvailableOption(win, "#simple-voice") ?? "";
+    if (!selectedVoice) throw new Error("The simplified Create screen did not expose an available voice.");
+    const selectedStyle = await readSelectValue(win, "#simple-visual-style");
+    if (selectedStyle !== "vox-documentary") throw new Error(`Unexpected visual style: ${selectedStyle}`);
+    await clickText(win, "Create Video Project");
+    await assertText(win, "Preparing your video");
+    summary = await waitForPersistedProject(topic);
+  }
   const persisted = projectRepository.loadProject(summary.id);
   if (!persisted) throw new Error("Created project was not loadable from SQLite.");
   const setup = persisted.setup;
@@ -1050,7 +1063,14 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
       await clickText(win, "Open next step");
       checkpointText = await waitForOneOfPageText(win, ["Idea candidates", "Idea Lab", "Retry automatic workflow", "needs attention"], requireFullFlow ? 900_000 : 20_000);
     }
-    if (checkpointText.includes("Idea candidates")) {
+    if (resumeProject && persisted.approvedIdeaId) {
+      if (checkpointText.includes("Retry automatic workflow")) {
+        await waitForEnabledControl(win, "Retry automatic workflow", 30_000);
+        await clickText(win, "Retry automatic workflow");
+        await waitForProjectStageStatus(summary.id, "asset-review", ["needs_review"], 900_000);
+      }
+      phases.ideaSelection = "approved";
+    } else if (checkpointText.includes("Idea candidates")) {
       phases.ideaSelection = "reached";
       if (checkpointText.includes("Approve this idea")) {
         await clickText(win, "Approve this idea");

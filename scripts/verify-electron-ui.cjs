@@ -63,6 +63,7 @@ async function createWorkspace() {
   if (!seedRoot) return workspaceRoot;
 
   const resolvedSeedRoot = path.resolve(seedRoot);
+  if (process.env.LSF_UI_USE_SEED_WORKSPACE === "1") return resolvedSeedRoot;
   for (const suffix of ["", "-wal", "-shm"]) {
     const source = path.join(resolvedSeedRoot, `long-short-factory.sqlite${suffix}`);
     const target = path.join(workspaceRoot, `long-short-factory.sqlite${suffix}`);
