@@ -217,7 +217,7 @@ export interface TimelineAssemblyArtifact { id: string; stageRunId?: string; sta
 export interface PreviewRenderArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; relativeFilePath: string; payloadJson: { relativeFilePath: string; subtitleRelativeFilePath?: string; durationSeconds: number; width: number; height: number; sha256?: string; inputArtifactIds: string[] }; createdAt: string; updatedAt: string; }
 export interface QaArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { runner: "local_deterministic"; findings: Array<{ code: string; severity: "blocking" | "warning"; message: string; evidence: string }>; inputArtifactIds: string[] }; createdAt: string; updatedAt: string; }
 export interface CapCutDraftArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { draftName: string; structurallyValidated: true; trackCounts: { video: number; audio: number; text: number }; inputArtifactIds: string[] }; createdAt: string; updatedAt: string; }
-export interface PackagingExportArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; relativeFilePath: string; payloadJson: { relativeFilePath: string; artifactIds: string[]; sha256: string }; createdAt: string; updatedAt: string; }
+export interface PackagingExportArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; relativeFilePath: string; payloadJson: { relativeFilePath: string; artifactIds: string[]; sha256: string; mp4RelativeFilePath?: string }; createdAt: string; updatedAt: string; }
 
 export interface EditCompetitorReferenceInput extends ReferenceMutationInput {
   sourceUrl?: string;
@@ -327,6 +327,20 @@ export interface LongShortFactoryApi {
   continueAfterIdeaSelection: (input: { projectId: string; ideaId: string }) => Promise<FactoryProject>;
   startMediaGeneration: (input: { projectId: string }) => Promise<FactoryProject>;
   retryScene: (input: { projectId: string; sceneId: string }) => Promise<FactoryProject>;
+  reviseSceneReview: (input: {
+    projectId: string;
+    artifactId: string;
+    action: "edit_prompt" | "edit_direction" | "change_scene_type" | "remove_scene";
+    shotId?: string;
+    sceneId?: string;
+    positivePrompt?: string;
+    negativePrompt?: string;
+    framing?: string;
+    cameraAngle?: string;
+    cameraMovement?: string;
+    subjectAction?: string;
+    visualMode?: FactoryProject["shots"][number]["visualMode"];
+  }) => Promise<FactoryProject>;
   continueAfterSceneReview: (input: { projectId: string }) => Promise<FactoryProject>;
   renderProductionPreview: (input: { projectId: string }) => Promise<FactoryProject>;
   continueAfterFinalApproval: (input: { projectId: string }) => Promise<FactoryProject>;
@@ -490,6 +504,7 @@ export interface LongShortFactoryApi {
   runPreviewRender: (input: { projectId: string; force?: boolean }) => Promise<FactoryProject>;
   listPreviewRenderArtifacts: (input: { projectId: string }) => Promise<PreviewRenderArtifact[]>;
   getPreviewVideoUrl: (input: { projectId: string; artifactId: string }) => Promise<{ url: string }>;
+  getAssetPreviewUrl: (input: { projectId: string; artifactId: string; assetSha256: string }) => Promise<{ url: string }>;
   approvePreviewRender: (input: { projectId: string }) => Promise<FactoryProject>;
   rejectPreviewRender: (input: { projectId: string }) => Promise<FactoryProject>;
   runQa: (input: { projectId: string }) => Promise<FactoryProject>;

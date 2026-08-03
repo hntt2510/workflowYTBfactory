@@ -20,6 +20,8 @@ import {
   originalityReviewOutputSchema,
   researchSourcesOutputSchema,
   editVisualRoutingRequestSchema,
+  sceneReviewRevisionRequestSchema,
+  assetPreviewMediaRequestSchema,
   shotPlanOutputSchema,
   visualRoutingOutputSchema,
   assetReviewOutputSchema,
@@ -411,5 +413,20 @@ describe("ipc schemas", () => {
     expect(packagingExportOutputSchema.parse({ relativeFilePath: "exports/project-1/package.json", artifactIds: ["a1", "a2", "a3", "a4", "a5", "a6"], sha256: "f".repeat(64) }).artifactIds).toHaveLength(6);
     expect(() => packagingExportOutputSchema.parse({ relativeFilePath: "exports/project-1/package.json", artifactIds: ["a1", "a1", "a3", "a4", "a5", "a6"], sha256: "f".repeat(64) })).toThrow();
     expect(() => packagingExportOutputSchema.parse({ relativeFilePath: "../secret.json", artifactIds: [], sha256: "bad" })).toThrow();
+  });
+
+  it("validates Scene Review revisions as typed user actions", () => {
+    expect(sceneReviewRevisionRequestSchema.parse({
+      projectId: "project-1",
+      artifactId: "artifact-1",
+      action: "edit_direction",
+      shotId: "shot-1",
+      framing: "wide",
+      cameraAngle: "front",
+      cameraMovement: "slow push",
+      subjectAction: "map unfolds"
+    }).action).toBe("edit_direction");
+    expect(() => sceneReviewRevisionRequestSchema.parse({ projectId: "project-1", artifactId: "artifact-1", action: "remove_scene", sceneId: "scene-1", extra: true })).toThrow();
+    expect(assetPreviewMediaRequestSchema.parse({ projectId: "project-1", artifactId: "artifact-1", assetSha256: "a".repeat(64) }).assetSha256).toHaveLength(64);
   });
 });

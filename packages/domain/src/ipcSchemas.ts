@@ -732,6 +732,13 @@ export const assetReviewArtifactResponseSchema = z.object({ id: idSchema, stageR
 export const assetReviewArtifactsResponseSchema = z.array(assetReviewArtifactResponseSchema);
 export const reviseAssetReviewRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema, assetSha256: z.string().length(64), action: z.enum(["approve", "reject", "assign", "unassign"]), shotId: idSchema.optional() }).strict();
 export const manualAssetUploadRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema, shotId: idSchema }).strict();
+export const sceneReviewRevisionRequestSchema = z.discriminatedUnion("action", [
+  z.object({ projectId: idSchema, artifactId: idSchema, action: z.literal("edit_prompt"), shotId: idSchema, positivePrompt: z.string().trim().min(1).max(10000), negativePrompt: z.string().trim().min(1).max(5000) }).strict(),
+  z.object({ projectId: idSchema, artifactId: idSchema, action: z.literal("edit_direction"), shotId: idSchema, framing: z.string().trim().min(1).max(1000), cameraAngle: z.string().trim().min(1).max(1000), cameraMovement: z.string().trim().min(1).max(1000), subjectAction: z.string().trim().min(1).max(2000) }).strict(),
+  z.object({ projectId: idSchema, artifactId: idSchema, action: z.literal("change_scene_type"), sceneId: idSchema, visualMode: shotPlanShotSchema.shape.visualMode }).strict(),
+  z.object({ projectId: idSchema, artifactId: idSchema, action: z.literal("remove_scene"), sceneId: idSchema }).strict()
+]);
+export const assetPreviewMediaRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema, assetSha256: z.string().length(64) }).strict();
 export const voiceSegmentSchema = z.object({
   scriptSectionId: idSchema,
   relativeFilePath: safePathSchema,
@@ -801,7 +808,7 @@ export const capcutDraftApprovalRequestSchema = z.object({ projectId: idSchema, 
 export const capcutDraftArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: capcutDraftOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const capcutDraftArtifactsResponseSchema = z.array(capcutDraftArtifactResponseSchema);
 
-export const packagingExportOutputSchema = z.object({ relativeFilePath: safePathSchema, artifactIds: z.array(idSchema).min(6).max(12).refine((ids) => new Set(ids).size === ids.length, { message: "Package artifact IDs must be unique." }), sha256: z.string().length(64) }).strict();
+export const packagingExportOutputSchema = z.object({ relativeFilePath: safePathSchema, artifactIds: z.array(idSchema).min(6).max(12).refine((ids) => new Set(ids).size === ids.length, { message: "Package artifact IDs must be unique." }), sha256: z.string().length(64), mp4RelativeFilePath: safePathSchema.optional() }).strict();
 export const packagingExportRequestSchema = z.object({ projectId: idSchema }).strict();
 export const packagingExportArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: packagingExportOutputSchema, relativeFilePath: safePathSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const packagingExportArtifactsResponseSchema = z.array(packagingExportArtifactResponseSchema);

@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain as electronIpcMain, protocol } from "electron";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, join, relative, resolve } from "node:path";
@@ -134,6 +134,8 @@ import {
   visualRoutingOutputSchema,
   visualRoutingArtifactsResponseSchema,
   editVisualRoutingRequestSchema,
+  sceneReviewRevisionRequestSchema,
+  assetPreviewMediaRequestSchema,
   promptPreparationRequestSchema,
   promptPreparationOutputSchema,
   promptPreparationArtifactsResponseSchema,
@@ -500,6 +502,7 @@ async function mergeVoiceAudio(items: Array<{ inputPath: string; startSeconds: n
 
 const previewAudioFiles = new Map<string, string>();
 const previewMediaFiles = new Map<string, { projectId: string; artifactId: string; outputPath: string }>();
+const assetPreviewMediaFiles = new Map<string, { projectId: string; artifactId: string; assetSha256: string; outputPath: string; mimeType: string }>();
 
 function audioPreviewUrl(outputPath: string): string {
   const token = randomUUID();
@@ -1113,8 +1116,19 @@ function registerPreviewMediaProtocol(): void {
   protocol.handle("lsf-media", (request) => {
     const requestUrl = new URL(request.url);
     const token = requestUrl.pathname.slice(1);
+    const assetMedia = assetPreviewMediaFiles.get(token);
+    if (requestUrl.hostname !== "preview" || !token) return new Response("Not found", { status: 404 });
+    if (assetMedia) {
+      if (!existsSync(assetMedia.outputPath)) return new Response("Not found", { status: 404 });
+      const artifact = workflowRunStore.getArtifact(assetMedia.projectId, assetMedia.artifactId);
+      const parsed = artifact?.payloadJson ? assetReviewOutputSchema.safeParse(artifact.payloadJson) : null;
+      const asset = parsed?.success ? parsed.data.assets.find((item) => item.asset.sha256 === assetMedia.assetSha256) : undefined;
+      if (!artifact || (artifact.status !== "needs_review" && artifact.status !== "approved") || !asset || asset.asset.relativeFilePath !== relative(workspaceRoot, assetMedia.outputPath)) return new Response("Not found", { status: 404 });
+      const bytes = readFileSync(assetMedia.outputPath);
+      return new Response(request.method === "HEAD" ? null : bytes, { status: 200, headers: { "Cache-Control": "no-store", "Content-Length": String(bytes.length), "Content-Type": assetMedia.mimeType } });
+    }
     const media = previewMediaFiles.get(token);
-    if (requestUrl.hostname !== "preview" || !token || !media || !existsSync(media.outputPath)) {
+    if (!media || !existsSync(media.outputPath)) {
       return new Response("Not found", { status: 404 });
     }
     const artifact = workflowRunStore.getArtifact(media.projectId, media.artifactId);
@@ -2869,6 +2883,109 @@ ipcMain.handle("edit-visual-routing", (_event, input: unknown) => {
   }
   return factoryProjectResponseSchema.parse(source.status === "approved" ? transitionProjectStage(nextProject, "visual-routing", "needs_review") : nextProject);
 });
+
+function persistSceneReviewRevision(input: {
+  project: FactoryProject;
+  stageId: "scene-plan" | "visual-routing" | "prompt-preparation";
+  source: WorkflowArtifact;
+  inputArtifactIds: string[];
+  output: unknown;
+  type: string;
+  projectUpdate: FactoryProject;
+}): FactoryProject {
+  if (!input.source.stageRunId) throw new Error("Scene Review revision has no source run.");
+  const outputArtifact = input.stageId === "scene-plan"
+    ? scenePlanOutputSchema.parse(input.output)
+    : input.stageId === "visual-routing"
+      ? visualRoutingOutputSchema.parse(input.output)
+      : promptPreparationOutputSchema.parse(input.output);
+  const now = new Date().toISOString();
+  const runId = `stage-run-${randomUUID()}`;
+  const artifactId = `artifact-${randomUUID()}`;
+  const staleProject = markDownstreamStagesStale(input.project, input.stageId);
+  const runningProject = input.source.status === "approved"
+    ? transitionProjectStage(
+      transitionProjectStage(
+        transitionProjectStage(staleProject, input.stageId, "stale"),
+        input.stageId,
+        "queued"
+      ),
+      input.stageId,
+      "running"
+    )
+    : staleProject;
+  const reviewProject = input.source.status === "approved" ? transitionProjectStage(runningProject, input.stageId, "needs_review") : runningProject;
+  const reviewOutput = {
+    ...input.projectUpdate,
+    stages: reviewProject.stages
+  };
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    if (input.source.status === "approved") workflowRunStore.markStageArtifactsStale(input.project.id, [input.stageId]);
+    else workflowRunStore.rejectReviewRun(input.source.stageRunId, { withinTransaction: true });
+    saveProjectWithWorkflowInvalidation(reviewOutput, { withinTransaction: true });
+    workflowRunStore.createRun({ id: runId, projectId: input.project.id, stageId: input.stageId, status: "running", runnerId: "scene-review-user-action", runnerVersion: "scene-review-v1", inputArtifactIds: input.inputArtifactIds, inputFingerprint: canonicalSha256({ stageId: input.stageId, sourceArtifactId: input.source.id, output: outputArtifact }), outputArtifactIds: [], startedAt: now });
+    workflowRunStore.finishRun({ id: runId, projectId: input.project.id, stageId: input.stageId, status: "needs_review", runnerId: "scene-review-user-action", runnerVersion: "scene-review-v1", inputArtifactIds: input.inputArtifactIds, inputFingerprint: canonicalSha256({ stageId: input.stageId, sourceArtifactId: input.source.id, output: outputArtifact }), outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId: input.project.id, stageId: input.stageId, stageRunId: runId, type: input.type, version: workflowRunStore.listArtifacts(input.project.id, input.stageId).length + 1, status: "needs_review", payloadJson: outputArtifact, createdAt: now, updatedAt: now }, { withinTransaction: true });
+    workflowRunStore.approveReviewRun(runId, { withinTransaction: true });
+    const approvedProject = transitionProjectStage({ ...input.projectUpdate, stages: reviewProject.stages }, input.stageId, "approved");
+    saveProjectWithWorkflowInvalidation(approvedProject, { withinTransaction: true });
+    db.exec("COMMIT;");
+    factoryProjectResponseSchema.parse(approvedProject);
+    return approvedProject;
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+}
+
+ipcMain.handle("revise-scene-review", (_event, input: unknown) => {
+  const request = sceneReviewRevisionRequestSchema.parse(input);
+  const project = projectRepository.loadProject(request.projectId);
+  if (!project) throw new Error(`Project not found: ${request.projectId}`);
+  const source = workflowRunStore.listArtifacts(request.projectId, request.action === "edit_prompt" ? "prompt-preparation" : request.action === "remove_scene" ? "scene-plan" : "visual-routing")
+    .find((artifact) => artifact.id === request.artifactId && (artifact.status === "needs_review" || artifact.status === "approved"));
+  if (!source?.payloadJson) throw new Error("Scene Review revision must start from a reviewable artifact.");
+
+  if (request.action === "edit_prompt") {
+    const current = promptPreparationOutputSchema.parse(source.payloadJson);
+    const prompt = current.prompts.find((item) => item.shotId === request.shotId);
+    if (!prompt) throw new Error("The selected shot has no generation prompt.");
+    const nextPrompt = { ...prompt, promptVersionId: `prompt-${randomUUID()}`, positivePrompt: request.positivePrompt, negativePrompt: request.negativePrompt };
+    const output = { prompts: current.prompts.map((item) => item.shotId === request.shotId ? nextPrompt : item) };
+    const visualArtifact = currentApprovedArtifacts(project, "visual-routing").find((item) => item.payloadJson);
+    if (!visualArtifact) throw new Error("Prompt editing requires approved Visual Routing.");
+    return persistSceneReviewRevision({ project, stageId: "prompt-preparation", source, inputArtifactIds: [visualArtifact.id], output, type: "visual-prompts", projectUpdate: { ...project, shots: project.shots.map((shot) => shot.id === request.shotId ? { ...shot, promptVersionId: nextPrompt.promptVersionId } : shot) } });
+  }
+
+  if (request.action === "edit_direction") {
+    const current = visualRoutingOutputSchema.parse(source.payloadJson);
+    if (!current.shots.some((shot) => shot.id === request.shotId)) throw new Error("The selected shot is not present in Visual Routing.");
+    const output = { shots: current.shots.map((shot) => shot.id === request.shotId ? { ...shot, framing: request.framing, cameraAngle: request.cameraAngle, cameraMovement: request.cameraMovement, subjectAction: request.subjectAction } : shot) };
+    const shotArtifact = currentApprovedArtifacts(project, "shot-plan").find((item) => item.payloadJson);
+    if (!shotArtifact) throw new Error("Direction editing requires approved Shot Plan.");
+    return persistSceneReviewRevision({ project, stageId: "visual-routing", source, inputArtifactIds: [shotArtifact.id], output, type: "visual-routing", projectUpdate: { ...project, shots: project.shots.map((shot) => shot.id === request.shotId ? { ...shot, framing: request.framing, cameraAngle: request.cameraAngle, cameraMovement: request.cameraMovement, subjectAction: request.subjectAction } : shot) } });
+  }
+
+  if (request.action === "change_scene_type") {
+    const current = visualRoutingOutputSchema.parse(source.payloadJson);
+    const sceneShotIds = new Set(project.shots.filter((shot) => shot.sceneId === request.sceneId).map((shot) => shot.id));
+    if (!project.scenes.some((scene) => scene.id === request.sceneId) || !sceneShotIds.size) throw new Error("The selected scene is not editable.");
+    const output = { shots: current.shots.map((shot) => sceneShotIds.has(shot.id) ? { ...shot, visualMode: request.visualMode } : shot) };
+    const shotArtifact = currentApprovedArtifacts(project, "shot-plan").find((item) => item.payloadJson);
+    if (!shotArtifact) throw new Error("Scene type editing requires approved Shot Plan.");
+    return persistSceneReviewRevision({ project, stageId: "visual-routing", source, inputArtifactIds: [shotArtifact.id], output, type: "visual-routing", projectUpdate: { ...project, scenes: project.scenes.map((scene) => scene.id === request.sceneId ? { ...scene, visualMode: request.visualMode } : scene), shots: project.shots.map((shot) => sceneShotIds.has(shot.id) ? { ...shot, visualMode: request.visualMode } : shot) } });
+  }
+
+  const current = scenePlanOutputSchema.parse(source.payloadJson);
+  if (current.scenes.length <= 1) throw new Error("A project must keep at least one scene.");
+  if (!current.scenes.some((scene) => scene.id === request.sceneId)) throw new Error("The selected scene is not present in Scene Plan.");
+  const output = { ...current, scenes: current.scenes.filter((scene) => scene.id !== request.sceneId) };
+  const scriptArtifact = currentApprovedArtifacts(project, "script").find((item) => item.payloadJson);
+  const retentionArtifact = currentApprovedArtifacts(project, "retention-review").find((item) => item.payloadJson);
+  if (!scriptArtifact || !retentionArtifact) throw new Error("Removing a scene requires approved Script and Retention Review.");
+  return persistSceneReviewRevision({ project, stageId: "scene-plan", source, inputArtifactIds: [scriptArtifact.id, retentionArtifact.id], output, type: "scene-plan", projectUpdate: { ...project, scenes: project.scenes.filter((scene) => scene.id !== request.sceneId), shots: project.shots.filter((shot) => shot.sceneId !== request.sceneId) } });
+});
+
 ipcMain.handle("approve-visual-routing", (_event, input: unknown) => { const { projectId } = visualRoutingRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "visual-routing").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Visual Routing exists."); const shots = visualRoutingOutputSchema.parse(artifact.payloadJson).shots; const approved = transitionProjectStage(markDownstreamStagesStale({ ...project, shots }, "visual-routing"), "visual-routing", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
 ipcMain.handle("reject-visual-routing", (_event, input: unknown) => { const { projectId } = visualRoutingRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "visual-routing").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId) throw new Error("No reviewable Visual Routing exists."); const rejected = transitionProjectStage(project, "visual-routing", "rejected"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(rejected, { withinTransaction: true }); workflowRunStore.rejectReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(rejected); });
 
@@ -2894,7 +3011,10 @@ ipcMain.handle("run-asset-acquisition", async (_event, input: unknown) => {
   const settings = credentialStore.loadProviderCredentialSettings("9router"); const apiKey = await credentialStore.resolveProviderSecret("9router"); if (!settings?.imageModel || !apiKey) throw new Error("The selected image model or credential is unavailable."); const imageModel = settings.imageModel; const imageBaseUrl = settings.baseUrl; const runId = `stage-run-${randomUUID()}`; const retryBase = sceneId ? markDownstreamStagesStale(project, "asset-acquisition") : project; const rerunBase = sceneId && project.stages.find((stage) => stage.id === "asset-acquisition")?.status === "approved" ? transitionProjectStage(retryBase, "asset-acquisition", "stale") : retryBase; const running = transitionProjectStage(transitionProjectStage(rerunBase, "asset-acquisition", "queued"), "asset-acquisition", "running");
   db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(running, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "asset-acquisition", status: "running", runnerId: "asset-acquisition-9router", runnerVersion: "asset-acquisition-v1", providerId: "9router", configuredModelId: imageModel, inputArtifactIds: [promptArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: new Date().toISOString() }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
   try {
-    const priorAcquisition = sceneId ? currentApprovedArtifacts(project, "asset-acquisition").find((item) => item.payloadJson) : undefined;
+    const priorAcquisition = sceneId
+      ? currentApprovedArtifacts(project, "asset-acquisition").find((item) => item.payloadJson)
+        ?? workflowRunStore.listArtifacts(projectId, "asset-acquisition").find((item) => (item.status === "approved" || item.status === "stale") && item.payloadJson)
+      : undefined;
     const priorAssets = priorAcquisition?.payloadJson ? assetAcquisitionOutputSchema.parse(priorAcquisition.payloadJson).assets : [];
     const regeneratedShotIds = new Set(imagePrompts.map((prompt) => prompt.shotId));
     const assets = sceneId ? priorAssets.filter((asset) => !regeneratedShotIds.has(asset.shotId)) : [];
@@ -2964,11 +3084,11 @@ ipcMain.handle("reject-asset-review", (_event, input: unknown) => { const { proj
 ipcMain.handle("select-manual-asset-upload", async (_event, input: unknown) => {
   const request = manualAssetUploadRequestSchema.parse(input); const project = projectRepository.loadProject(request.projectId); if (!project) throw new Error(`Project not found: ${request.projectId}`);
   const source = workflowRunStore.listArtifacts(request.projectId, "asset-review").find((item) => item.id === request.artifactId && item.status === "needs_review"); if (!source?.stageRunId || !source.payloadJson) throw new Error("Manual Upload must start from a reviewable Asset Review artifact.");
-  const shot = project.shots.find((item) => item.id === request.shotId); if (!shot || (shot.visualMode !== "manual_upload" && shot.visualMode !== "uploaded")) throw new Error("Manual Upload is only available for a manually routed shot.");
+  const shot = project.shots.find((item) => item.id === request.shotId); if (!shot) throw new Error("The selected shot was not found.");
   const selected = await dialog.showOpenDialog({ properties: ["openFile"], filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }] }); if (selected.canceled || !selected.filePaths[0]) return factoryProjectResponseSchema.parse(project);
   const asset = await importLocalImageAsset({ projectId: request.projectId, shotId: request.shotId, workspaceRoot, sourcePath: selected.filePaths[0] }); const current = assetReviewOutputSchema.parse(source.payloadJson); if (current.assets.some((item) => item.asset.sha256 === asset.sha256)) throw new Error("That image is already present in this review.");
-  const output = assetReviewOutputSchema.parse({ ...current, assets: [...current.assets, { asset, reviewStatus: "needs_review" }] }); const inputArtifactIds = [current.acquisitionArtifactId]; const runId = `stage-run-${randomUUID()}`; const artifactId = `artifact-${randomUUID()}`; const now = new Date().toISOString();
-  const nextProject = markDownstreamStagesStale(project, "asset-review");
+  const output = assetReviewOutputSchema.parse({ ...current, assets: [...current.assets.filter((item) => item.asset.shotId !== request.shotId), { asset, reviewStatus: "needs_review" }] }); const inputArtifactIds = [current.acquisitionArtifactId]; const runId = `stage-run-${randomUUID()}`; const artifactId = `artifact-${randomUUID()}`; const now = new Date().toISOString();
+  const nextProject = markDownstreamStagesStale({ ...project, shots: project.shots.map((item) => item.id === request.shotId ? { ...item, visualMode: "uploaded" as const } : item) }, "asset-review");
   db.exec("BEGIN IMMEDIATE;"); try { workflowRunStore.rejectReviewRun(source.stageRunId, { withinTransaction: true }); saveProjectWithWorkflowInvalidation(nextProject, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId: request.projectId, stageId: "asset-review", status: "running", runnerId: "asset-review-manual-upload", runnerVersion: "asset-review-v1", inputArtifactIds, inputFingerprint: canonicalSha256({ stageId: "asset-review", sourceArtifactId: source.id, manualUploadSha256: asset.sha256, shotId: request.shotId }), outputArtifactIds: [], startedAt: now }); workflowRunStore.finishRun({ id: runId, projectId: request.projectId, stageId: "asset-review", status: "needs_review", runnerId: "asset-review-manual-upload", runnerVersion: "asset-review-v1", inputArtifactIds, inputFingerprint: canonicalSha256({ stageId: "asset-review", sourceArtifactId: source.id, manualUploadSha256: asset.sha256, shotId: request.shotId }), outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId: request.projectId, stageId: "asset-review", stageRunId: runId, type: "asset-review", version: workflowRunStore.listArtifacts(request.projectId, "asset-review").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
   return factoryProjectResponseSchema.parse(nextProject);
 });
@@ -3402,6 +3522,22 @@ ipcMain.handle("get-preview-video-url", (_event, input: unknown) => {
   return previewMediaUrlResponseSchema.parse({ url: `lsf-media://preview/${token}` });
 });
 
+ipcMain.handle("get-asset-preview-url", (_event, input: unknown) => {
+  const request = assetPreviewMediaRequestSchema.parse(input);
+  const artifact = workflowRunStore.getArtifact(request.projectId, request.artifactId);
+  if (!artifact?.payloadJson || (artifact.status !== "needs_review" && artifact.status !== "approved")) throw new Error("Scene asset is not reviewable.");
+  const output = assetReviewOutputSchema.parse(artifact.payloadJson);
+  const item = output.assets.find((candidate) => candidate.asset.sha256 === request.assetSha256);
+  if (!item) throw new Error("Scene asset is not present in the review artifact.");
+  const outputPath = resolveWorkspaceArtifactPath(item.asset.relativeFilePath);
+  if (!existsSync(outputPath)) throw new Error("Scene asset is missing from the workspace.");
+  const actualSha256 = createHash("sha256").update(readFileSync(outputPath)).digest("hex");
+  if (actualSha256 !== item.asset.sha256) throw new Error("Scene asset changed after validation and must be regenerated.");
+  const token = randomUUID();
+  assetPreviewMediaFiles.set(token, { projectId: request.projectId, artifactId: request.artifactId, assetSha256: request.assetSha256, outputPath, mimeType: item.asset.mimeType });
+  return previewMediaUrlResponseSchema.parse({ url: `lsf-media://preview/${token}` });
+});
+
 ipcMain.handle("approve-preview-render", async (_event, input: unknown) => {
   const { projectId } = previewRenderRequestSchema.parse(input);
   const project = projectRepository.loadProject(projectId);
@@ -3554,14 +3690,17 @@ ipcMain.handle("run-packaging-export", (_event, input: unknown) => {
   const artifacts = packagingExportRequiredStageIds.map((stageId) => currentApprovedArtifacts(project, stageId).find((item) => item.payloadJson));
   if (artifacts.some((artifact) => !artifact)) throw new Error("Packaging Export requires approved QA, CapCut Draft, preview, timeline, script, and assets.");
   const approved = artifacts as NonNullable<(typeof artifacts)[number]>[]; const artifactIds = approved.map((artifact) => artifact.id);
-  const manifest = { schemaVersion: 1, project: { id: project.id, topic: project.topic, format: project.format, targetLanguage: project.targetLanguage }, artifactIds };
-  const text = JSON.stringify(manifest, null, 2); if (/(?:api[_-]?key|authorization|credential|https?:\/\/|[A-Za-z]:[\\/]|\.\.)/i.test(text)) throw new Error("Packaging manifest failed secret or path safety validation.");
+  const previewArtifact = approved.find((artifact) => artifact.stageId === "preview-render");
+  if (!previewArtifact?.payloadJson) throw new Error("Packaging Export requires an approved preview MP4.");
+  const previewOutput = previewRenderOutputSchema.parse(previewArtifact.payloadJson);
+  const previewPath = resolveWorkspaceArtifactPath(previewOutput.relativeFilePath);
+  if (!existsSync(previewPath)) throw new Error("Approved preview MP4 is missing.");
   const fingerprint = canonicalSha256({ stageId: "packaging-export", artifactIds }); const existing = workflowRunStore.findLatestByInput(projectId, "packaging-export", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project);
-  const runId = `stage-run-${randomUUID()}`; const artifactId = `artifact-${randomUUID()}`; const now = new Date().toISOString(); const relativeFilePath = join("exports", projectId, `${runId}.json`); const outputPath = resolveWorkspaceArtifactPath(relativeFilePath); mkdirSync(dirname(outputPath), { recursive: true }); writeFileSync(outputPath, text, "utf8"); const sha256 = createHash("sha256").update(text).digest("hex"); const output = packagingExportOutputSchema.parse({ relativeFilePath, artifactIds, sha256 }); const review = transitionProjectStage(transitionProjectStage(transitionProjectStage(project, "packaging-export", "queued"), "packaging-export", "running"), "packaging-export", "needs_review");
+  const runId = `stage-run-${randomUUID()}`; const artifactId = `artifact-${randomUUID()}`; const now = new Date().toISOString(); const relativeFilePath = join("exports", projectId, `${runId}.json`); const mp4RelativeFilePath = join("exports", projectId, `${runId}.mp4`); const outputPath = resolveWorkspaceArtifactPath(relativeFilePath); const mp4OutputPath = resolveWorkspaceArtifactPath(mp4RelativeFilePath); mkdirSync(dirname(outputPath), { recursive: true }); copyFileSync(previewPath, mp4OutputPath); const manifest = { schemaVersion: 1, project: { id: project.id, topic: project.topic, format: project.format, targetLanguage: project.targetLanguage }, artifactIds, media: { mp4RelativeFilePath } }; const text = JSON.stringify(manifest, null, 2); if (/(?:api[_-]?key|authorization|credential|https?:\/\/|[A-Za-z]:[\\/]|\.\.)/i.test(text)) throw new Error("Packaging manifest failed secret or path safety validation."); writeFileSync(outputPath, text, "utf8"); const sha256 = createHash("sha256").update(text).digest("hex"); const output = packagingExportOutputSchema.parse({ relativeFilePath, artifactIds, sha256, mp4RelativeFilePath }); const review = transitionProjectStage(transitionProjectStage(transitionProjectStage(project, "packaging-export", "queued"), "packaging-export", "running"), "packaging-export", "needs_review");
   db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "packaging-export", status: "running", runnerId: "packaging-export-local", runnerVersion: "packaging-export-v1", inputArtifactIds: artifactIds, inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "packaging-export", status: "needs_review", runnerId: "packaging-export-local", runnerVersion: "packaging-export-v1", inputArtifactIds: artifactIds, inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId, stageId: "packaging-export", stageRunId: runId, type: "package-export", version: workflowRunStore.listArtifacts(projectId, "packaging-export").length + 1, status: "needs_review", payloadJson: output, relativeFilePath, createdAt: now, updatedAt: now }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review);
 });
 ipcMain.handle("list-packaging-export-artifacts", (_event, input: unknown) => { const { projectId } = packagingExportRequestSchema.parse(input); return packagingExportArtifactsResponseSchema.parse(workflowRunStore.listArtifacts(projectId, "packaging-export").map((artifact) => ({ id: artifact.id, ...(artifact.stageRunId ? { stageRunId: artifact.stageRunId } : {}), status: artifact.status, payloadJson: artifact.payloadJson, relativeFilePath: artifact.relativeFilePath, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt }))); });
-ipcMain.handle("approve-packaging-export", (_event, input: unknown) => { const { projectId } = packagingExportRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "packaging-export").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Packaging Export exists."); const output = packagingExportOutputSchema.parse(artifact.payloadJson); verifyPackagingManifest({ workspaceRoot, ...(artifact.relativeFilePath ? { artifactRelativeFilePath: artifact.relativeFilePath } : {}), reviewedRelativeFilePath: output.relativeFilePath, reviewedSha256: output.sha256, reviewedArtifactIds: output.artifactIds, reviewedProjectId: projectId }); const approved = transitionProjectStage(project, "packaging-export", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
+ipcMain.handle("approve-packaging-export", (_event, input: unknown) => { const { projectId } = packagingExportRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "packaging-export").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Packaging Export exists."); const output = packagingExportOutputSchema.parse(artifact.payloadJson); verifyPackagingManifest({ workspaceRoot, ...(artifact.relativeFilePath ? { artifactRelativeFilePath: artifact.relativeFilePath } : {}), reviewedRelativeFilePath: output.relativeFilePath, reviewedSha256: output.sha256, reviewedArtifactIds: output.artifactIds, reviewedProjectId: projectId, ...(output.mp4RelativeFilePath ? { reviewedMp4RelativeFilePath: output.mp4RelativeFilePath } : {}) }); const approved = transitionProjectStage(project, "packaging-export", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
 ipcMain.handle("reject-packaging-export", (_event, input: unknown) => { const { projectId } = packagingExportRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "packaging-export").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId) throw new Error("No reviewable Packaging Export exists."); const rejected = transitionProjectStage(project, "packaging-export", "rejected"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(rejected, { withinTransaction: true }); workflowRunStore.rejectReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(rejected); });
 
 ipcMain.handle("list-projects", () => projectListResponseSchema.parse(projectRepository.listProjects()));

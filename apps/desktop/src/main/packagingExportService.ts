@@ -28,6 +28,7 @@ export function verifyPackagingManifest(input: {
   reviewedSha256: string;
   reviewedArtifactIds: string[];
   reviewedProjectId: string;
+  reviewedMp4RelativeFilePath?: string;
 }): void {
   if (input.artifactRelativeFilePath !== input.reviewedRelativeFilePath) {
     throw new PackagingExportError("path_mismatch", "Package manifest path does not match the reviewed artifact.");
@@ -48,7 +49,7 @@ export function verifyPackagingManifest(input: {
   if (sha256 !== input.reviewedSha256) {
     throw new PackagingExportError("hash_mismatch", "Package manifest hash no longer matches the reviewed artifact.");
   }
-  let manifest: { schemaVersion?: unknown; artifactIds?: unknown; project?: { id?: unknown } };
+  let manifest: { schemaVersion?: unknown; artifactIds?: unknown; project?: { id?: unknown }; media?: { mp4RelativeFilePath?: unknown } };
   try {
     manifest = JSON.parse(content.toString("utf8")) as { schemaVersion?: unknown; artifactIds?: unknown; project?: { id?: unknown } };
   } catch {
@@ -65,5 +66,15 @@ export function verifyPackagingManifest(input: {
   }
   if (!Array.isArray(manifest.artifactIds) || manifest.artifactIds.length !== input.reviewedArtifactIds.length || manifest.artifactIds.some((id, index) => id !== input.reviewedArtifactIds[index])) {
     throw new PackagingExportError("manifest_mismatch", "Package manifest artifact IDs do not match the reviewed artifact.");
+  }
+  if (input.reviewedMp4RelativeFilePath) {
+    if (manifest.media?.mp4RelativeFilePath !== input.reviewedMp4RelativeFilePath || isAbsolute(input.reviewedMp4RelativeFilePath)) {
+      throw new PackagingExportError("manifest_mismatch", "Package manifest MP4 path does not match the reviewed export.");
+    }
+    const mp4Path = resolve(input.workspaceRoot, input.reviewedMp4RelativeFilePath);
+    const mp4FromWorkspace = relative(input.workspaceRoot, mp4Path);
+    if (!mp4FromWorkspace || mp4FromWorkspace.startsWith("..") || isAbsolute(mp4FromWorkspace) || resolve(input.workspaceRoot) === mp4Path || !existsSync(mp4Path)) {
+      throw new PackagingExportError("missing_manifest", "Final MP4 export is missing or outside the workspace.");
+    }
   }
 }
