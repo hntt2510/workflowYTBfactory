@@ -1,0 +1,38 @@
+{
+  "jobId": "JOB-VOX-SCENE-APPROVAL-CSP-V1",
+  "type": "short",
+  "title": "Unblock VOX scene approval and asset previews",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Allow the simplified Scene Review checkpoint to continue after approved scene assets are persisted, even while voice generation is pending, and allow local lsf-media asset previews through the renderer CSP.",
+  "businessContext": "The resumed VOX smoke reached Scene Review with every scene asset approved and assigned, but the Approve Scene control was disabled because the asset-review artifact was already approved. The real preview URLs were also blocked by the renderer CSP.",
+  "allowedPaths": [
+    "apps/desktop/src/renderer/App.tsx",
+    "apps/desktop/index.html",
+    ".harness/jobs/JOB-VOX-SCENE-APPROVAL-CSP-V1.json",
+    ".harness/handoffs/JOB-VOX-SCENE-APPROVAL-CSP-V1.md",
+    ".harness/locks/JOB-VOX-SCENE-APPROVAL-CSP-V1.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": [
+    "apps/desktop/src/main/**",
+    "apps/desktop/src/preload/**",
+    "packages/db/**",
+    "packages/providers/**"
+  ],
+  "dependencies": ["JOB-VOX-SMOKE-RESUME-V1"],
+  "acceptanceCriteria": [
+    "Approve Scene is enabled when the selected scene has approved, assigned assets, regardless of pending voice segments or an already approved asset-review artifact.",
+    "Approving the persisted scene review continues the existing production orchestrator without rerunning scene visuals.",
+    "Renderer asset previews using lsf-media:// are not rejected by the document CSP.",
+    "Focused syntax/type checks and diff checks pass; no final voice, preview, or export evidence is fabricated."
+  ],
+  "verificationCommands": [
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["The existing orchestrator requires a backend contract change outside the renderer-scoped paths."]
+}

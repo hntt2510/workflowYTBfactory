@@ -856,24 +856,30 @@ function SceneReviewScreen(props: { project: FactoryProject; setSelectedProject:
   }
 
   async function approveScene(sceneId: string): Promise<FactoryProject> {
-    let review = (await refresh()).find((artifact) => artifact.status === "needs_review");
+    let refreshed = await refresh();
+    let review = refreshed.find((artifact) => artifact.status === "needs_review") ?? refreshed.find((artifact) => artifact.status === "approved");
     if (!review) throw new Error("No reviewable scene assets exist.");
     let pending = review.payloadJson.assets.find((item) => props.project.shots.some((shot) => shot.id === item.asset.shotId && shot.sceneId === sceneId) && item.reviewStatus === "needs_review");
     while (pending) {
       await factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: review.id, assetSha256: pending.asset.sha256, action: "approve" });
-      review = (await refresh()).find((artifact) => artifact.status === "needs_review");
+      refreshed = await refresh();
+      review = refreshed.find((artifact) => artifact.status === "needs_review") ?? refreshed.find((artifact) => artifact.status === "approved");
       if (!review) break;
       pending = review.payloadJson.assets.find((item) => props.project.shots.some((shot) => shot.id === item.asset.shotId && shot.sceneId === sceneId) && item.reviewStatus === "needs_review");
     }
-    review = (await refresh()).find((artifact) => artifact.status === "needs_review");
+    refreshed = await refresh();
+    review = refreshed.find((artifact) => artifact.status === "needs_review") ?? refreshed.find((artifact) => artifact.status === "approved");
     let unassigned = review?.payloadJson.assets.find((item) => props.project.shots.some((shot) => shot.id === item.asset.shotId && shot.sceneId === sceneId) && item.reviewStatus === "approved" && !item.assignedShotId);
     while (review && unassigned) {
       await factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: review.id, assetSha256: unassigned.asset.sha256, action: "assign", shotId: unassigned.asset.shotId });
-      review = (await refresh()).find((artifact) => artifact.status === "needs_review");
+      refreshed = await refresh();
+      review = refreshed.find((artifact) => artifact.status === "needs_review") ?? refreshed.find((artifact) => artifact.status === "approved");
       unassigned = review?.payloadJson.assets.find((item) => props.project.shots.some((shot) => shot.id === item.asset.shotId && shot.sceneId === sceneId) && item.reviewStatus === "approved" && !item.assignedShotId);
     }
-    const finalReview = (await refresh()).find((artifact) => artifact.status === "needs_review");
+    refreshed = await refresh();
+    const finalReview = refreshed.find((artifact) => artifact.status === "needs_review") ?? refreshed.find((artifact) => artifact.status === "approved");
     if (finalReview?.payloadJson.assets.every((item) => item.reviewStatus === "approved" && Boolean(item.assignedShotId))) {
+      if (finalReview.status === "approved") return factoryClient.continueAfterSceneReview({ projectId: props.project.id });
       const approved = await factoryClient.approveAssetReview({ projectId: props.project.id });
       return await factoryClient.loadProject(props.project.id) ?? approved;
     }
@@ -930,7 +936,7 @@ function SceneReviewScreen(props: { project: FactoryProject; setSelectedProject:
               {editingDirection?.shotId === shot.id ? <div className="form-grid"><FormField label="Framing" htmlFor={`direction-framing-${shot.id}`}><input id={`direction-framing-${shot.id}`} value={editingDirection.framing} onChange={(event) => setEditingDirection({ ...editingDirection, framing: event.target.value })} /></FormField><FormField label="Camera angle" htmlFor={`direction-angle-${shot.id}`}><input id={`direction-angle-${shot.id}`} value={editingDirection.cameraAngle} onChange={(event) => setEditingDirection({ ...editingDirection, cameraAngle: event.target.value })} /></FormField><FormField label="Camera movement" htmlFor={`direction-movement-${shot.id}`}><input id={`direction-movement-${shot.id}`} value={editingDirection.cameraMovement} onChange={(event) => setEditingDirection({ ...editingDirection, cameraMovement: event.target.value })} /></FormField><FormField label="Subject action" htmlFor={`direction-action-${shot.id}`}><textarea id={`direction-action-${shot.id}`} value={editingDirection.subjectAction} onChange={(event) => setEditingDirection({ ...editingDirection, subjectAction: event.target.value })} /></FormField><div className="button-row"><button className="button primary compact" type="button" disabled={running || !routingArtifact} onClick={() => routingArtifact && void revise({ projectId: props.project.id, artifactId: routingArtifact.id, action: "edit_direction", shotId: shot.id, framing: editingDirection.framing, cameraAngle: editingDirection.cameraAngle, cameraMovement: editingDirection.cameraMovement, subjectAction: editingDirection.subjectAction }, "Scene direction updated; regenerate this scene when ready.").then(() => setEditingDirection(null))}>Save Direction</button><button className="button secondary compact" type="button" onClick={() => setEditingDirection(null)}>Cancel</button></div></div> : null}
             </div>;
           }) : <StatusBadge tone="warning">No shots are assigned to this scene.</StatusBadge>}
-          <div className="button-row"><button className="button secondary compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.retryScene({ projectId: props.project.id, sceneId: scene.id }), "Scene regeneration is ready for review.")}>Regenerate Scene</button><button className="button primary compact" type="button" disabled={running || !ready || review?.status !== "needs_review"} onClick={() => void perform(() => approveScene(scene.id), "Scene approved.")}>Approve Scene</button>{scenePlanArtifact && props.project.scenes.length > 1 ? <button className="button danger compact" type="button" disabled={running} onClick={() => { if (window.confirm("Remove this scene and its dependent media?")) void revise({ projectId: props.project.id, artifactId: scenePlanArtifact.id, action: "remove_scene", sceneId: scene.id }, "Scene removed; affected media and preview are stale."); }}>Remove Scene</button> : null}</div>
+          <div className="button-row"><button className="button secondary compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.retryScene({ projectId: props.project.id, sceneId: scene.id }), "Scene regeneration is ready for review.")}>Regenerate Scene</button><button className="button primary compact" type="button" disabled={running || !ready} onClick={() => void perform(() => approveScene(scene.id), "Scene approved.")}>Approve Scene</button>{scenePlanArtifact && props.project.scenes.length > 1 ? <button className="button danger compact" type="button" disabled={running} onClick={() => { if (window.confirm("Remove this scene and its dependent media?")) void revise({ projectId: props.project.id, artifactId: scenePlanArtifact.id, action: "remove_scene", sceneId: scene.id }, "Scene removed; affected media and preview are stale."); }}>Remove Scene</button> : null}</div>
         </SectionCard>;
       })}</div> : <EmptyState title="Scenes are not ready yet" detail="Production will create the scene list after content preparation." action={<button className="button primary" type="button" onClick={() => props.setRoute("production")}>Back to Production</button>} />}
       {message ? <p className={message.toLowerCase().includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}
