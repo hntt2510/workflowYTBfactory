@@ -2,7 +2,7 @@ import { routeChannelProfile } from "./router";
 import { seedChannelProfiles } from "./seedProfiles";
 import type { ChannelProfile, FactoryProject, PipelineStage, VideoFormat, VisualWorkflowMode, WorkflowMode } from "./types";
 import { normalizeReferenceIdentity } from "./referenceIdentity";
-import { characterVersionIsApproved } from "./character";
+import { characterVersionIsApproved, resolveApprovedCharacterVersion } from "./character";
 import { workflowStageDefinitions } from "./workflowRegistry";
 
 function uniqueId(prefix: string): string {
@@ -70,7 +70,7 @@ export function createFixtureProject(input: {
         }];
       })()
     : [];
-  const selectedCharacterVersion = profile.characterVersions?.find((version) => version.id === (input.characterVersionId ?? profile.activeCharacterVersionId));
+  const selectedCharacterVersion = resolveApprovedCharacterVersion(profile, input.characterVersionId);
   const stages = createPipelineStages(0).map((stage) => (
     competitorReferences.length && stage.id === "reference-intake"
       ? { ...stage, status: "approved" as const }
@@ -90,7 +90,7 @@ export function createFixtureProject(input: {
       language: input.targetLanguage,
       workflowMode: input.workflowMode ?? "semi_automatic",
       visualWorkflow: input.visualWorkflow ?? (input.workflowMode === "guided" ? "legacy" : "character_first"),
-      ...(input.characterVersionId ?? profile.activeCharacterVersionId ? { characterVersionId: input.characterVersionId ?? profile.activeCharacterVersionId } : {}),
+      ...(selectedCharacterVersion ? { characterVersionId: selectedCharacterVersion.id } : {}),
       inputMode: input.inputMode ?? (input.competitorReference ? "reference" : "topic"),
       aspectRatio: input.aspectRatio ?? (input.format === "short" ? "9:16" : "16:9"),
       visualStyle: input.visualStyle ?? "vox-documentary",

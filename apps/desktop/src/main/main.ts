@@ -2318,10 +2318,10 @@ ipcMain.handle("run-character-preparation", (_event, input: unknown) => {
   const boundProject = bindActiveApprovedCharacterVersion(project);
   if (boundProject !== project) project = saveAndReturnProject(boundProject);
   const profile = projectRepository.loadChannelProfile(project.profileId);
-  const character = profile?.characterVersions?.find((version) => version.id === project.setup.characterVersionId);
+  const character = resolveApprovedCharacterVersion(profile, project.setup.characterVersionId);
   if (!character || !characterVersionIsApproved(character)) throw new Error("Select and approve a channel character before continuing visual production.");
   if (project.stages.find((stage) => stage.id === "character-preparation")?.status === "approved") return factoryProjectResponseSchema.parse(project);
-  const approved = transitionProjectStage(project, "character-preparation", "approved");
+  const approved = moveManualStageToApproved(project, "character-preparation");
   projectRepository.saveProject(approved);
   return factoryProjectResponseSchema.parse(approved);
 });
@@ -2334,9 +2334,9 @@ ipcMain.handle("approve-character-preparation", (_event, input: unknown) => {
   const boundProject = bindActiveApprovedCharacterVersion(project);
   if (boundProject !== project) project = saveAndReturnProject(boundProject);
   const profile = projectRepository.loadChannelProfile(project.profileId);
-  const character = profile?.characterVersions?.find((version) => version.id === project.setup.characterVersionId);
+  const character = resolveApprovedCharacterVersion(profile, project.setup.characterVersionId);
   if (!character || !characterVersionIsApproved(character)) throw new Error("Select and approve a channel character before continuing visual production.");
-  const approved = transitionProjectStage(project, "character-preparation", "approved");
+  const approved = moveManualStageToApproved(project, "character-preparation");
   projectRepository.saveProject(approved);
   return factoryProjectResponseSchema.parse(approved);
 });

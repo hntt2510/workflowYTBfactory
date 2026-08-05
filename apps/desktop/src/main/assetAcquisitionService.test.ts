@@ -145,10 +145,17 @@ describe("asset acquisition", () => {
   });
   it("resolves a REUSE shot to an approved earlier frame", () => {
     const assignments = resolveReusableAssetAssignments([
-      { id: "shot-1", visualMode: "ai_image", continuityRefs: [] },
-      { id: "shot-2", visualMode: "reuse", continuityRefs: ["shot-1"] }
+      { id: "shot-1", visualMode: "ai_image", continuityRefs: [], order: 0, startFrame: 0 },
+      { id: "shot-2", visualMode: "reuse", continuityRefs: ["shot-1"], order: 1, startFrame: 30 }
     ], new Map([["shot-1", "asset-source"]]));
     expect(assignments.get("shot-2")).toBe("asset-source");
+  });
+  it("does not resolve a REUSE shot from a later frame", () => {
+    const assignments = resolveReusableAssetAssignments([
+      { id: "shot-2", visualMode: "reuse", continuityRefs: ["shot-3"], order: 1, startFrame: 30 },
+      { id: "shot-3", visualMode: "ai_image", continuityRefs: [], order: 2, startFrame: 60 }
+    ], new Map([["shot-3", "asset-later"]]));
+    expect(assignments.has("shot-2")).toBe(false);
   });
 });
 

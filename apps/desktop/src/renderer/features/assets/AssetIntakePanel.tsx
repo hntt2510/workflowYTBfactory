@@ -28,6 +28,10 @@ export interface AssetIntakePanelProps {
 export function AssetIntakePanel(props: AssetIntakePanelProps) {
   const root = useRef<HTMLDivElement>(null);
   const latestReview = props.latestReview;
+  const reusableShots = props.project.shots.filter((shot) => shot.visualMode === "reuse");
+  const frameSpecForShot = (shotId: string) => props.latestPrompt?.payloadJson.scenePrompts
+    ?.flatMap((scenePrompt) => scenePrompt.frameManifest)
+    .find((frame) => frame.shotId === shotId);
 
   useGSAP(() => {
     const items = gsap.utils.toArray<HTMLElement>(".asset-slot", root.current ?? undefined);
@@ -90,13 +94,15 @@ export function AssetIntakePanel(props: AssetIntakePanelProps) {
       <div className="asset-intake-grid">
         {props.requiredShots.map((shot) => {
           const item = props.itemForShot(shot.id);
+          const frameSpec = frameSpecForShot(shot.id);
           return (
             <article className={`asset-slot ${item ? "" : "asset-slot-missing"}`} key={`slot-${shot.id}`}>
               {item && props.latestReview
                 ? <AssetPreviewImage projectId={props.project.id} artifactId={props.latestReview.id} assetSha256={item.asset.sha256} />
                 : <div className="asset-slot-preview asset-slot-placeholder">Chưa có ảnh</div>}
               <div>
-                <strong>{shot.id}</strong>
+                <strong>{frameSpec?.displayNumber ?? shot.id} · {shot.sceneId}</strong>
+                <span>{frameSpec?.role ?? "STORYBOARD FRAME"} · {shot.purpose}</span>
                 <span>{item ? `${item.asset.width}×${item.asset.height} · ${item.reviewStatus === "approved" ? "Đã duyệt" : "Chờ duyệt"}` : "Thiếu storyboard frame"}</span>
                 {item?.warnings?.map((warning) => <small className="attention-copy" key={warning}>{warning}</small>)}
               </div>
@@ -105,6 +111,43 @@ export function AssetIntakePanel(props: AssetIntakePanelProps) {
           );
         })}
       </div>
+      {reusableShots.length ? (
+        <section className="reuse-intake" aria-label="Reusable storyboard frames">
+          <div className="section-card-header">
+            <h3>Frame tái sử dụng</h3>
+            <p>Chọn một ảnh đã duyệt để dùng lại; không cần tạo thêm ảnh mới.</p>
+          </div>
+          <div className="asset-intake-grid">
+            {reusableShots.map((shot) => {
+              const assigned = props.reviewItems.find((item) => item.reviewStatus === "approved" && item.assignedShotId === shot.id);
+              return (
+                <article className={`asset-slot ${assigned ? "" : "asset-slot-missing"}`} key={`reuse-slot-${shot.id}`}>
+                  {assigned && latestReview ? <AssetPreviewImage projectId={props.project.id} artifactId={latestReview.id} assetSha256={assigned.asset.sha256} /> : <div className="asset-slot-preview asset-slot-placeholder">Chưa gán ảnh</div>}
+                  <div>
+                    <strong>{shot.id} · REUSE</strong>
+                    <span>{shot.purpose}</span>
+                    <select
+                      aria-label={`Gán ảnh cho ${shot.id}`}
+                      value={assigned?.asset.sha256 ?? ""}
+                      disabled={props.running || !latestReview || latestReview.status !== "needs_review"}
+                      onChange={(event) => {
+                        if (!latestReview || !event.target.value) return;
+                        void props.perform(
+                          () => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: latestReview.id, assetSha256: event.target.value, action: "assign", shotId: shot.id }),
+                          "Đã gán ảnh tái sử dụng."
+                        );
+                      }}
+                    >
+                      <option value="">Chọn ảnh đã duyệt</option>
+                      {props.reviewItems.filter((item) => item.reviewStatus === "approved").map((item) => <option key={item.asset.sha256} value={item.asset.sha256}>{item.asset.shotId} · {item.asset.sha256.slice(0, 8)}</option>)}
+                    </select>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
       {props.warningCount > 0 ? <p className="attention-copy">{props.warningCount} ảnh có cảnh báo; hãy kiểm tra trước khi dựng.</p> : null}
       {props.orphanCount > 0 ? <p className="attention-copy">{props.orphanCount} file chưa khớp storyboard frame.</p> : null}
       {latestReview
@@ -136,9 +179,10 @@ export function AssetIntakePanel(props: AssetIntakePanelProps) {
                         }}
                       >
                         <option value="">Bỏ gán frame</option>
-                        {props.requiredShots.map((shot) => <option key={shot.id} value={shot.id}>{shot.id}</option>)}
+                        {props.project.shots.map((shot) => <option key={shot.id} value={shot.id}>{shot.id}{shot.visualMode === "reuse" ? " · REUSE" : ""}</option>)}
                       </select>
                     ) : null}
+                    {item.reviewStatus !== "rejected" ? <button className="button danger compact" type="button" disabled={props.running} onClick={() => void props.perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: latestReview.id, assetSha256: item.asset.sha256, action: "reject" }), "Đã gỡ ảnh khỏi batch review.")}>Gỡ khỏi batch</button> : null}
                   </>
                 ) : null}
               </article>
