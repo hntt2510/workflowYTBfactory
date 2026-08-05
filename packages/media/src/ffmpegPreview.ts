@@ -60,7 +60,8 @@ export function planFfmpegPreviewCommand(input: {
     finalBedLabel = "[ducked_bed]";
   }
   const mixedLabels = [narrationLabel, finalBedLabel, sfxLabel].filter((label): label is string => Boolean(label));
-  const audioMix = `${mixedLabels.join("")}amix=inputs=${mixedLabels.length}:duration=longest:dropout_transition=0[a]`;
+  const timelineDurationSeconds = timelineDurationFrames / input.timeline.fps;
+  const audioMix = `${mixedLabels.join("")}amix=inputs=${mixedLabels.length}:duration=longest:dropout_transition=0,apad=whole_dur=${timelineDurationSeconds.toFixed(6)},atrim=duration=${timelineDurationSeconds.toFixed(6)},asetpts=PTS-STARTPTS[a]`;
   filterParts.push(audioMix);
   const outputVideoLabel = input.subtitleFilePath ? "vs" : "v";
   const subtitleFilter = input.subtitleFilePath

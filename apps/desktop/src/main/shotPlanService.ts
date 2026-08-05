@@ -91,8 +91,11 @@ export async function runShotPlan(input: {
   const targetDurationSeconds = Math.max(...input.scenes.map((scene) => scene.startFrame + scene.durationFrames), 1) / input.fps;
   const imageBudget = imageBudgetForDuration(targetDurationSeconds);
   const budgetedShots = characterFirst
-    ? mergeCharacterFirstImageBudget(normalizedOutput.shots, input.scenes, input.fps, imageBudget)
+    ? mergeCharacterFirstImageBudget(splitCharacterFirstLongShots(normalizedOutput.shots, input.fps), input.scenes, input.fps, imageBudget)
     : normalizedOutput.shots;
+  if (characterFirst && (budgetedShots.filter((shot) => shot.visualMode === "ai_image").length > imageBudget || hasRollingImageBudgetViolation(budgetedShots, input.fps))) {
+    throw new ShotPlanError("invalid_output", "Shot Plan exceeds the 20 AI-generated images per rolling minute budget.");
+  }
   const output = shotPlanOutputSchema.parse({
     shots: budgetedShots.map((shot) => ({
       ...shot,
@@ -212,12 +215,43 @@ function normalizeCharacterFirstShotTiming(shots: ShotPlanShot[], scenes: ShotPl
   return normalized;
 }
 
+function splitCharacterFirstLongShots(shots: ShotPlanShot[], fps: number): ShotPlanShot[] {
+  const maxDurationFrames = Math.max(1, fps * 5);
+  const usedIds = new Set(shots.map((shot) => shot.id));
+  return shots.flatMap((shot) => {
+    if (shot.durationFrames <= maxDurationFrames) return [shot];
+    const parts: ShotPlanShot[] = [];
+    let remainingFrames = shot.durationFrames;
+    let startOffset = 0;
+    let part = 0;
+    while (remainingFrames > 0) {
+      const durationFrames = Math.min(maxDurationFrames, remainingFrames);
+      let id = part === 0 ? shot.id : `${shot.id}-part-${part + 1}`;
+      let suffix = part + 1;
+      while (usedIds.has(id) && id !== shot.id) id = `${shot.id}-part-${++suffix}`;
+      usedIds.add(id);
+      parts.push({
+        ...shot,
+        id,
+        order: shot.order + part,
+        startFrame: shot.startFrame + startOffset,
+        durationFrames
+      });
+      remainingFrames -= durationFrames;
+      startOffset += durationFrames;
+      part += 1;
+    }
+    return parts;
+  });
+}
+
 function mergeCharacterFirstImageBudget(shots: ShotPlanShot[], scenes: ShotPlanScene[], fps: number, imageBudget: number): ShotPlanShot[] {
   let working = [...shots];
-  while (working.filter((shot) => shot.visualMode === "ai_image").length > imageBudget) {
+  const maxDurationFrames = Math.max(1, fps * 5);
+  while (working.filter((shot) => shot.visualMode === "ai_image").length > imageBudget || hasRollingImageBudgetViolation(working, fps)) {
     const candidates = working
       .map((shot, index) => ({ shot, index, next: working[index + 1] }))
-      .filter(({ shot, next }) => Boolean(next) && shot.sceneId === next!.sceneId && (shot.visualMode === "ai_image" || next!.visualMode === "ai_image"))
+      .filter(({ shot, next }) => Boolean(next) && shot.sceneId === next!.sceneId && shot.durationFrames + next!.durationFrames <= maxDurationFrames && (shot.visualMode === "ai_image" || next!.visualMode === "ai_image"))
       .sort((left, right) => {
         const leftBoth = left.shot.visualMode === "ai_image" && left.next!.visualMode === "ai_image";
         const rightBoth = right.shot.visualMode === "ai_image" && right.next!.visualMode === "ai_image";
@@ -229,6 +263,16 @@ function mergeCharacterFirstImageBudget(shots: ShotPlanShot[], scenes: ShotPlanS
     working.splice(candidate.index, 2, merged);
   }
   return normalizeCharacterFirstShotTiming(working, scenes, fps);
+}
+
+function hasRollingImageBudgetViolation(shots: ShotPlanShot[], fps: number): boolean {
+  const windowFrames = Math.max(1, fps * 60);
+  const imageShots = shots.filter((shot) => shot.visualMode === "ai_image").sort((left, right) => left.startFrame - right.startFrame);
+  return imageShots.some((shot, index) => {
+    let count = 0;
+    for (let cursor = index; cursor >= 0 && shot.startFrame - imageShots[cursor]!.startFrame < windowFrames; cursor -= 1) count += 1;
+    return count > maxAiImagesPerMinute;
+  });
 }
 
 function mergeShotTail(shots: ShotPlanShot[], maxCount: number): ShotPlanShot[] {

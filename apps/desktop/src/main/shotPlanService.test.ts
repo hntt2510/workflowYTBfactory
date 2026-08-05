@@ -97,6 +97,24 @@ describe("shot plan service", () => {
     db.close();
   });
 
+  it("splits character-first beats that exceed the five-second maximum", async () => {
+    const { db, credentialStore, certificationStore } = await setup();
+    const output = { shots: [{ id: "long-shot", sceneId: "scene-1", order: 0, startFrame: 0, durationFrames: 360, fps: 30, purpose: "Explain", visualMode: "ai_image", framing: "Medium", cameraAngle: "Eye", cameraMovement: "Static", subjectAction: "Explain", startState: {}, endState: {}, continuityRefs: [] }] };
+    const result = await runShotPlan({
+      scenes: [{ id: "scene-1", startFrame: 0, durationFrames: 360 }],
+      fps: 30,
+      characterFirst: true,
+      credentialStore,
+      certificationStore,
+      createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify(output) }) })
+    });
+    expect(result.output.shots.length).toBeGreaterThan(1);
+    expect(result.output.shots.every((shot) => shot.durationFrames <= 150)).toBe(true);
+    expect(result.output.shots[0]?.startFrame).toBe(0);
+    expect(result.output.shots.at(-1)!.startFrame + result.output.shots.at(-1)!.durationFrames).toBe(360);
+    db.close();
+  });
+
   it("keeps provider timeout as a retryable provider failure", async () => {
     const { db, credentialStore, certificationStore } = await setup();
     await expect(runShotPlan({

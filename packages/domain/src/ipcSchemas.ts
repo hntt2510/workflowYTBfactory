@@ -802,19 +802,29 @@ export const visualPromptSchema = z.object({ shotId: idSchema, promptVersionId: 
 const storyboardFrameSpecSchema = z.object({
   shotId: idSchema,
   displayNumber: z.string().regex(/^\d{3}$/),
+  assetId: idSchema.optional(),
   role: z.enum(["BASE", "EXPRESSION_CHANGE", "POSE_CHANGE", "ACTION_KEYFRAME", "CUTAWAY", "INSERT", "ENVIRONMENT", "GRAPHIC", "REUSE"]),
+  assetStrategy: z.enum(["NEW_BASE", "REFERENCE_VARIATION", "EXPRESSION_VARIATION", "POSE_VARIATION", "BACKGROUND_VARIATION", "INSERT_DETAIL", "GRAPHIC_ASSET", "REUSE_EXISTING", "NO_NEW_ASSET"]).optional(),
   purpose: z.string().min(1).max(2000),
   durationFrames: z.number().int().positive(),
   delta: z.string().min(1).max(2000),
-  continuityRefs: z.array(z.string().min(1).max(1000)).max(50)
+  continuityRefs: z.array(z.string().min(1).max(1000)).max(50),
+  referenceInstructions: z.array(z.string().min(1).max(2000)).max(20).optional(),
+  prohibitedChanges: z.array(z.string().min(1).max(1000)).max(30).optional(),
+  expectedFilename: z.string().regex(/^\d{3}\.(png|jpg|jpeg|webp)$/).optional(),
+  acceptanceChecklist: z.array(z.string().min(1).max(1000)).max(20).optional()
 }).strict();
 const scenePromptPackageSchema = z.object({
   sceneId: idSchema,
   promptVersionId: idSchema,
+  targetTool: z.literal("GG Lab").optional(),
+  compilationMode: z.literal("scene_prompt").optional(),
   promptText: z.string().min(1).max(30000),
   frameNumbers: z.array(z.string().regex(/^\d{3}$/)).min(1).max(20),
+  generatedFrameNumbers: z.array(z.string().regex(/^\d{3}$/)).max(20).optional(),
   referenceInstructions: z.array(z.string().min(1).max(2000)).max(20),
   continuityLocks: z.array(z.string().min(1).max(2000)).max(50),
+  prohibitedChanges: z.array(z.string().min(1).max(1000)).max(30).optional(),
   expectedAspectRatio: z.enum(["16:9", "9:16"]),
   frameManifest: z.array(storyboardFrameSpecSchema).min(1).max(20)
 }).strict();

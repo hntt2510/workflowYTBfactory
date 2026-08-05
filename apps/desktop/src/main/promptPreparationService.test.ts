@@ -9,6 +9,26 @@ import { promptPreparationTimeoutMs, runPromptPreparation } from "./promptPrepar
 
 describe("prompt preparation service", () => {
   it("returns an empty output without provider access when no shots are AI-routed", async () => { const db = openFactoryDatabase(join(mkdtempSync(join(tmpdir(), "lsf-prompts-empty-")), "factory.sqlite")); const credentials = new ProviderCredentialStore(db, new MemoryKeychain()); const createResponseText = vi.fn(); await expect(runPromptPreparation({ shots: [{ id: "shot-1", visualMode: "document", framing: "Close", cameraAngle: "Eye", cameraMovement: "Static", subjectAction: "Reveal", continuityRefs: [] }], aspectRatio: "16:9", credentialStore: credentials, certificationStore: new TextCertificationStore(db), createClient: () => ({ createResponseText }) })).resolves.toMatchObject({ output: { prompts: [] } }); expect(createResponseText).not.toHaveBeenCalled(); db.close(); });
+  it("keeps every manual storyboard frame in the scene prompt package", async () => {
+    const db = openFactoryDatabase(join(mkdtempSync(join(tmpdir(), "lsf-prompts-scene-")), "factory.sqlite"));
+    const result = await runPromptPreparation({
+      manualMode: true,
+      shots: [
+        { id: "shot-1", sceneId: "scene-1", visualMode: "ai_image", framing: "Medium", cameraAngle: "Eye", cameraMovement: "Static", subjectAction: "Explain", continuityRefs: [] },
+        { id: "shot-2", sceneId: "scene-1", visualMode: "reuse", framing: "Medium", cameraAngle: "Eye", cameraMovement: "Static", subjectAction: "Hold", continuityRefs: ["shot-1"] },
+        { id: "shot-3", sceneId: "scene-1", visualMode: "text_card", framing: "Wide", cameraAngle: "Front", cameraMovement: "Static", subjectAction: "Show", continuityRefs: [] }
+      ],
+      aspectRatio: "16:9",
+      credentialStore: new ProviderCredentialStore(db, new MemoryKeychain()),
+      certificationStore: new TextCertificationStore(db)
+    });
+    expect(result.output.scenePrompts?.[0]?.frameNumbers).toEqual(["001", "002", "003"]);
+    expect(result.output.scenePrompts?.[0]?.generatedFrameNumbers).toEqual(["001", "003"]);
+    expect(result.output.scenePrompts?.[0]?.frameManifest[0]?.expectedFilename).toBe("001.png");
+    expect(result.output.scenePrompts?.[0]?.targetTool).toBe("GG Lab");
+    expect(result.output.scenePrompts?.[0]?.frameManifest.map((frame) => frame.role)).toEqual(["BASE", "REUSE", "ACTION_KEYFRAME"]);
+    db.close();
+  });
   it("uses the extended provider timeout and rejects prompts not bound exactly to approved AI-routed shots", async () => { const db = openFactoryDatabase(join(mkdtempSync(join(tmpdir(), "lsf-prompts-")), "factory.sqlite")); const credentials = new ProviderCredentialStore(db, new MemoryKeychain()); const certifications = new TextCertificationStore(db); await credentials.saveProviderCredential({ providerId: "9router", baseUrl: "http://127.0.0.1:20128/v1", textModel: "prompt-v1" }, "sk-secret"); certifications.saveTextCertificationRecord({ id: "cert-prompts", providerId: "9router", configuredModelId: "prompt-v1", baseUrlFingerprint: fingerprintBaseUrl("http://127.0.0.1:20128/v1")!, credentialVersionRef: credentials.loadProviderCredentialVersionRef("9router"), endpointStrategy: "responses", implementationVersion: "text-certification-v1", exactTextTest: { status: "passed", latencyMs: 1 }, strictJsonTest: { status: "passed", latencyMs: 1 }, overallStatus: "verified", testedAt: "2026-07-30T00:00:00.000Z" }); const input = { shots: [{ id: "shot-1", visualMode: "ai_image", framing: "Close", cameraAngle: "Eye", cameraMovement: "Static", subjectAction: "Reveal", continuityRefs: [] }], aspectRatio: "16:9" as const, credentialStore: credentials, certificationStore: certifications, createClient: () => ({ createResponseText: async (request: { timeoutMs?: number }) => { expect(request.timeoutMs).toBe(promptPreparationTimeoutMs); return { text: JSON.stringify({ prompts: [{ shotId: "missing", promptVersionId: "prompt-1", positivePrompt: "subject", negativePrompt: "text", aspectRatio: "16:9", continuityConstraints: [], prohibitedElements: [] }] }) }; } }) }; await expect(runPromptPreparation(input)).rejects.toMatchObject({ category: "invalid_output" }); db.close(); });
 
   it("appends the character framing and approved asset mapping to every AI prompt", async () => {

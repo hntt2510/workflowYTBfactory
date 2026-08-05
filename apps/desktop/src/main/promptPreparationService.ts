@@ -12,14 +12,15 @@ type PromptShot = { id: string; sceneId?: string; purpose?: string; durationFram
 
 export async function runPromptPreparation(input: { shots: PromptShot[]; aspectRatio: "16:9" | "9:16"; character?: CharacterVersion | undefined; assetConcepts?: AssetConcept[] | undefined; manualMode?: boolean; credentialStore: ProviderCredentialStore; certificationStore: TextCertificationStore; createClient?: (config: { baseUrl: string; apiKey: string }) => TextClient }) {
   const imageShots = input.shots.filter((shot) => ["ai_image", "ai_video", "stock_image", "stock_video", "manual_upload", "uploaded"].includes(shot.visualMode));
-  if (imageShots.length === 0) return { output: promptPreparationOutputSchema.parse({ prompts: [], scenePrompts: [] }) };
   if (input.manualMode) {
+    const prompts = imageShots.map((shot) => localPromptForShot(shot, input.aspectRatio, input.character, input.assetConcepts ?? []));
     const output = promptPreparationOutputSchema.parse({
-      prompts: imageShots.map((shot) => localPromptForShot(shot, input.aspectRatio, input.character, input.assetConcepts ?? [])),
-      scenePrompts: compileScenePromptPackages(imageShots, imageShots.map((shot) => localPromptForShot(shot, input.aspectRatio, input.character, input.assetConcepts ?? [])), input.aspectRatio, input.character)
+      prompts,
+      scenePrompts: compileScenePromptPackages(input.shots, prompts, input.aspectRatio, input.character, input.assetConcepts ?? [])
     });
     return { output };
   }
+  if (imageShots.length === 0) return { output: promptPreparationOutputSchema.parse({ prompts: [], scenePrompts: [] }) };
   const aiShots = imageShots.filter((shot) => shot.visualMode === "ai_image" || shot.visualMode === "ai_video");
   const certification = await loadNineRouterTextCertification({ credentialStore: input.credentialStore, certificationStore: input.certificationStore });
   if (certification.status !== "verified") throw new PromptPreparationError("capability_not_verified", "A verified text-model certification is required before Prompt Preparation can run.");
@@ -52,7 +53,7 @@ export async function runPromptPreparation(input: { shots: PromptShot[]; aspectR
     });
   const output = promptPreparationOutputSchema.parse({
     prompts: finalPrompts,
-    scenePrompts: compileScenePromptPackages(aiShots, finalPrompts, input.aspectRatio, input.character)
+    scenePrompts: compileScenePromptPackages(input.shots, finalPrompts, input.aspectRatio, input.character, input.assetConcepts ?? [])
   });
   const returnedModelId = responses.find((response) => response.returnedModelId)?.returnedModelId;
   return { output, ...(returnedModelId ? { returnedModelId } : {}) };
@@ -91,12 +92,14 @@ function buildPromptRequest(
 
 function localPromptForShot(shot: PromptShot, aspectRatio: "16:9" | "9:16", character: CharacterVersion | undefined, assetConcepts: AssetConcept[]) {
   const conceptText = assetConcepts.filter((concept) => concept.shotId === shot.id).map((concept) => `${concept.role}: ${concept.description}`).join("; ");
+  const composition = character ? resolveCharacterCompositionLock(character) : undefined;
   const characterText = character ? `Use the locked teacher identity ${character.name}: ${character.persona.appearance}; preserve ${character.invariantTraits.join(", ")}.` : "Use the approved visual continuity bible.";
+  const compositionText = composition ? `Composition lock: ${composition.aspectRatio} canvas; ${composition.subjectAnchor}; subject box x=${composition.subjectBox.x}, y=${composition.subjectBox.y}, width=${composition.subjectBox.width}, height=${composition.subjectBox.height}; ${composition.cameraDistance}; ${composition.headroom}; keep the safe zone x=${composition.safeZone.x}, y=${composition.safeZone.y}, width=${composition.safeZone.width}, height=${composition.safeZone.height} clear for diagrams and subtitles.` : "Keep the approved composition and safe zones unchanged.";
   const continuity = shot.continuityRefs.length ? `Continuity references: ${shot.continuityRefs.join(", ")}.` : "Keep continuity with the previous storyboard frame.";
   return {
     shotId: shot.id,
     promptVersionId: `prompt-${shot.id}-manual-v1`,
-    positivePrompt: `${characterText} Create the approved storyboard frame for ${shot.purpose ?? shot.id}. ${shot.semanticBeat ?? "Follow the semantic beat exactly."} Subject action: ${shot.subjectAction}. Framing: ${shot.framing}; camera: ${shot.cameraAngle}; movement intent: ${shot.cameraMovement}. ${conceptText ? `Approved asset concept: ${conceptText}.` : "Use only the approved scene asset direction."} ${continuity} Output a clean ${aspectRatio} image with no text, logo, contact sheet, or watermark unless explicitly required by the storyboard.`,
+    positivePrompt: `${compositionText} ${characterText} Create the approved storyboard frame for ${shot.purpose ?? shot.id}. ${shot.semanticBeat ?? "Follow the semantic beat exactly."} Subject action: ${shot.subjectAction}. Framing: ${shot.framing}; camera: ${shot.cameraAngle}; movement intent: ${shot.cameraMovement}. ${conceptText ? `Approved asset concept: ${conceptText}.` : "Use only the approved scene asset direction."} ${continuity} Output one clean ${aspectRatio} image with no text, logo, contact sheet, or watermark unless explicitly required by the storyboard.`,
     negativePrompt: "No identity drift, wardrobe drift, extra limbs, inconsistent framing, invented props, contact sheet, logo, watermark, or unrelated text.",
     aspectRatio,
     continuityConstraints: [continuity, "Preserve approved character and environment continuity."],
@@ -107,7 +110,7 @@ function localPromptForShot(shot: PromptShot, aspectRatio: "16:9" | "9:16", char
   };
 }
 
-function compileScenePromptPackages(shots: PromptShot[], prompts: ReturnType<typeof promptPreparationOutputSchema.parse>["prompts"], aspectRatio: "16:9" | "9:16", character: CharacterVersion | undefined) {
+function compileScenePromptPackages(shots: PromptShot[], prompts: ReturnType<typeof promptPreparationOutputSchema.parse>["prompts"], aspectRatio: "16:9" | "9:16", character: CharacterVersion | undefined, assetConcepts: AssetConcept[]) {
   const promptByShot = new Map(prompts.map((prompt) => [prompt.shotId, prompt]));
   const groups = new Map<string, PromptShot[]>();
   for (const shot of shots) {
@@ -120,15 +123,26 @@ function compileScenePromptPackages(shots: PromptShot[], prompts: ReturnType<typ
       const prompt = promptByShot.get(shot.id);
       const displayNumber = String(globalNumber++).padStart(3, "0");
       const role = /reuse/i.test(shot.visualMode) ? "REUSE" : index === 0 ? "BASE" : /expression|face/i.test(`${shot.purpose} ${shot.subjectAction}`) ? "EXPRESSION_CHANGE" : /pose|gesture|move|point/i.test(`${shot.purpose} ${shot.subjectAction}`) ? "POSE_CHANGE" : /chart|money|diagram|insert|cutaway/i.test(`${shot.purpose} ${shot.subjectAction}`) ? "INSERT" : "ACTION_KEYFRAME";
-      return { shotId: shot.id, displayNumber, role, purpose: shot.purpose ?? shot.id, durationFrames: shot.durationFrames ?? 1, delta: prompt?.positivePrompt ?? shot.subjectAction, continuityRefs: shot.continuityRefs };
+      const assetStrategy = role === "REUSE" ? "REUSE_EXISTING" : role === "BASE" ? "NEW_BASE" : role === "EXPRESSION_CHANGE" ? "EXPRESSION_VARIATION" : role === "POSE_CHANGE" ? "POSE_VARIATION" : role === "INSERT" ? "INSERT_DETAIL" : /environment|background/i.test(`${shot.purpose} ${shot.subjectAction}`) ? "BACKGROUND_VARIATION" : /diagram|graphic|text card/i.test(`${shot.visualMode} ${shot.purpose}`) ? "GRAPHIC_ASSET" : "REFERENCE_VARIATION";
+      const concepts = assetConcepts.filter((concept) => concept.shotId === shot.id);
+      const referenceInstructions = shot.continuityRefs.length ? shot.continuityRefs.map((ref) => `Use ${ref} as the continuity reference; keep identity, wardrobe, palette, lighting direction, and camera side unchanged.`) : ["Attach the approved character master reference when the teacher appears."];
+      const prohibitedChanges = character ? [...character.prohibitedChanges, "Do not move the teacher out of the locked subject box.", "Do not place diagrams, money, charts, or subtitles inside the teacher subject box."] : ["Do not invent new characters, props, text, or logos."];
+      const delta = role === "REUSE" ? "Reuse the approved source frame without generating a new image; only apply the approved crop or motion in the timeline." : `${prompt?.positivePrompt ?? shot.subjectAction}${concepts.length ? ` Approved asset mapping: ${concepts.map((concept) => `${concept.role} - ${concept.description}`).join("; ")}.` : ""}`;
+      const acceptanceChecklist = ["One separate image file, not a contact sheet", `Readable ${aspectRatio} composition`, "Approved character identity and framing remain stable", "No unapproved text, logo, or watermark"];
+      return { shotId: shot.id, displayNumber, assetId: `asset-${shot.id}`, role, assetStrategy, purpose: shot.purpose ?? shot.id, durationFrames: shot.durationFrames ?? 1, delta, continuityRefs: shot.continuityRefs, referenceInstructions, prohibitedChanges, expectedFilename: `${displayNumber}.png`, acceptanceChecklist };
     });
     const locks = [
       "Create each frame as a separate image file, never a contact sheet.",
       "Do not skip frames or stop for confirmation between frames.",
+      "Continue until the scene is complete and save every generated frame using its exact three-digit filename.",
       character ? `Keep the approved character bible unchanged: ${character.invariantTraits.join("; ")}.` : "Keep the approved visual bible unchanged."
     ];
-    const promptText = `Create scene ${sceneId} as exactly ${frameManifest.length} separate ${aspectRatio} images. ${locks.join(" ")} Use the first frame as the base reference for later frames in this scene. ${frameManifest.map((frame) => `Frame ${frame.displayNumber} (${frame.role}): ${frame.delta}`).join(" ")} Save each result separately using the frame number, and continue until the scene is complete.`;
-    return { sceneId, promptVersionId: `scene-prompt-${sceneId}-v1`, promptText, frameNumbers: frameManifest.map((frame) => frame.displayNumber), referenceInstructions: ["Attach the approved character master reference when the teacher appears.", "Use the previous frame in this scene as the internal reference for continuity."], continuityLocks: locks, expectedAspectRatio: aspectRatio, frameManifest };
+    const generatedFrameNumbers = frameManifest.filter((frame) => frame.assetStrategy !== "REUSE_EXISTING" && frame.assetStrategy !== "NO_NEW_ASSET").map((frame) => frame.displayNumber);
+    const composition = character ? resolveCharacterCompositionLock(character) : undefined;
+    const compositionLock = composition ? ` Keep the teacher in the locked ${composition.subjectAnchor} position within normalized box x=${composition.subjectBox.x}, y=${composition.subjectBox.y}, width=${composition.subjectBox.width}, height=${composition.subjectBox.height}; preserve ${composition.headroom} and leave the safe zone x=${composition.safeZone.x}, y=${composition.safeZone.y}, width=${composition.safeZone.width}, height=${composition.safeZone.height} for explanatory assets and subtitles.` : " Keep the approved composition and subtitle safe zone unchanged.";
+    const frameInstructions = frameManifest.map((frame) => frame.assetStrategy === "REUSE_EXISTING" ? `Frame ${frame.displayNumber} (${frame.role}, REUSE_EXISTING): ${frame.delta}` : `Frame ${frame.displayNumber} (${frame.role}, save as ${frame.expectedFilename}): ${frame.delta} Attach references in this order: ${frame.referenceInstructions.join(" ")}`);
+    const promptText = `Create scene ${sceneId} for a ${aspectRatio} YouTube explainer as exactly ${generatedFrameNumbers.length} new separate image files. ${locks.join(" ")}${compositionLock} Use the first generated frame as the base reference and use each preceding approved frame for continuity. Do not create a contact sheet, do not combine frames, and do not add text, logos, or watermarks unless the storyboard explicitly requires them. ${frameInstructions.join(" ")} For REUSE_EXISTING frames, do not generate a file; reuse the named approved frame in the edit. Continue without asking for confirmation between frames.`;
+    return { sceneId, promptVersionId: `scene-prompt-${sceneId}-v1`, targetTool: "GG Lab", compilationMode: "scene_prompt", promptText, frameNumbers: frameManifest.map((frame) => frame.displayNumber), generatedFrameNumbers, referenceInstructions: ["Attach the approved character master reference when the teacher appears.", "Use the previous generated frame in this scene as the internal reference for continuity."], continuityLocks: locks, prohibitedChanges: [...new Set(frameManifest.flatMap((frame) => frame.prohibitedChanges))], expectedAspectRatio: aspectRatio, frameManifest };
   });
 }
 

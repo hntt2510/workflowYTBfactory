@@ -235,7 +235,7 @@ import { runPromptPreparation, PromptPreparationError } from "./promptPreparatio
 import { runShotPlan, ShotPlanError } from "./shotPlanService";
 import { createManualCharacterPromptPack, retryManualCharacterReference } from "./characterService";
 import { runAssetConcepts, AssetConceptError } from "./assetConceptService";
-import { acquireImageAsset, AssetAcquisitionError, importLocalImageAsset, planAssetAcquisition, type AcquiredImageAsset, type ImageReferenceInput } from "./assetAcquisitionService";
+import { acquireImageAsset, AssetAcquisitionError, importLocalImageAsset, mapNumericAssetFilename, planAssetAcquisition, type AcquiredImageAsset, type ImageReferenceInput } from "./assetAcquisitionService";
 import { loadNineRouterImageCertification, runNineRouterImageCertification } from "./nineRouterImageCertificationService";
 import { buildResearchSearchQuery, ResearchSourceSearchError, runResearchSourceSearch } from "./researchSourceSearchService";
 import { getPreviewFileSha256, PreviewRenderError, renderPreview } from "./previewRenderService";
@@ -2264,6 +2264,7 @@ ipcMain.handle("approve-character-version", (_event, input: unknown) => {
     || !reference.sha256
     || !reference.mimeType
     || !existsSync(resolveWorkspaceArtifactPath(reference.relativeFilePath))
+    || createHash("sha256").update(readFileSync(resolveWorkspaceArtifactPath(reference.relativeFilePath))).digest("hex") !== reference.sha256
   ))) throw new Error("Every character reference must include validated image metadata before approval.");
   const now = new Date().toISOString();
   const nextProfile: ChannelProfile = {
@@ -4145,6 +4146,7 @@ ipcMain.handle("approve-asset-review", (_event, input: unknown) => {
   if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Asset Review exists.");
   const output = assetReviewOutputSchema.parse(artifact.payloadJson);
   if (output.assets.some((item) => item.reviewStatus !== "approved" || !item.assignedShotId)) throw new Error("Approve and explicitly assign every generated asset before completing Asset Review.");
+  if (output.assets.some((item) => !existsSync(resolveWorkspaceArtifactPath(item.asset.relativeFilePath)))) throw new Error("Every approved asset must still exist in the workspace.");
   const shotIds = new Set(project.shots.map((shot) => shot.id));
   if (output.assets.some((item) => !shotIds.has(item.assignedShotId!))) throw new Error("Assigned asset shot does not exist in the current project.");
   const assignedShotIds = output.assets.map((item) => item.assignedShotId!);
@@ -4222,12 +4224,23 @@ ipcMain.handle("select-manual-asset-upload", async (_event, input: unknown) => {
   const occupied = new Set(currentItems.filter((item) => item.reviewStatus !== "rejected").map((item) => item.assignedShotId ?? item.asset.shotId));
   if (request.shotId) occupied.delete(request.shotId);
   const targetShots = project.shots.filter((shot) => shot.visualMode !== "reuse");
+  const frameToShotId = new Map<string, string>();
+  const promptArtifact = currentApprovedArtifacts(project, "prompt-preparation").find((item) => item.payloadJson);
+  if (promptArtifact?.payloadJson) {
+    const promptOutput = promptPreparationOutputSchema.parse(promptArtifact.payloadJson);
+    for (const scenePrompt of promptOutput.scenePrompts ?? []) {
+      for (const frame of scenePrompt.frameManifest) {
+        if (frame.assetStrategy === "REUSE_EXISTING") continue;
+        frameToShotId.set(frame.displayNumber, frame.shotId);
+      }
+    }
+  }
   const imported: AcquiredImageAsset[] = [];
   const seenHashes = new Set(currentItems.map((item) => item.asset.sha256));
   for (let index = 0; index < sourcePaths.length; index += 1) {
     const sourcePath = sourcePaths[index]!;
-    const numericName = basename(sourcePath).match(/(?:^|[^0-9])(\d{1,3})(?:[^0-9]|$)/)?.[1];
-    const numericShot = numericName ? targetShots[Number(numericName) - 1] : undefined;
+    const numericShotId = mapNumericAssetFilename({ sourcePath, targetShotIds: targetShots.map((shot) => shot.id), frameToShotId });
+    const numericShot = numericShotId ? targetShots.find((candidate) => candidate.id === numericShotId) : undefined;
     const shot = index === 0 && request.shotId
       ? project.shots.find((candidate) => candidate.id === request.shotId)
       : numericShot ?? targetShots.find((candidate) => !occupied.has(candidate.id) && !imported.some((asset) => asset.shotId === candidate.id));

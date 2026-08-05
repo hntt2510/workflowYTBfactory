@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { acquireImageAsset, importLocalImageAsset, planAssetAcquisition } from "./assetAcquisitionService";
+import { acquireImageAsset, importLocalImageAsset, mapNumericAssetFilename, planAssetAcquisition } from "./assetAcquisitionService";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+K3V3WQAAAABJRU5ErkJggg==", "base64");
 describe("asset acquisition", () => {
@@ -136,6 +136,12 @@ describe("asset acquisition", () => {
     expect(asset.relativeFilePath).toMatch(/^assets[\\/]uploads[\\/]/);
     expect(asset.relativeFilePath).not.toContain(sourceRoot);
     expect(existsSync(join(workspaceRoot, asset.relativeFilePath))).toBe(true);
+  });
+  it("maps numeric files through the scene frame manifest instead of counting REUSE slots", () => {
+    const frameToShotId = new Map([["001", "shot-1"], ["003", "shot-3"]]);
+    expect(mapNumericAssetFilename({ sourcePath: "001.png", targetShotIds: ["shot-1", "shot-3"], frameToShotId })).toBe("shot-1");
+    expect(mapNumericAssetFilename({ sourcePath: "003.png", targetShotIds: ["shot-1", "shot-3"], frameToShotId })).toBe("shot-3");
+    expect(mapNumericAssetFilename({ sourcePath: "teacher-final.png", targetShotIds: ["shot-1"] })).toBeUndefined();
   });
 });
 
