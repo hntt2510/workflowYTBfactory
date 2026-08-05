@@ -8,7 +8,7 @@ export function planFfmpegPreviewCommand(input: {
   outputPath: string;
   resolution: PreviewResolution;
   visualInputs: Array<{ filePath: string; startFrame: number; durationFrames: number; motion?: ShotMotionPlan | undefined }>;
-  audioInputs: Array<{ filePath: string; startFrame?: number }>;
+  audioInputs: Array<{ filePath: string; startFrame?: number; durationFrames?: number; kind?: "narration" | "music" | "ambient" | "sfx"; volume?: number; loop?: boolean }>;
   subtitleFilePath?: string;
   subtitlePreset?: SubtitlePreset;
 }): string[] {
@@ -24,20 +24,49 @@ export function planFfmpegPreviewCommand(input: {
   if (expectedStart !== totalFrames(input.timeline)) throw new Error("Visual inputs do not cover the approved timeline.");
   const args = [input.ffmpegPath ?? "ffmpeg", "-y"];
   for (const visual of visuals) args.push("-loop", "1", "-framerate", String(input.timeline.fps), "-t", String(visual.durationFrames / input.timeline.fps), "-i", visual.filePath);
-  for (const audio of input.audioInputs) args.push("-i", audio.filePath);
+  for (const audio of input.audioInputs) {
+    if (audio.loop) args.push("-stream_loop", "-1");
+    args.push("-i", audio.filePath);
+  }
   const videoFilters = visuals.map((visual, index) => `[${index}:v]${motionFilter(visual.motion, width, height, size, input.timeline.fps)}[v${index}]`).join(";");
   const videoConcat = visuals.map((_, index) => `[v${index}]`).join("") + `concat=n=${visuals.length}:v=1:a=0[v]`;
   const audioOffset = visuals.length;
+  const timelineDurationFrames = totalFrames(input.timeline);
   const audioFilters = input.audioInputs.map((audio, index) => {
     const delayMs = Math.max(0, Math.round((audio.startFrame ?? 0) * 1000 / input.timeline.fps));
-    return `[${audioOffset + index}:a]adelay=${delayMs}:all=1[a${index}]`;
+    const durationSeconds = Math.max(1 / input.timeline.fps, (audio.durationFrames ?? timelineDurationFrames) / input.timeline.fps);
+    const volume = Math.max(0, Math.min(2, audio.volume ?? 1));
+    return `[${audioOffset + index}:a]aresample=async=1,atrim=duration=${durationSeconds.toFixed(6)},asetpts=PTS-STARTPTS,volume=${volume.toFixed(3)},adelay=${delayMs}:all=1[a${index}]`;
   }).join(";");
-  const audioMix = input.audioInputs.map((_, index) => `[a${index}]`).join("") + `amix=inputs=${input.audioInputs.length}:duration=longest:dropout_transition=0[a]`;
+  const filterParts = [audioFilters];
+  const narrationLabels = input.audioInputs.flatMap((audio, index) => (audio.kind ?? "narration") === "narration" ? [`[a${index}]`] : []);
+  const bedLabels = input.audioInputs.flatMap((audio, index) => (audio.kind ?? "narration") === "music" || (audio.kind ?? "narration") === "ambient" ? [`[a${index}]`] : []);
+  const sfxLabels = input.audioInputs.flatMap((audio, index) => (audio.kind ?? "narration") === "sfx" ? [`[a${index}]`] : []);
+  const group = (labels: string[], name: string): string | undefined => {
+    if (!labels.length) return undefined;
+    if (labels.length === 1) {
+      filterParts.push(`${labels[0]}anull[${name}]`);
+    } else {
+      filterParts.push(`${labels.join("")}amix=inputs=${labels.length}:duration=longest:dropout_transition=0[${name}]`);
+    }
+    return `[${name}]`;
+  };
+  const narrationLabel = group(narrationLabels, "narration_mix");
+  const bedLabel = group(bedLabels, "bed_mix");
+  const sfxLabel = group(sfxLabels, "sfx_mix");
+  let finalBedLabel = bedLabel;
+  if (bedLabel && narrationLabel) {
+    filterParts.push(`${bedLabel}${narrationLabel}sidechaincompress=threshold=0.04:ratio=8:attack=20:release=300:makeup=1[ducked_bed]`);
+    finalBedLabel = "[ducked_bed]";
+  }
+  const mixedLabels = [narrationLabel, finalBedLabel, sfxLabel].filter((label): label is string => Boolean(label));
+  const audioMix = `${mixedLabels.join("")}amix=inputs=${mixedLabels.length}:duration=longest:dropout_transition=0[a]`;
+  filterParts.push(audioMix);
   const outputVideoLabel = input.subtitleFilePath ? "vs" : "v";
   const subtitleFilter = input.subtitleFilePath
     ? `[v]subtitles='${escapeSubtitlePath(input.subtitleFilePath)}':charenc=UTF-8:force_style='${subtitleStyle(input.subtitlePreset ?? "vox-clean")}'[vs]`
     : "";
-  const filters = [videoFilters, videoConcat, subtitleFilter, audioFilters, audioMix].filter(Boolean).join(";");
+  const filters = [videoFilters, videoConcat, subtitleFilter, ...filterParts].filter(Boolean).join(";");
   return [...args, "-filter_complex", filters, "-map", `[${outputVideoLabel}]`, "-map", "[a]", "-shortest", "-c:v", "libx264", "-c:a", "aac", "-movflags", "+faststart", input.outputPath];
 }
 

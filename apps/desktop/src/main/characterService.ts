@@ -59,6 +59,54 @@ function toReference(view: CharacterReferenceView, asset: AcquiredImageAsset): C
   };
 }
 
+export function createManualCharacterPromptPack(input: {
+  profileId: string;
+  version: number;
+  name: string;
+  persona: CharacterPersona;
+  invariantTraits: string[];
+  prohibitedChanges: string[];
+  composition?: CharacterVersion["composition"];
+  viewCount?: number;
+}): CharacterVersion {
+  const now = new Date().toISOString();
+  const views = characterReferenceViewsForCount(input.viewCount ?? 5);
+  return {
+    id: `character-${input.profileId}-v${input.version}`,
+    version: input.version,
+    status: "needs_review",
+    name: input.name,
+    persona: input.persona,
+    invariantTraits: input.invariantTraits,
+    prohibitedChanges: input.prohibitedChanges,
+    composition: resolveCharacterCompositionLock(input),
+    references: views.map((view) => ({
+      id: `character-reference-${view}`,
+      view,
+      status: "needs_review" as const,
+      promptText: characterPrompt({ ...input, view })
+    })),
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+export function retryManualCharacterReference(input: { version: CharacterVersion; view: CharacterReferenceView }): CharacterVersion {
+  const reference = input.version.references.find((candidate) => candidate.view === input.view);
+  if (!reference) throw new CharacterGenerationError("invalid_input", `Character reference view was not found: ${input.view}.`);
+  const promptText = characterPrompt({ ...input.version, view: input.view });
+  return {
+    ...input.version,
+    status: "needs_review",
+    references: input.version.references.map((candidate) => {
+      if (candidate.view !== input.view) return candidate;
+      const { relativeFilePath: _relativeFilePath, sha256: _sha256, mimeType: _mimeType, width: _width, height: _height, ...withoutAsset } = candidate;
+      return { ...withoutAsset, status: "needs_review" as const, promptText };
+    }),
+    updatedAt: new Date().toISOString()
+  };
+}
+
 export async function generateCharacterVersion(input: {
   profileId: string;
   version: number;

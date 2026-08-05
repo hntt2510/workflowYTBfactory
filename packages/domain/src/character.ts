@@ -42,6 +42,7 @@ export interface CharacterReference {
   id: string;
   view: CharacterReferenceView;
   status: "needs_review" | "approved" | "rejected";
+  promptText?: string;
   relativeFilePath?: string;
   sha256?: string;
   mimeType?: "image/png" | "image/jpeg" | "image/webp";
@@ -77,7 +78,10 @@ export function resolveCharacterCompositionLock(version: { composition?: Charact
 }
 
 export function characterVersionIsApproved(version: CharacterVersion | undefined): boolean {
-  return Boolean(version && version.status === "approved" && version.references.length >= 4 && version.references.every((reference) => reference.status === "approved"));
+  return Boolean(version && version.status === "approved" && version.references.length >= 4 && version.references.every((reference) => (
+    reference.status === "approved"
+    && Boolean(reference.relativeFilePath && reference.sha256 && reference.mimeType)
+  )));
 }
 
 export function characterReferenceViewsForCount(count = 5): CharacterReferenceView[] {

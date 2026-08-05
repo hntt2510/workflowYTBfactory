@@ -1166,8 +1166,9 @@ function NewProjectWizard(props: {
     { label: "FFmpeg", ready: props.bootstrap.runtime.ffmpegAvailable, action: "settings" as RouteId, help: "Set FFMPEG_PATH or add ffmpeg to PATH before video download/preview processing." },
     { label: "Pexels stock", ready: props.stockPresence.hasCredential, action: "providers" as RouteId, help: "Save a Pexels API key for stock image/video lookup." }
   ];
-  const setupReady = setupChecks.every((check) => check.ready);
-  const missingSetupMessage = setupChecks.filter((check) => !check.ready).map((check) => `${check.label}: ${check.help}`).join(" ");
+  // Provider capability gates belong to individual production stages, not project creation.
+  const setupReady = Boolean(targetLanguage.trim());
+  const missingSetupMessage = setupReady ? "" : "Choose a target language before creating the project.";
 
   async function routeTopic() {
     setMessage("");
@@ -1555,7 +1556,7 @@ function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRefresh: (
     try {
       await factoryClient.generateCharacterPack({ profileId: selected.id, name: characterName.trim(), persona: { ...persona, props: persona.props.split(",").map((item) => item.trim()).filter(Boolean), gestures: persona.gestures.split(",").map((item) => item.trim()).filter(Boolean) }, invariantTraits: invariantTraits.split("\n").map((item) => item.trim()).filter(Boolean), prohibitedChanges: prohibitedChanges.split("\n").map((item) => item.trim()).filter(Boolean), viewCount });
       await props.onRefresh();
-      setMessage("Character Pack generated. Review each view, then approve the version.");
+      setMessage("Da tao prompt pack local. Copy tung prompt sang GG Lab, upload du anh roi approve.");
     } catch (error) {
       setMessage(`Character generation failed: ${safeRendererError(error)}`);
     } finally {
@@ -1578,9 +1579,23 @@ function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRefresh: (
     try {
       await factoryClient.retryCharacterReference({ profileId: selected.id, versionId, view });
       await props.onRefresh();
-      setMessage(`Retried ${view.replaceAll("_", " ")} only.`);
+      setMessage(`Da tao lai prompt cho view ${view.replaceAll("_", " ")}. Hay tao va upload anh moi.`);
     } catch (error) {
       setMessage(`Character view retry failed: ${safeRendererError(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function upload(versionId: string, view: CharacterReferenceView): Promise<void> {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await factoryClient.uploadCharacterReference({ profileId: selected.id, versionId, view });
+      await props.onRefresh();
+      setMessage(`Da upload anh cho view ${view.replaceAll("_", " ")}.`);
+    } catch (error) {
+      setMessage(`Character upload failed: ${safeRendererError(error)}`);
     } finally {
       setBusy(false);
     }
@@ -1611,7 +1626,7 @@ function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRefresh: (
         description="Configure the teacher identity once per channel. New character-first projects reuse the active approved version."
         actions={
           <>
-            <button className="button primary" type="button" disabled={busy || !selected} onClick={() => void generateCharacterPack()}>Generate Identity Pack</button>
+            <button className="button primary" type="button" disabled={busy || !selected} onClick={() => void generateCharacterPack()}>Create GG Lab Prompt Pack</button>
             <DisabledAction reason="Profile import/export is not implemented.">Import JSON</DisabledAction>
           </>
         }
@@ -1642,7 +1657,7 @@ function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRefresh: (
           </DataTable>
         </SectionCard>
         {selected ? (
-          <SectionCard title="Teacher character setup" description="Identity pack generation creates 4-6 views; retry affects only the selected view.">
+          <SectionCard title="Teacher character setup" description="Tao prompt local, tu gen anh trong GG Lab, upload tung view roi duyet ca pack.">
             <div className="tabs-static">
               {["General", "Audience", "Content", "Tone", "Visuals", "Voice", "Hashtags", "Avoid Rules", "Router Signals"].map((tab) => <span key={tab}>{tab}</span>)}
             </div>
@@ -1668,10 +1683,22 @@ function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRefresh: (
               <FormField label="Invariant traits" htmlFor="character-invariants"><textarea id="character-invariants" value={invariantTraits} onChange={(event) => setInvariantTraits(event.target.value)} /></FormField>
               <FormField label="Prohibited changes" htmlFor="character-prohibited"><textarea id="character-prohibited" value={prohibitedChanges} onChange={(event) => setProhibitedChanges(event.target.value)} /></FormField>
             </div>
-            {versions.map((version) => <SectionCard key={version.id} title={`${version.name} v${version.version}`} description={`${characterVersionIsApproved(version) ? "approved" : version.status.replaceAll("_", " ")}${selected.activeCharacterVersionId === version.id ? " / active" : ""}`}>
-              <div className="profile-grid">{version.references.map((reference) => { const key = `${version.id}:${reference.view}`; return <div className="profile-card" key={reference.id}><strong>{reference.view.replaceAll("_", " ")}</strong><small>{reference.status.replaceAll("_", " ")}</small>{previewUrls[key] ? <img className="character-preview" src={previewUrls[key]} alt={`${version.name} ${reference.view}`} /> : <button className="button compact" type="button" onClick={() => void preview(version.id, reference.view)}>Preview</button>}<div className="button-row"><button className="button secondary compact" type="button" disabled={busy} onClick={() => void retry(version.id, reference.view)}>Retry view</button></div></div>; })}</div>
-              {!characterVersionIsApproved(version) ? <button className="button primary compact" type="button" disabled={busy} onClick={() => void approve(version.id)}>Approve / Lock Version</button> : <StatusBadge tone="success">Approved and active</StatusBadge>}
-            </SectionCard>)}
+            {versions.map((version) => {
+              const uploadReady = version.references.length >= 4 && version.references.every((reference) => Boolean(reference.relativeFilePath && reference.sha256));
+              return <SectionCard key={version.id} title={`${version.name} v${version.version}`} description={`${characterVersionIsApproved(version) ? "approved" : version.status.replaceAll("_", " ")}${selected.activeCharacterVersionId === version.id ? " / active" : ""}`}>
+                <div className="profile-grid">{version.references.map((reference) => {
+                  const key = `${version.id}:${reference.view}`;
+                  return <div className="profile-card" key={reference.id}>
+                    <strong>{reference.view.replaceAll("_", " ")}</strong>
+                    <small>{reference.relativeFilePath ? "image uploaded / review pending" : "prompt ready / image missing"}</small>
+                    {previewUrls[key] ? <img className="character-preview" src={previewUrls[key]} alt={`${version.name} ${reference.view}`} /> : reference.relativeFilePath ? <button className="button compact" type="button" onClick={() => void preview(version.id, reference.view)}>Preview</button> : <p className="muted">No image uploaded.</p>}
+                    {reference.promptText ? <><textarea className="prompt-preview" readOnly value={reference.promptText} aria-label={`Prompt ${reference.view}`} /><button className="button compact" type="button" onClick={() => void navigator.clipboard.writeText(reference.promptText ?? "")}>Copy prompt</button></> : null}
+                    <div className="button-row"><button className="button primary compact" type="button" disabled={busy} onClick={() => void upload(version.id, reference.view)}>Upload / replace</button><button className="button secondary compact" type="button" disabled={busy} onClick={() => void retry(version.id, reference.view)}>Regenerate prompt</button></div>
+                  </div>;
+                })}</div>
+                {!characterVersionIsApproved(version) ? <><button className="button primary compact" type="button" disabled={busy || !uploadReady} onClick={() => void approve(version.id)}>Approve / Lock Version</button>{!uploadReady ? <small className="muted">Upload every identity view before approval.</small> : null}</> : <StatusBadge tone="success">Approved and active</StatusBadge>}
+              </SectionCard>;
+            })}
             {message ? <p className={message.includes("failed") || message.includes("unavailable") ? "error-message" : "safe-message"}>{message}</p> : null}
           </SectionCard>
         ) : null}
@@ -2780,9 +2807,22 @@ function VisualsScreen(props: { project: FactoryProject; textCertification: Text
     catch (error) { setMessage(safeRendererError(error)); }
     finally { setRunning(false); }
   }
+
   async function copyScenePrompt(promptText: string) {
     try { await navigator.clipboard.writeText(promptText); setMessage("Đã copy prompt cho cảnh."); }
     catch { setMessage("Không thể copy tự động. Hãy chọn và copy prompt thủ công."); }
+  }
+  async function importDroppedFiles(event: React.DragEvent<HTMLDivElement>): Promise<void> {
+    event.preventDefault();
+    if (running || !latestPrompt || latestPrompt.status !== "approved") return;
+    const sourcePaths = Array.from(event.dataTransfer.files)
+      .map((file) => factoryClient.getDroppedFilePath(file))
+      .filter(Boolean);
+    if (!sourcePaths.length) {
+      setMessage("Không đọc được đường dẫn file được thả. Hãy dùng nút tải ảnh.");
+      return;
+    }
+    await perform(() => factoryClient.selectManualAssetUpload({ projectId: props.project.id, sourcePaths }), "Đã import ảnh. Tiếp tục approve từng frame.");
   }
   return <>
     <PageHeader title={characterFirst ? "Director & Assets" : "Visual Sources"} description={characterFirst ? "Chốt storyboard, copy prompt theo cảnh, rồi tải ảnh bạn đã tạo từ GG Lab lên." : "Route approved shots to visual modes before preparing prompts or acquiring assets."} actions={canRetryStage(eligibility) ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runVisualRouting({ projectId: props.project.id }), eligibility.status === "failed" || eligibility.status === "needs_attention" ? "Visual Routing retry is ready for review." : "Visual Routing is ready for review.")} disabled={running}>{eligibility.status === "failed" || eligibility.status === "needs_attention" ? "Retry Visual Routing" : "Run Visual Routing"}</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Visual Routing is not runnable."}>Run Visual Routing</DisabledAction>} />
@@ -2805,8 +2845,51 @@ function VisualsScreen(props: { project: FactoryProject; textCertification: Text
     {characterFirst ? <>
       <SectionCard title="Asset Intake" description="Tạo ảnh thủ công trong GG Lab, sau đó kéo thả hoặc chọn nhiều file tại đây. File 001, 002... sẽ tự map theo thứ tự storyboard.">
         <div className="intake-summary"><div><strong>{missingCount}</strong><span>frame còn thiếu</span></div><div><strong>{requiredShots.length - missingCount}</strong><span>frame đã map/duyệt</span></div><div><strong>{requiredShots.length}</strong><span>frame cần có</span></div></div>
-        <div className="upload-dropzone"><p><strong>Upload nhiều ảnh một lần</strong></p><p>PNG, JPG hoặc WebP · tự kiểm tra MIME, kích thước, hash và mapping.</p><button className="button primary" type="button" disabled={running || !latestPrompt || latestPrompt.status !== "approved"} onClick={() => void perform(() => factoryClient.selectManualAssetUpload({ projectId: props.project.id }), "Đã import ảnh. Tiếp tục approve từng frame.")}>Tải ảnh GG Lab lên</button>{!latestPrompt || latestPrompt.status !== "approved" ? <small>Approve Scene Prompt trước khi upload.</small> : null}</div>
-        {latestReview ? <div className="asset-intake-grid">{reviewItems.map((item) => <article className="asset-slot" key={item.asset.sha256}><AssetPreviewImage projectId={props.project.id} artifactId={latestReview.id} assetSha256={item.asset.sha256} /><div><strong>{item.asset.shotId}</strong><span>{item.asset.width}×{item.asset.height} · {item.reviewStatus === "approved" ? "Đã duyệt" : item.reviewStatus === "rejected" ? "Cần thay" : "Chờ review"}</span></div>{latestReview.status === "needs_review" ? <div className="button-row"><button className="button compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: latestReview.id, assetSha256: item.asset.sha256, action: "approve" }), "Frame đã được duyệt.")}>Approve</button><button className="button danger compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: latestReview.id, assetSha256: item.asset.sha256, action: "reject" }), "Frame cần thay thế.")}>Replace</button></div> : null}</article>)}</div> : <EmptyState title="Chưa có ảnh upload" detail="Tạo ảnh theo prompt studio rồi upload toàn bộ ở đây." />}
+        <div className="upload-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => void importDroppedFiles(event)}><p><strong>Upload nhiều ảnh một lần</strong></p><p>PNG, JPG hoặc WebP · tự kiểm tra MIME, kích thước, hash và mapping.</p><button className="button primary" type="button" disabled={running || !latestPrompt || latestPrompt.status !== "approved"} onClick={() => void perform(() => factoryClient.selectManualAssetUpload({ projectId: props.project.id }), "Đã import ảnh. Tiếp tục approve từng frame.")}>Tải ảnh GG Lab lên</button>{!latestPrompt || latestPrompt.status !== "approved" ? <small>Approve Scene Prompt trước khi upload.</small> : <small>Kéo thả nhiều ảnh vào vùng này để tự map theo storyboard.</small>}</div>
+        {latestReview ? (
+          <div className="asset-intake-grid">
+            {reviewItems.map((item) => (
+              <article className="asset-slot" key={item.asset.sha256}>
+                <AssetPreviewImage projectId={props.project.id} artifactId={latestReview.id} assetSha256={item.asset.sha256} />
+                <div>
+                  <strong>{item.assignedShotId ?? item.asset.shotId}</strong>
+                  <span>{item.asset.width}×{item.asset.height} · {item.reviewStatus === "approved" ? "Đã duyệt" : item.reviewStatus === "rejected" ? "Cần thay" : "Chờ review"}</span>
+                </div>
+                {latestReview.status === "needs_review" ? (
+                  <>
+                    <div className="button-row">
+                      <button className="button compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: latestReview.id, assetSha256: item.asset.sha256, action: "approve" }), "Frame đã được duyệt.")}>Approve</button>
+                      <button className="button danger compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: latestReview.id, assetSha256: item.asset.sha256, action: "reject" }), "Frame cần thay thế.")}>Replace</button>
+                    </div>
+                    {item.reviewStatus === "approved" ? (
+                      <select
+                        aria-label={`Assign ${item.asset.sha256} to storyboard frame`}
+                        value={item.assignedShotId ?? ""}
+                        disabled={running}
+                        onChange={(event) => {
+                          const shotId = event.target.value;
+                          void perform(
+                            () => factoryClient.reviseAssetReview({
+                              projectId: props.project.id,
+                              artifactId: latestReview.id,
+                              assetSha256: item.asset.sha256,
+                              action: shotId ? "assign" : "unassign",
+                              ...(shotId ? { shotId } : {})
+                            }),
+                            "Frame mapping updated."
+                          );
+                        }}
+                      >
+                        <option value="">Unassign frame</option>
+                        {requiredShots.map((shot) => <option key={shot.id} value={shot.id}>{shot.id}</option>)}
+                      </select>
+                    ) : null}
+                  </>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        ) : <EmptyState title="Chưa có ảnh upload" detail="Tạo ảnh theo prompt studio rồi upload toàn bộ ở đây." />}
       </SectionCard>
     </> : <>
       <StageStatusHeader stageName="Asset Acquisition" stageNumber={18} eligibility={assetEligibility} dependencies={["Approved Prompt Preparation", "Verified image model"]} purpose="Legacy/experimental provider image generation. It is not part of the default character-first flow." />
@@ -2844,11 +2927,18 @@ function TimelineScreen(props: { project: FactoryProject; setSelectedProject: (p
   const refresh = async () => { const [timeline, previews] = await Promise.all([factoryClient.listTimelineAssemblyArtifacts({ projectId: props.project.id }), factoryClient.listPreviewRenderArtifacts({ projectId: props.project.id })]); setArtifacts(timeline); setPreviewArtifacts(previews); const currentPreview = previews.find((artifact) => artifact.status === "needs_review") ?? previews.find((artifact) => artifact.status === "approved"); setSubtitlePreset(currentPreview?.payloadJson.subtitlePreset ?? "vox-clean"); };
   useEffect(() => { void refresh().catch(() => setArtifacts([])); }, [props.project.id]);
   async function perform(action: () => Promise<FactoryProject>, success: string) { setRunning(true); try { props.setSelectedProject(await action()); await refresh(); setMessage(success); } catch (error) { setMessage(safeRendererError(error)); } finally { setRunning(false); } }
+  async function selectAudio(kind: "music" | "ambient" | "sfx"): Promise<void> {
+    await perform(() => factoryClient.selectProjectAudio({ projectId: props.project.id, kind }), `${kind} audio saved. Rebuild the timeline to include it.`);
+  }
   const totalFrames = Math.max(...props.project.timeline.items.map((item) => item.startFrame + item.durationFrames), 1);
   return (
     <>
       <PageHeader title="Timeline" description="Assemble approved visuals, voice, and subtitles into an integer-frame review timeline." actions={canRetryStage(eligibility) ? <button className="button primary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runTimelineAssembly({ projectId: props.project.id }), eligibility.status === "failed" || eligibility.status === "needs_attention" ? "Timeline Assembly retry is ready for review." : "Timeline Assembly is ready for review.")}>{eligibility.status === "failed" || eligibility.status === "needs_attention" ? "Retry Timeline Assembly" : "Assemble timeline"}</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Timeline Assembly is not runnable."}>Assemble timeline</DisabledAction>} />
       <StageStatusHeader stageName="Timeline Assembly" stageNumber={22} eligibility={eligibility} dependencies={["Approved Asset Review", "Approved Voice", "Approved Subtitles"]} purpose="Create a reviewable timeline only from approved media; it does not render or export." />
+      <SectionCard title="Audio tracks" description="Optional music, ambience, and SFX are copied into the workspace. Music and ambience loop under narration at reduced volume; SFX stays a separate CapCut audio item.">
+        <div className="button-row"><button className="button secondary" type="button" disabled={running} onClick={() => void selectAudio("music")}>{props.project.setup.musicPath ? "Replace music" : "Add music"}</button><button className="button secondary" type="button" disabled={running} onClick={() => void selectAudio("ambient")}>{props.project.setup.ambientPath ? "Replace ambience" : "Add ambience"}</button><button className="button secondary" type="button" disabled={running} onClick={() => void selectAudio("sfx")}>{props.project.setup.sfxPath ? "Replace SFX" : "Add SFX"}</button></div>
+        <p className="muted">Music: {props.project.setup.musicPath ?? "not supplied"} · Ambience: {props.project.setup.ambientPath ?? "not supplied"} · SFX: {props.project.setup.sfxPath ?? "not supplied"}</p>
+      </SectionCard>
 <SectionCard title="Timeline Assembly review">{artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : artifact.status === "rejected" ? "danger" : "warning"}>{artifact.status.replaceAll("_", " ")}</StatusBadge><p>{artifact.payloadJson.items.length} media items at {artifact.payloadJson.fps} fps</p>{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" type="button" disabled={running || !eligibility.approvable} onClick={() => void perform(() => factoryClient.approveTimelineAssembly({ projectId: props.project.id }), "Timeline Assembly approved.")}>Approve timeline</button><button className="button danger compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.rejectTimelineAssembly({ projectId: props.project.id }), "Timeline Assembly rejected.")}>Reject timeline</button></div> : null}</div>)}{message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</SectionCard>
       <StageStatusHeader stageName="Preview Render" stageNumber={23} eligibility={previewEligibility} dependencies={["Approved Timeline Assembly"]} purpose="Render real approved visual and narration media with FFmpeg, then review the validated local preview before QA." />
       <SectionCard title="Subtitle preset" description="Important Vietnamese text stays in the local UTF-8 compositing layer. Choose one global subtitle style before rendering the preview."><FormField label="Subtitle preset" htmlFor="subtitle-preset"><select id="subtitle-preset" value={subtitlePreset} onChange={(event) => setSubtitlePreset(event.target.value as SubtitlePreset)}><option value="vox-clean">VOX Clean</option><option value="minimal">Minimal</option><option value="high-contrast">High Contrast</option></select></FormField></SectionCard>

@@ -7,6 +7,7 @@ export type WorkflowMode = "guided" | "semi_automatic" | "full_automatic";
 export type ProductionInputMode = "topic" | "existing_script" | "reference";
 export type VisualWorkflowMode = "legacy" | "character_first";
 export type SubtitlePreset = "vox-clean" | "minimal" | "high-contrast";
+export type ProjectAudioKind = "music" | "ambient" | "sfx";
 export type ProductionStatus =
   | "draft"
   | "preparing"
@@ -49,6 +50,9 @@ export interface ProjectSetup {
   aspectRatio?: "16:9" | "9:16" | "1:1";
   visualStyle?: "vox-documentary";
   voiceId?: string;
+  musicPath?: string;
+  ambientPath?: string;
+  sfxPath?: string;
   outputResolution?: "1080p" | "720p";
   sourceScript?: string;
   referenceUrl?: string;
@@ -343,7 +347,7 @@ export interface StageEligibility {
 
 export interface TimelineItem {
   id: string;
-  track: "primary_visual" | "overlay_visual" | "narration" | "music" | "sfx" | "subtitles" | "text" | "markers";
+  track: "primary_visual" | "overlay_visual" | "narration" | "music" | "ambience" | "sfx" | "subtitles" | "text" | "markers";
   sourceId: string;
   startFrame: number;
   durationFrames: number;

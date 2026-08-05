@@ -21,6 +21,7 @@ describe("asset concepts", () => {
     expect(validateAssetConcepts([concept("asset-1")], new Set(["shot-1"]))).toHaveLength(1);
     expect(() => validateAssetConcepts([concept("asset-1")], new Set(["shot-2"]))).toThrow(/unknown shot/);
     expect(() => validateAssetConcepts([concept("asset-1"), concept("asset-1")], new Set(["shot-1"]))).toThrow(/unique/);
+    expect(() => validateAssetConcepts([concept("asset-1"), concept("asset-2")], new Set(["shot-1", "shot-2"]))).toThrow(/one-to-one/);
   });
 
   it("rejects concepts without semantic content", () => {

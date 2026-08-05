@@ -22,7 +22,7 @@ export async function renderPreview(input: {
   outputPath: string;
   resolution: PreviewResolution;
   visualInputs: Array<{ filePath: string; startFrame: number; durationFrames: number; motion?: ShotMotionPlan | undefined }>;
-  audioInputs: Array<{ filePath: string }>;
+  audioInputs: Array<{ filePath: string; startFrame?: number; durationFrames?: number; kind?: "narration" | "music" | "ambient" | "sfx"; volume?: number; loop?: boolean }>;
   subtitleFilePath?: string;
   subtitlePreset?: SubtitlePreset;
   ffmpegPath?: string;
@@ -46,8 +46,8 @@ export async function renderPreview(input: {
           : input.resolution === "720p-horizontal" ? [1280, 720]
             : input.resolution === "720p-vertical" ? [720, 1280]
               : [720, 720];
-    const narrationEndFrame = input.timeline.items.filter((item) => item.track === "narration").reduce((end, item) => Math.max(end, item.startFrame + item.durationFrames), 0);
-    const expectedDuration = narrationEndFrame / input.timeline.fps;
+    const outputEndFrame = input.timeline.items.filter((item) => item.track !== "markers").reduce((end, item) => Math.max(end, item.startFrame + item.durationFrames), 0);
+    const expectedDuration = outputEndFrame / input.timeline.fps;
     if (!video?.width || !video.height || video.width !== expectedSize[0] || video.height !== expectedSize[1] || !audio || !Number.isFinite(fps) || Math.abs(fps - input.timeline.fps) > 0.01 || !Number.isFinite(duration) || duration <= 0 || !expectedDuration || Math.abs(duration - expectedDuration) > 0.5) throw new Error("invalid media");
     return { outputPath: input.outputPath, durationSeconds: duration, width: video.width, height: video.height, sha256: await getPreviewFileSha256(input.outputPath) };
   } catch { throw new PreviewRenderError("invalid_preview", "Rendered preview failed FFprobe validation."); }

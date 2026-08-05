@@ -37,6 +37,7 @@ const characterReferenceSchema = z.object({
   id: idSchema,
   view: characterReferenceViewSchema,
   status: z.enum(["needs_review", "approved", "rejected"]),
+  promptText: z.string().min(1).max(20000).optional(),
   relativeFilePath: safePathSchema.optional(),
   sha256: z.string().length(64).optional(),
   mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]).optional(),
@@ -78,6 +79,7 @@ export const characterPackRequestSchema = z.object({
 export const characterVersionRequestSchema = z.object({ profileId: idSchema, versionId: idSchema }).strict();
 export const characterReferenceRetryRequestSchema = characterVersionRequestSchema.extend({ view: characterReferenceViewSchema }).strict();
 export const characterPreviewRequestSchema = characterVersionRequestSchema.extend({ view: characterReferenceViewSchema }).strict();
+export const characterReferenceUploadRequestSchema = characterVersionRequestSchema.extend({ view: characterReferenceViewSchema }).strict();
 const motionEffectSchema = z.enum(["none", "slide_up", "slide_down", "pan_left", "pan_right", "zoom_in", "zoom_out", "pop", "dissolve"]);
 const motionPlanSchema = z.object({ effect: motionEffectSchema, intensity: z.enum(["subtle", "standard", "strong"]), rationale: z.string().min(1).max(1000), userOverride: z.boolean().optional() }).strict();
 
@@ -843,8 +845,7 @@ export const assetAcquisitionOutputSchema = z.object({ assets: z.array(acquiredI
 export const assetAcquisitionRequestSchema = z.object({ projectId: idSchema, sceneId: idSchema.optional() }).strict();
 export const assetAcquisitionArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: assetAcquisitionOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const assetAcquisitionArtifactsResponseSchema = z.array(assetAcquisitionArtifactResponseSchema);
-export const assetReviewItemSchema = z.object({ asset: acquiredImageAssetSchema, reviewStatus: z.enum(["needs_review", "approved", "rejected"]), assignedShotId: idSchema.optional() }).strict()
-  .refine((item) => item.assignedShotId === undefined || item.assignedShotId === item.asset.shotId, { message: "Assigned shot must match the reviewed asset shot." });
+export const assetReviewItemSchema = z.object({ asset: acquiredImageAssetSchema, reviewStatus: z.enum(["needs_review", "approved", "rejected"]), assignedShotId: idSchema.optional(), warnings: z.array(z.string().min(1).max(500)).max(10).optional() }).strict();
 export const assetReviewOutputSchema = z.object({ acquisitionArtifactId: idSchema, assets: z.array(assetReviewItemSchema).min(1).max(500) }).strict()
   .refine((output) => {
     const assignedShotIds = output.assets.flatMap((item) => item.assignedShotId ? [item.assignedShotId] : []);
@@ -854,7 +855,7 @@ export const assetReviewRequestSchema = z.object({ projectId: idSchema, sceneId:
 export const assetReviewArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: assetReviewOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const assetReviewArtifactsResponseSchema = z.array(assetReviewArtifactResponseSchema);
 export const reviseAssetReviewRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema, assetSha256: z.string().length(64), action: z.enum(["approve", "reject", "assign", "unassign"]), shotId: idSchema.optional() }).strict();
-export const manualAssetUploadRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema.optional(), shotId: idSchema.optional() }).strict();
+export const manualAssetUploadRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema.optional(), shotId: idSchema.optional(), sourcePaths: z.array(z.string().min(1).max(4000)).min(1).max(200).optional() }).strict();
 export const sceneReviewRevisionRequestSchema = z.discriminatedUnion("action", [
   z.object({ projectId: idSchema, artifactId: idSchema, action: z.literal("edit_prompt"), shotId: idSchema, positivePrompt: z.string().trim().min(1).max(10000), negativePrompt: z.string().trim().min(1).max(5000) }).strict(),
   z.object({ projectId: idSchema, artifactId: idSchema, action: z.literal("edit_direction"), shotId: idSchema, framing: z.string().trim().min(1).max(1000), cameraAngle: z.string().trim().min(1).max(1000), cameraMovement: z.string().trim().min(1).max(1000), subjectAction: z.string().trim().min(1).max(2000) }).strict(),
@@ -894,9 +895,11 @@ export const subtitlePreparationOutputSchema = z.object({ fps: z.number().int().
 export const subtitlePreparationRequestSchema = z.object({ projectId: idSchema }).strict();
 export const subtitlePreparationArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: subtitlePreparationOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const subtitlePreparationArtifactsResponseSchema = z.array(subtitlePreparationArtifactResponseSchema);
-export const timelineItemOutputSchema = z.object({ id: idSchema, track: z.enum(["primary_visual", "overlay_visual", "narration", "music", "sfx", "subtitles", "text", "markers"]), sourceId: z.string().min(1).max(1000), startFrame: z.number().int().nonnegative(), durationFrames: z.number().int().positive(), fps: z.number().int().positive().max(120), motion: motionPlanSchema.optional() }).strict();
+export const timelineItemOutputSchema = z.object({ id: idSchema, track: z.enum(["primary_visual", "overlay_visual", "narration", "music", "ambience", "sfx", "subtitles", "text", "markers"]), sourceId: z.string().min(1).max(1000), startFrame: z.number().int().nonnegative(), durationFrames: z.number().int().positive(), fps: z.number().int().positive().max(120), motion: motionPlanSchema.optional() }).strict();
 export const timelineAssemblyOutputSchema = z.object({ fps: z.number().int().positive().max(120), items: z.array(timelineItemOutputSchema).min(1).max(2000) }).strict();
 export const timelineAssemblyRequestSchema = z.object({ projectId: idSchema }).strict();
+export const projectAudioKindSchema = z.enum(["music", "ambient", "sfx"]);
+export const selectProjectAudioRequestSchema = z.object({ projectId: idSchema, kind: projectAudioKindSchema }).strict();
 export const timelineAssemblyArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: timelineAssemblyOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const timelineAssemblyArtifactsResponseSchema = z.array(timelineAssemblyArtifactResponseSchema);
 

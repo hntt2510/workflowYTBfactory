@@ -375,7 +375,7 @@ describe("ipc schemas", () => {
     expect(assetReviewOutputSchema.parse({ acquisitionArtifactId: "artifact-1", assets: [{ asset, reviewStatus: "needs_review" }] }).assets).toHaveLength(1);
     expect(reviseAssetReviewRequestSchema.parse({ projectId: "project-1", artifactId: "artifact-2", assetSha256: "d".repeat(64), action: "assign", shotId: "shot-1" }).action).toBe("assign");
     expect(() => assetReviewOutputSchema.parse({ acquisitionArtifactId: "artifact-1", assets: [{ asset: { ...asset, signedUrl: "https://example.com" }, reviewStatus: "needs_review" }] })).toThrow();
-    expect(() => assetReviewOutputSchema.parse({ acquisitionArtifactId: "artifact-1", assets: [{ asset, reviewStatus: "approved", assignedShotId: "shot-2" }] })).toThrow();
+    expect(assetReviewOutputSchema.parse({ acquisitionArtifactId: "artifact-1", assets: [{ asset, reviewStatus: "approved", assignedShotId: "shot-2" }] }).assets[0]?.assignedShotId).toBe("shot-2");
     expect(() => assetReviewOutputSchema.parse({ acquisitionArtifactId: "artifact-1", assets: [{ asset, reviewStatus: "approved", assignedShotId: "shot-1" }, { asset: { ...asset, sha256: "e".repeat(64) }, reviewStatus: "approved", assignedShotId: "shot-1" }] })).toThrow();
   });
 

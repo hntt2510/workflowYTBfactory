@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("longShortFactory", {
   bootstrap: () => ipcRenderer.invoke("bootstrap"),
@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("longShortFactory", {
   retryCharacterReference: (input) => ipcRenderer.invoke("retry-character-reference", input),
   approveCharacterVersion: (input) => ipcRenderer.invoke("approve-character-version", input),
   getCharacterPreviewUrl: (input) => ipcRenderer.invoke("get-character-preview-url", input),
+  uploadCharacterReference: (input) => ipcRenderer.invoke("upload-character-reference", input),
   runCharacterPreparation: (input) => ipcRenderer.invoke("run-character-preparation", input),
   approveCharacterPreparation: (input) => ipcRenderer.invoke("approve-character-preparation", input),
   startProductionPreparation: (input) => ipcRenderer.invoke("start-production-preparation", input),
@@ -138,6 +139,7 @@ contextBridge.exposeInMainWorld("longShortFactory", {
   listAssetReviewArtifacts: (input) => ipcRenderer.invoke("list-asset-review-artifacts", input),
   reviseAssetReview: (input) => ipcRenderer.invoke("revise-asset-review", input),
   selectManualAssetUpload: (input) => ipcRenderer.invoke("select-manual-asset-upload", input),
+  getDroppedFilePath: (file) => webUtils.getPathForFile(file),
   approveAssetReview: (input) => ipcRenderer.invoke("approve-asset-review", input),
   rejectAssetReview: (input) => ipcRenderer.invoke("reject-asset-review", input),
   runVoiceGeneration: (input) => ipcRenderer.invoke("run-voice-generation", input),
@@ -148,6 +150,7 @@ contextBridge.exposeInMainWorld("longShortFactory", {
   listSubtitlePreparationArtifacts: (input) => ipcRenderer.invoke("list-subtitle-preparation-artifacts", input),
   approveSubtitlePreparation: (input) => ipcRenderer.invoke("approve-subtitle-preparation", input),
   rejectSubtitlePreparation: (input) => ipcRenderer.invoke("reject-subtitle-preparation", input),
+  selectProjectAudio: (input) => ipcRenderer.invoke("select-project-audio", input),
   runTimelineAssembly: (input) => ipcRenderer.invoke("run-timeline-assembly", input),
   listTimelineAssemblyArtifacts: (input) => ipcRenderer.invoke("list-timeline-assembly-artifacts", input),
   approveTimelineAssembly: (input) => ipcRenderer.invoke("approve-timeline-assembly", input),

@@ -103,7 +103,14 @@ describe("semi-automatic reference chain", () => {
         persona: { role: "Teacher", ageRange: "30-45", appearance: "Clear", wardrobe: "Blazer", palette: "Navy", props: [], gestures: [], tone: "Calm" },
         invariantTraits: ["Same face"],
         prohibitedChanges: ["No identity changes"],
-        references: characterReferenceViewsForCount(4).map((view, index) => ({ id: `reference-${index}`, view, status: "approved" as const })),
+        references: characterReferenceViewsForCount(4).map((view, index) => ({
+          id: `reference-${index}`,
+          view,
+          status: "approved" as const,
+          relativeFilePath: `assets/character-${index}.png`,
+          sha256: "a".repeat(64),
+          mimeType: "image/png" as const
+        })),
         createdAt: "2026-01-01T00:00:00.000Z",
         updatedAt: "2026-01-01T00:00:00.000Z"
       }]
