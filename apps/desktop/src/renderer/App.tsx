@@ -1448,7 +1448,7 @@ function ProjectOverview(props: {
   return (
     <>
       <PageHeader
-        eyebrow="Project Diagnostic"
+        eyebrow="Project command center"
         title={project.setup.projectName}
         description="One place to see progress. The app runs safe stages automatically and opens a review screen only when you choose it."
         actions={<div className="button-row">{progress.percent === 100 ? <><button className="button secondary" type="button" onClick={() => props.setRoute("final-preview")}>Watch final video</button><button className="button secondary" type="button" onClick={() => props.setRoute("export")}>Open export</button></> : null}<button className="button primary" type="button" disabled={isRunning || (!actionStage && !nextStage && !nextChain)} onClick={() => void continueProduction()}>{isRunning ? "Production is running..." : actionLabel}</button></div>}
@@ -1466,7 +1466,7 @@ function ProjectOverview(props: {
         </SectionCard>
       ) : null}
       {props.semiAutomaticError ? <SectionCard title="Needs attention"><p className="error-message">{props.semiAutomaticError}</p></SectionCard> : null}
-      <SectionCard title="Progress summary" description="Only applicable required stages count toward progress. Optional outputs are shown separately.">
+      <SectionCard title="Project command center" description="Progress summary: only applicable required stages count toward progress. Optional outputs are shown separately.">
         <div className="route-result">
           <StatusBadge tone={stageTone(progress.currentStageId ? "current" : "complete")}>{progress.completedCount}/{progress.totalCount} required stages complete</StatusBadge>
           <strong>{progress.currentStageName ? `Current: ${progress.currentStageName}` : "Project complete"}</strong>
@@ -1510,7 +1510,10 @@ function ProjectOverview(props: {
         ]} />
       </SectionCard>
       <SectionCard title="Advanced controls" description="Internal stages remain available for debugging, not as the normal production path.">
-        <button className="button secondary compact" type="button" onClick={() => props.setRoute("advanced-pipeline")}>Open Advanced Pipeline Details</button>
+        <div className="button-row">
+          <button className="button secondary compact" type="button" onClick={() => props.setRoute("reference-intake")}>Reference Intake</button>
+          <button className="button secondary compact" type="button" onClick={() => props.setRoute("advanced-pipeline")}>Open Advanced Pipeline Details</button>
+        </div>
       </SectionCard>
     </>
   );
