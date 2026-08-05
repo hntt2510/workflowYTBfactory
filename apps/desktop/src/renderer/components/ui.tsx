@@ -105,3 +105,15 @@ export function DataTable(props: { children: ReactNode; label: string }) {
   );
 }
 
+export function SettingsList(props: { items: Array<[string, string]> }) {
+  return (
+    <dl className="settings-list">
+      {props.items.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}

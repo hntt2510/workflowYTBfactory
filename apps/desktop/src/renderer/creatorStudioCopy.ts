@@ -1,5 +1,11 @@
 import type { RouteId } from "./navigation";
 
+export const workflowModeOptions: Array<{ value: "guided" | "semi_automatic" | "full_automatic"; label: string; detail: string }> = [
+  { value: "guided", label: "Advanced guided", detail: "Expose every internal stage for debugging." },
+  { value: "semi_automatic", label: "Simple production", detail: "Runs valid internal stages automatically and pauses only at user checkpoints." },
+  { value: "full_automatic", label: "Full automatic", detail: "Not implemented yet; use Guided mode for manual execution." }
+];
+
 export const creatorPhaseDefinitions = [
   { id: "brief", label: "Brief", route: "project-overview" as RouteId, stageIds: ["project-setup"] },
   { id: "story", label: "Story", route: "script" as RouteId, stageIds: ["idea-lab", "research-source-intake", "claim-map", "outline", "script", "fact-review", "retention-review"] },

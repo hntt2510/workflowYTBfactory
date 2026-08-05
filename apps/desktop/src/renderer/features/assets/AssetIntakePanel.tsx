@@ -32,6 +32,10 @@ export function AssetIntakePanel(props: AssetIntakePanelProps) {
   const frameSpecForShot = (shotId: string) => props.latestPrompt?.payloadJson.scenePrompts
     ?.flatMap((scenePrompt) => scenePrompt.frameManifest)
     .find((frame) => frame.shotId === shotId);
+  const reuseSourceForShot = (shot: FactoryProject["shots"][number]) => shot.continuityRefs
+    .map((referenceId) => props.project.shots.find((candidate) => candidate.id === referenceId))
+    .map((sourceShot) => sourceShot ? { shot: sourceShot, item: props.itemForShot(sourceShot.id) } : undefined)
+    .find((source) => source?.item?.reviewStatus === "approved");
 
   useGSAP(() => {
     const items = gsap.utils.toArray<HTMLElement>(".asset-slot", root.current ?? undefined);
@@ -119,28 +123,14 @@ export function AssetIntakePanel(props: AssetIntakePanelProps) {
           </div>
           <div className="asset-intake-grid">
             {reusableShots.map((shot) => {
-              const assigned = props.reviewItems.find((item) => item.reviewStatus === "approved" && item.assignedShotId === shot.id);
+              const source = reuseSourceForShot(shot);
               return (
-                <article className={`asset-slot ${assigned ? "" : "asset-slot-missing"}`} key={`reuse-slot-${shot.id}`}>
-                  {assigned && latestReview ? <AssetPreviewImage projectId={props.project.id} artifactId={latestReview.id} assetSha256={assigned.asset.sha256} /> : <div className="asset-slot-preview asset-slot-placeholder">Chưa gán ảnh</div>}
+                <article className={`asset-slot ${source ? "" : "asset-slot-missing"}`} key={`reuse-slot-${shot.id}`}>
+                  {source?.item && latestReview ? <AssetPreviewImage projectId={props.project.id} artifactId={latestReview.id} assetSha256={source.item.asset.sha256} /> : <div className="asset-slot-preview asset-slot-placeholder">Chưa có frame nguồn</div>}
                   <div>
                     <strong>{shot.id} · REUSE</strong>
                     <span>{shot.purpose}</span>
-                    <select
-                      aria-label={`Gán ảnh cho ${shot.id}`}
-                      value={assigned?.asset.sha256 ?? ""}
-                      disabled={props.running || !latestReview || latestReview.status !== "needs_review"}
-                      onChange={(event) => {
-                        if (!latestReview || !event.target.value) return;
-                        void props.perform(
-                          () => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: latestReview.id, assetSha256: event.target.value, action: "assign", shotId: shot.id }),
-                          "Đã gán ảnh tái sử dụng."
-                        );
-                      }}
-                    >
-                      <option value="">Chọn ảnh đã duyệt</option>
-                      {props.reviewItems.filter((item) => item.reviewStatus === "approved").map((item) => <option key={item.asset.sha256} value={item.asset.sha256}>{item.asset.shotId} · {item.asset.sha256.slice(0, 8)}</option>)}
-                    </select>
+                    {source ? <span>Tự dùng lại frame nguồn {source.shot.id}</span> : <small className="attention-copy">Chưa tìm thấy frame nguồn đã duyệt trong continuity refs.</small>}
                   </div>
                 </article>
               );
