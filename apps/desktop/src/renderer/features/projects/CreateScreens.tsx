@@ -251,7 +251,7 @@ export function SimpleCreateScreen(props: {
 }
 
 export function NewProjectWizard(props: {
-  profiles: ChannelProfile[]; 
+  profiles: ChannelProfile[];
   providerPresence: ProviderPresence;
   stockPresence: ProviderPresence;
   providerSettings: ProviderCredentialSettings | null;
