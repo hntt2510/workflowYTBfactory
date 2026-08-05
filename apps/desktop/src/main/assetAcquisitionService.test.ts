@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { acquireImageAsset, importLocalImageAsset, mapNumericAssetFilename, planAssetAcquisition } from "./assetAcquisitionService";
+import { acquireImageAsset, importLocalImageAsset, mapNumericAssetFilename, planAssetAcquisition, resolveReusableAssetAssignments } from "./assetAcquisitionService";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+K3V3WQAAAABJRU5ErkJggg==", "base64");
 describe("asset acquisition", () => {
@@ -142,6 +142,13 @@ describe("asset acquisition", () => {
     expect(mapNumericAssetFilename({ sourcePath: "001.png", targetShotIds: ["shot-1", "shot-3"], frameToShotId })).toBe("shot-1");
     expect(mapNumericAssetFilename({ sourcePath: "003.png", targetShotIds: ["shot-1", "shot-3"], frameToShotId })).toBe("shot-3");
     expect(mapNumericAssetFilename({ sourcePath: "teacher-final.png", targetShotIds: ["shot-1"] })).toBeUndefined();
+  });
+  it("resolves a REUSE shot to an approved earlier frame", () => {
+    const assignments = resolveReusableAssetAssignments([
+      { id: "shot-1", visualMode: "ai_image", continuityRefs: [] },
+      { id: "shot-2", visualMode: "reuse", continuityRefs: ["shot-1"] }
+    ], new Map([["shot-1", "asset-source"]]));
+    expect(assignments.get("shot-2")).toBe("asset-source");
   });
 });
 

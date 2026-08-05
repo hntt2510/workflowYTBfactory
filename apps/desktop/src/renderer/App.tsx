@@ -46,8 +46,9 @@ import type {
 } from "./types";
 import { estimatedDuration, formatDate, formatTimecode, queueCounts, safeRendererError, stageTone } from "./utils";
 import { certificationTone, imageCertificationLabel, textCertificationLabel } from "./certificationLabels";
-import { characterVersionNeedsSetup, hasSemiAutomaticAttention, nextSemiAutomaticChain, type SemiAutomaticChain, type SemiAutomaticProgress } from "./semiAutomaticWorkflow";
+import { characterPhaseStateLabel, creatorStatusLabel, characterVersionNeedsSetup, hasSemiAutomaticAttention, nextSemiAutomaticChain, type SemiAutomaticChain, type SemiAutomaticProgress } from "./semiAutomaticWorkflow";
 import { AppShell, LoadingScreen } from "./layouts/AppShell";
+import { creatorPhaseStateLabel, creatorStatusLabel } from "./creatorStudioCopy";
 import "./styles.css";
 
 const competitorWorkflowStageIds: CompetitorWorkflowRun["stageId"][] = ["transcript-cleaning", "reference-segmentation", "competitor-dna"];
@@ -1141,7 +1142,7 @@ function NewProjectWizard(props: {
   const [topic, setTopic] = useState("What did Aaron's breastpiece symbolize?");
   const [projectName, setProjectName] = useState("");
   const [format, setFormat] = useState<"long" | "short">("long");
-  const [languageChoice, setLanguageChoice] = useState("English");
+  const [languageChoice, setLanguageChoice] = useState("Vietnamese");
   const [customLanguage, setCustomLanguage] = useState("");
   const [targetDuration, setTargetDuration] = useState("");
   const [workflowMode, setWorkflowMode] = useState<"guided" | "semi_automatic" | "full_automatic">("semi_automatic");
@@ -1158,14 +1159,6 @@ function NewProjectWizard(props: {
   const selectedCharacterVersion = characterVersions.find((version) => version.id === selectedCharacterVersionId) ?? characterVersions.find((version) => version.id === routedProfile?.activeCharacterVersionId);
   const targetLanguage = languageChoice === "Custom" ? customLanguage.trim() : languageChoice;
   const effectiveTargetDuration = targetDuration.trim() || defaultTargetDuration(format);
-  const setupChecks = [
-    { label: "9Router API key", ready: props.providerPresence.hasCredential, action: "providers" as RouteId, help: "Save 9Router credential in Providers." },
-    { label: "9Router Text model", ready: props.textCertification.status === "verified", action: "providers" as RouteId, help: "Select a discovered text model and run Text Model Certification." },
-    { label: "9Router Image model", ready: props.imageCertification.status === "verified", action: "providers" as RouteId, help: "Select an image model and run Image Model Certification." },
-    { label: "OmniVoice TTS", ready: Boolean(props.localTtsSettings?.available), action: "settings" as RouteId, help: "Configure OmniVoice executable in Settings." },
-    { label: "FFmpeg", ready: props.bootstrap.runtime.ffmpegAvailable, action: "settings" as RouteId, help: "Set FFMPEG_PATH or add ffmpeg to PATH before video download/preview processing." },
-    { label: "Pexels stock", ready: props.stockPresence.hasCredential, action: "providers" as RouteId, help: "Save a Pexels API key for stock image/video lookup." }
-  ];
   // Provider capability gates belong to individual production stages, not project creation.
   const setupReady = Boolean(targetLanguage.trim());
   const missingSetupMessage = setupReady ? "" : "Choose a target language before creating the project.";
@@ -1224,24 +1217,20 @@ function NewProjectWizard(props: {
 
   return (
     <>
-      <PageHeader title="New Project Wizard" description="Finish local setup first, then create a project with competitor references saved into SQLite." />
+      <PageHeader eyebrow="Bắt đầu một video mới" title="Tạo dự án" description="Chốt brief trước. Bạn có thể tạo ảnh thủ công trong GG Lab mà không cần cấu hình image provider." />
       <div className="wizard">
         <aside className="wizard-steps">
-          {["Basic information", "Channel profile", "Workflow mode", "Provider selection", "Review"].map((label, index) => (
+          {["Brief", "Kênh", "Cách làm", "Đường đi video", "Xác nhận"].map((label, index) => (
             <button className={step === index + 1 ? "active" : ""} key={label} onClick={() => setStep(index + 1)} type="button">
               <span>{index + 1}</span>{label}
             </button>
           ))}
         </aside>
         <SectionCard>
-          <div className="setup-checklist">
-            {setupChecks.map((check) => (
-              <div className="status-row" key={check.label}>
-                <span>{check.label}</span>
-                <StatusBadge tone={check.ready ? "success" : "warning"}>{check.ready ? "Ready" : "Needs setup"}</StatusBadge>
-                {check.ready ? <small>Configured</small> : <button className="button compact" type="button" onClick={() => props.setRoute(check.action)}>{check.help}</button>}
-              </div>
-            ))}
+          <div className="creator-intro">
+            <span className="eyebrow">Manual-first studio</span>
+            <strong>Ảnh được tạo ở GG Lab, video được dựng trong app.</strong>
+            <p>Provider, giọng đọc và CapCut là phần mở rộng. Chúng không chặn việc tạo project hoặc đi qua Story.</p>
           </div>
           {message ? <p className="error-message">{message}</p> : null}
           {step === 1 ? (
@@ -1286,7 +1275,7 @@ function NewProjectWizard(props: {
                 <textarea id="competitor-notes" value={competitorNotes} onChange={(event) => setCompetitorNotes(event.target.value)} placeholder="Optional notes, hook observations, or angle constraints" />
               </FormField>
               <button className="button primary" type="button" onClick={() => void routeTopic()} disabled={!targetLanguage.trim() || !setupReady}>
-                Route channel profile
+                Chọn kênh
               </button>
               {!setupReady ? <p className="error-message">Finish setup first: {missingSetupMessage}</p> : null}
             </div>
@@ -1339,38 +1328,39 @@ function NewProjectWizard(props: {
           ) : null}
           {step === 4 ? (
             <div className="capability-grid">
-              {[
-                { name: "Text", provider: "9Router", ready: props.providerPresence.hasCredential, status: props.providerPresence.hasCredential ? "Credential saved" : "Not configured" },
-                { name: "Image", provider: "9Router", ready: props.providerPresence.hasCredential, status: props.providerPresence.hasCredential ? "Credential saved" : "Not configured" },
-                { name: "Video", provider: "9Router", ready: Boolean(props.providerSettings?.videoModel && props.providerPresence.hasCredential), status: props.providerSettings?.videoModel ? "Model configured" : "No video model" },
-                { name: "TTS", provider: "OmniVoice local", ready: Boolean(props.localTtsSettings?.available), status: props.localTtsSettings?.available ? "Detected" : "Needs setup" },
-                { name: "STT", provider: "Not wired", ready: false, status: "Not configured" },
-                { name: "Stock", provider: "Pexels", ready: props.stockPresence.hasCredential, status: props.stockPresence.hasCredential ? "Credential saved" : "Not configured" },
-                { name: "Evidence images", provider: "Direct URL / Wikipedia", ready: true, status: "Manual URL ready" }
-              ].map((capability) => (
-                <div className="capability-card" key={capability.name}>
-                  <strong>{capability.name}</strong>
-                  <span>{capability.provider}</span>
-                  <StatusBadge tone={capability.ready ? "success" : "warning"}>{capability.status}</StatusBadge>
-                  <small>{capability.name === "Evidence images" ? "Paste source image URLs in references; Google automated image search is not wired." : "Cost estimate unavailable"}</small>
-                </div>
-              ))}
-              <button className="button primary" type="button" onClick={() => setStep(5)}>Review</button>
+              <div className="capability-card creator-path-card">
+                <span className="eyebrow">Mặc định</span>
+                <strong>GG Lab thủ công</strong>
+                <span>Tạo prompt theo từng cảnh, tự tạo ảnh, rồi upload 001.png, 002.png...</span>
+                <StatusBadge tone="success">Không cần image API</StatusBadge>
+              </div>
+              <div className="capability-card creator-path-card">
+                <strong>FFmpeg dựng MP4</strong>
+                <span>Pan, zoom, transition, voice và subtitle được ghép ở Build.</span>
+                <StatusBadge tone={props.bootstrap.runtime.ffmpegAvailable ? "success" : "warning"}>{props.bootstrap.runtime.ffmpegAvailable ? "Sẵn sàng" : "Cấu hình ở Build"}</StatusBadge>
+              </div>
+              <div className="capability-card creator-path-card">
+                <strong>Giọng đọc và nhạc</strong>
+                <span>Có thể thêm sau khi duyệt asset. Không chặn việc tạo project.</span>
+                <StatusBadge tone="info">Thiết lập sau</StatusBadge>
+              </div>
+              <button className="button primary" type="button" onClick={() => setStep(5)}>Xem lại</button>
             </div>
           ) : null}
           {step === 5 ? (
             <div className="review-list">
-              <p><strong>Project:</strong> {projectName.trim() || topic}</p>
-              <p><strong>Topic:</strong> {topic}</p>
-              <p><strong>Profile:</strong> {routedProfile?.name ?? "Route before creating"}</p>
-              <p><strong>Language:</strong> {targetLanguage.trim() || "English"}</p>
-              <p><strong>Target duration:</strong> {effectiveTargetDuration}</p>
-              <p><strong>Mode:</strong> {workflowModeOptions.find((option) => option.value === workflowMode)?.label ?? "Guided"}</p>
-              <p><strong>Competitor references:</strong> {competitorScript.trim() ? "1 pasted competitor script/reference will be saved as Draft" : "None pasted yet; you can add it later in Reference Intake"}</p>
-              <p><StatusBadge tone="info">Ready</StatusBadge> Project creation saves setup and references only. Later stages must be run and approved one by one.</p>
-              {!setupReady ? <p className="error-message">Cannot create yet. {missingSetupMessage}</p> : null}
+              <p><strong>Dự án:</strong> {projectName.trim() || topic}</p>
+              <p><strong>Chủ đề:</strong> {topic}</p>
+              <p><strong>Kênh:</strong> {routedProfile?.name ?? "Chưa chọn"}</p>
+              <p><strong>Ngôn ngữ:</strong> {targetLanguage.trim() || "Vietnamese"}</p>
+              <p><strong>Thời lượng:</strong> {effectiveTargetDuration}</p>
+              <p><strong>Cách làm:</strong> {workflowModeOptions.find((option) => option.value === workflowMode)?.label ?? "Guided"}</p>
+              <p><strong>Ảnh:</strong> Tạo thủ công trong GG Lab, upload và duyệt trong Assets.</p>
+              <p><strong>Tài liệu tham khảo:</strong> {competitorScript.trim() ? "1 transcript sẽ được lưu để phân tích" : "Chưa có; có thể thêm sau"}</p>
+              <p><StatusBadge tone="success">Sẵn sàng tạo</StatusBadge> Cấu hình provider sẽ chỉ được hỏi khi một bước thực sự cần nó.</p>
+              {!setupReady ? <p className="error-message">Chưa thể tạo. {missingSetupMessage}</p> : null}
               <button className="button primary" type="button" onClick={() => void create()} disabled={saving || !topic.trim() || !targetLanguage.trim() || !setupReady}>
-                {saving ? "Creating..." : "Create Project"}
+                {saving ? "Đang tạo..." : "Tạo dự án"}
               </button>
             </div>
           ) : null}
@@ -1493,7 +1483,7 @@ function ProjectOverview(props: {
           {phaseRows.map((phase) => (
             <div className="status-row" key={phase.id}>
               <span>{phase.name}</span>
-              <StatusBadge tone={stageTone(phase.state)}>{workflowProgressStateLabel(phase.state)}</StatusBadge>
+              <StatusBadge tone={stageTone(phase.state)}>{creatorPhaseStateLabel(phase.state)}</StatusBadge>
               <small>{phase.currentStage ?? "Complete"}</small>
             </div>
           ))}
@@ -1722,7 +1712,7 @@ function StageStatusHeader(props: {
     <SectionCard title={props.stageName} description={props.purpose}>
       <div className="metric-grid">
         <MetricCard label="Stage number" value={registeredStage?.order ?? props.stageNumber} />
-        <MetricCard label="Current status" value={props.eligibility.status.replaceAll("_", " ")} tone={stageTone(props.eligibility.status)} />
+        <MetricCard label="Current status" value={creatorStatusLabel(props.eligibility.status)} tone={stageTone(props.eligibility.status)} />
         <MetricCard label="Runnable" value={props.eligibility.runnable ? "Yes" : "No"} tone={props.eligibility.runnable ? "success" : "warning"} />
         <MetricCard label="Approval" value={props.eligibility.approvable ? "Available" : "Locked"} tone={props.eligibility.approvable ? "success" : "warning"} />
       </div>
@@ -2938,8 +2928,7 @@ function VisualsScreen(props: { project: FactoryProject; textCertification: Text
 }
 
 function displayStatus(status: string): string {
-  const labels: Record<string, string> = { not_started: "Chưa bắt đầu", blocked: "Đang chờ bước trước", ready: "Sẵn sàng", queued: "Đang xếp hàng", running: "Đang xử lý", needs_review: "Chờ bạn duyệt", needs_attention: "Cần xử lý", approved: "Đã duyệt", rejected: "Đã từ chối", failed: "Có lỗi", stale: "Cần cập nhật" };
-  return labels[status] ?? status;
+  return creatorStatusLabel(status);
 }
 
 function visualLabel(mode: string): string {

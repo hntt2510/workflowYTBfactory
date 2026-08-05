@@ -20,18 +20,16 @@ describe("shot plan service", () => {
   it("repairs timing gaps inside an approved scene", async () => { const { db, credentialStore, certificationStore } = await setup(); const output = { shots: [{ id: "shot-1", sceneId: "scene-1", order: 0, startFrame: 15, durationFrames: 30, fps: 30, purpose: "Gap", visualMode: "document", framing: "Close", cameraAngle: "Eye level", cameraMovement: "Static", subjectAction: "Reveal", startState: {}, endState: {}, continuityRefs: [] }] }; const result = await runShotPlan({ scenes: [{ id: "scene-1", startFrame: 0, durationFrames: 60 }], fps: 30, credentialStore, certificationStore, createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify(output) }) }) }); expect(result.output.shots[0]).toMatchObject({ startFrame: 0, durationFrames: 60 }); db.close(); });
   it("rejects shot plans that skip an approved scene", async () => { const { db, credentialStore, certificationStore } = await setup(); const output = { shots: [{ id: "shot-1", sceneId: "scene-1", order: 0, startFrame: 0, durationFrames: 60, fps: 30, purpose: "Open", visualMode: "document", framing: "Close", cameraAngle: "Eye level", cameraMovement: "Static", subjectAction: "Reveal", startState: {}, endState: {}, continuityRefs: [] }] }; await expect(runShotPlan({ scenes: [{ id: "scene-1", startFrame: 0, durationFrames: 60 }, { id: "scene-2", startFrame: 60, durationFrames: 30 }], fps: 30, credentialStore, certificationStore, createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify(output) }) }) })).rejects.toMatchObject({ category: "invalid_output" }); db.close(); });
 
-  it("falls back to one deterministic shot per scene for invalid character-first JSON", async () => {
+  it("surfaces invalid character-first JSON instead of creating fallback shots", async () => {
     const { db, credentialStore, certificationStore } = await setup();
-    const result = await runShotPlan({
+    await expect(runShotPlan({
       scenes: [{ id: "scene-1", startFrame: 0, durationFrames: 60, purpose: "Open" }, { id: "scene-2", startFrame: 60, durationFrames: 30, purpose: "Explain" }],
       fps: 30,
       characterFirst: true,
       credentialStore,
       certificationStore,
       createClient: () => ({ createResponseText: async () => ({ text: "not json" }) })
-    });
-    expect(result.output.shots).toHaveLength(2);
-    expect(result.output.shots.map((shot) => [shot.sceneId, shot.startFrame, shot.durationFrames])).toEqual([["scene-1", 0, 60], ["scene-2", 60, 30]]);
+    })).rejects.toMatchObject({ category: "invalid_json" });
     db.close();
   });
 
@@ -112,6 +110,25 @@ describe("shot plan service", () => {
     expect(result.output.shots.every((shot) => shot.durationFrames <= 150)).toBe(true);
     expect(result.output.shots[0]?.startFrame).toBe(0);
     expect(result.output.shots.at(-1)!.startFrame + result.output.shots.at(-1)!.durationFrames).toBe(360);
+    db.close();
+  });
+
+  it("keeps later shots after every split part", async () => {
+    const { db, credentialStore, certificationStore } = await setup();
+    const output = { shots: [
+      { id: "long-shot", sceneId: "scene-1", order: 0, startFrame: 0, durationFrames: 360, fps: 30, purpose: "Explain", visualMode: "ai_image", framing: "Medium", cameraAngle: "Eye", cameraMovement: "Static", subjectAction: "Explain", startState: {}, endState: {}, continuityRefs: [] },
+      { id: "after-shot", sceneId: "scene-1", order: 1, startFrame: 360, durationFrames: 90, fps: 30, purpose: "After", visualMode: "document", framing: "Wide", cameraAngle: "Eye", cameraMovement: "Static", subjectAction: "Hold", startState: {}, endState: {}, continuityRefs: [] }
+    ] };
+    const result = await runShotPlan({
+      scenes: [{ id: "scene-1", startFrame: 0, durationFrames: 450 }],
+      fps: 30,
+      characterFirst: true,
+      credentialStore,
+      certificationStore,
+      createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify(output) }) })
+    });
+    expect(result.output.shots.map((shot) => shot.id)).toEqual(["long-shot", "long-shot-part-2", "long-shot-part-3", "after-shot"]);
+    expect(result.output.shots.map((shot) => [shot.startFrame, shot.durationFrames])).toEqual([[0, 150], [150, 150], [300, 60], [360, 90]]);
     db.close();
   });
 

@@ -60,6 +60,34 @@ export function mapNumericAssetFilename(input: {
   return input.frameToShotId?.get(frameNumber) ?? input.targetShotIds[Number(match[1]) - 1];
 }
 
+export function resolveReusableAssetAssignments(
+  shots: Array<{ id: string; visualMode: string; continuityRefs: string[]; order?: number | undefined; startFrame?: number | undefined; approvedAssetId?: string | undefined }>,
+  assignedAssetIds: ReadonlyMap<string, string>
+): Map<string, string> {
+  const resolved = new Map(assignedAssetIds);
+  for (const shot of shots) {
+    if (shot.approvedAssetId && !resolved.has(shot.id)) resolved.set(shot.id, shot.approvedAssetId);
+  }
+
+  const orderedShots = shots
+    .map((shot, index) => ({ shot, index }))
+    .sort((left, right) => (left.shot.startFrame ?? Number.POSITIVE_INFINITY) - (right.shot.startFrame ?? Number.POSITIVE_INFINITY)
+      || (left.shot.order ?? Number.POSITIVE_INFINITY) - (right.shot.order ?? Number.POSITIVE_INFINITY)
+      || left.index - right.index)
+    .map(({ shot }) => shot);
+  for (const shot of orderedShots) {
+    if (shot.visualMode !== "reuse" || resolved.has(shot.id)) continue;
+    const shotPosition = orderedShots.indexOf(shot);
+    const sourceShotId = shot.continuityRefs.find((reference) => {
+      const sourcePosition = orderedShots.findIndex((candidate) => candidate.id === reference);
+      return sourcePosition >= 0 && sourcePosition < shotPosition && resolved.has(reference);
+    });
+    const sourceAssetId = sourceShotId ? resolved.get(sourceShotId) : undefined;
+    if (sourceAssetId) resolved.set(shot.id, sourceAssetId);
+  }
+  return resolved;
+}
+
 export function planAssetAcquisition(input: {
   shots: Array<{ id: string; visualMode: string; promptVersionId?: string | undefined; approvedAssetId?: string | undefined }>;
   prompts: Array<{ shotId: string; promptVersionId: string; positivePrompt: string; aspectRatio: "16:9" | "9:16" }>;

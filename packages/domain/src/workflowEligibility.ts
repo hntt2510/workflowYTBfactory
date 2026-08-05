@@ -224,7 +224,9 @@ function referenceBlockingReasons(definition: WorkflowStageDefinition, snapshot:
 }
 
 function providerBlockingReasons(definition: WorkflowStageDefinition, snapshot: WorkflowStateSnapshot): StageEligibility["blockingReasons"] {
-  if (snapshot.visualWorkflow === "character_first" && (definition.id === "asset-concepts" || definition.id === "prompt-preparation")) return [];
+  // Character-first projects create images manually in GG Lab. Provider text/image
+  // capability must not block the normal prompt and asset-intake path.
+  if (snapshot.visualWorkflow === "character_first" && ["asset-concepts", "prompt-preparation", "asset-acquisition"].includes(definition.id)) return [];
   if (definition.executionKind === "provider_text" && !snapshot.providerCapabilities?.textVerified) {
     return [{
       code: "TEXT_MODEL_NOT_VERIFIED",

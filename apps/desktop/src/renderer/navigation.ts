@@ -34,9 +34,9 @@ export interface NavItem {
 
 export const workspaceRoutes: NavItem[] = [
   { id: "dashboard", label: "Home" },
-  { id: "projects", label: "Projects" },
-  { id: "asset-library", label: "Asset Library" },
-  { id: "settings", label: "Settings" }
+  { id: "projects", label: "Dự án" },
+  { id: "asset-library", label: "Thư viện asset" },
+  { id: "settings", label: "Cài đặt" }
 ];
 
 export const projectRoutes: NavItem[] = [
@@ -65,5 +65,5 @@ export const advancedRoutes: NavItem[] = [
 export const allRoutes = [...workspaceRoutes, { id: "new-project", label: "New Project" } satisfies NavItem, ...projectRoutes, ...advancedRoutes];
 
 export function routeLabel(route: RouteId): string {
-  return allRoutes.find((item) => item.id === route)?.label ?? "Overview";
+  return allRoutes.find((item) => item.id === route)?.label ?? "Tổng quan";
 }

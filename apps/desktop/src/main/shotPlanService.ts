@@ -56,16 +56,12 @@ export async function runShotPlan(input: {
   try {
     parsed = parseProviderJson(response.text);
   } catch {
-    if (!characterFirst) throw new ShotPlanError("invalid_json", "Shot Plan returned invalid JSON.");
-    parsed = { shots: [] };
+    throw new ShotPlanError("invalid_json", "Shot Plan returned invalid JSON.");
   }
   const providerOutput = characterFirst
     ? normalizeCharacterFirstProviderOutput(parsed, input.scenes, input.fps)
     : normalizeProviderMotion(parsed);
   let result = shotPlanOutputSchema.safeParse(providerOutput);
-  if (!result.success && characterFirst) {
-    result = shotPlanOutputSchema.safeParse(normalizeCharacterFirstProviderOutput({ shots: [] }, input.scenes, input.fps));
-  }
   if (!result.success) {
     const issue = result.error.issues[0];
     const location = issue?.path.length ? ` at ${issue.path.join(".")}` : "";
@@ -233,7 +229,7 @@ function splitCharacterFirstLongShots(shots: ShotPlanShot[], fps: number): ShotP
       parts.push({
         ...shot,
         id,
-        order: shot.order + part,
+        order: shot.order,
         startFrame: shot.startFrame + startOffset,
         durationFrames
       });

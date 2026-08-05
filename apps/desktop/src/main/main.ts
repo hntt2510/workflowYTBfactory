@@ -235,7 +235,7 @@ import { runPromptPreparation, PromptPreparationError } from "./promptPreparatio
 import { runShotPlan, ShotPlanError } from "./shotPlanService";
 import { createManualCharacterPromptPack, retryManualCharacterReference } from "./characterService";
 import { runAssetConcepts, AssetConceptError } from "./assetConceptService";
-import { acquireImageAsset, AssetAcquisitionError, importLocalImageAsset, mapNumericAssetFilename, planAssetAcquisition, type AcquiredImageAsset, type ImageReferenceInput } from "./assetAcquisitionService";
+import { acquireImageAsset, AssetAcquisitionError, importLocalImageAsset, mapNumericAssetFilename, planAssetAcquisition, resolveReusableAssetAssignments, type AcquiredImageAsset, type ImageReferenceInput } from "./assetAcquisitionService";
 import { loadNineRouterImageCertification, runNineRouterImageCertification } from "./nineRouterImageCertificationService";
 import { buildResearchSearchQuery, ResearchSourceSearchError, runResearchSourceSearch } from "./researchSourceSearchService";
 import { getPreviewFileSha256, PreviewRenderError, renderPreview } from "./previewRenderService";
@@ -1584,6 +1584,7 @@ function registerPreviewMediaProtocol(): void {
       const asset = parsed?.success ? parsed.data.assets.find((item) => item.asset.sha256 === assetMedia.assetSha256) : undefined;
       if (!artifact || (artifact.status !== "needs_review" && artifact.status !== "approved") || !asset || asset.asset.relativeFilePath !== relative(workspaceRoot, assetMedia.outputPath)) return new Response("Not found", { status: 404 });
       const bytes = readFileSync(assetMedia.outputPath);
+      if (createHash("sha256").update(bytes).digest("hex") !== asset.asset.sha256) return new Response("Not found", { status: 404 });
       return new Response(request.method === "HEAD" ? null : bytes, { status: 200, headers: { "Cache-Control": "no-store", "Content-Length": String(bytes.length), "Content-Type": assetMedia.mimeType } });
     }
     const characterMedia = characterPreviewMediaFiles.get(token);
@@ -3974,7 +3975,11 @@ ipcMain.handle("run-asset-acquisition", async (_event, input: unknown) => {
       throw new AssetAcquisitionError("unsafe_asset", "Approved character references are unavailable for image generation.");
     }
     for (const asset of routePlan.preservedAssets) {
-      if (!existsSync(resolveWorkspaceArtifactPath(asset.relativeFilePath))) throw new AssetAcquisitionError("unsafe_asset", `The approved local asset for shot ${asset.shotId} is missing from the workspace.`);
+      try {
+        assertCurrentApprovedAsset(asset, `shot ${asset.shotId}`);
+      } catch {
+        throw new AssetAcquisitionError("unsafe_asset", `The approved local asset for shot ${asset.shotId} is missing or changed in the workspace.`);
+      }
     }
     const certification = routePlan.imagePrompts.length
       ? await loadNineRouterImageCertification({ credentialStore, certificationStore: imageCertificationStore })
@@ -4069,16 +4074,27 @@ ipcMain.handle("run-asset-review", (_event, input: unknown) => {
     ? assetReviewOutputSchema.parse({ acquisitionArtifactId: acquisition.id, assets: reviewItems.map((item) => ({ ...item, reviewStatus: "approved" as const, assignedShotId: item.asset.shotId })) })
     : output;
   const review = transitionProjectStage(transitionProjectStage(transitionProjectStage(project, "asset-review", "queued"), "asset-review", "running"), "asset-review", "needs_review");
-  const assignments = new Map(automaticOutput.assets.map((item) => [item.assignedShotId!, `asset-${item.asset.sha256}`]));
-  const approved = automaticApproval
+  const assignments = resolveProjectAssetAssignments(project, automaticOutput.assets);
+  const missingShotIds = [...requiredAssetShotIds(project)].filter((shotId) => !assignments.has(shotId));
+  const hashesValid = automaticOutput.assets.every((item) => {
+    try {
+      assertCurrentApprovedAsset(item.asset, item.asset.shotId);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  const canAutoApprove = automaticApproval && missingShotIds.length === 0 && hashesValid && project.shots.every((shot) => shot.visualMode !== "reuse" || assignments.has(shot.id));
+  const persistedOutput = canAutoApprove ? automaticOutput : output;
+  const approved = canAutoApprove
     ? transitionProjectStage({ ...review, shots: review.shots.map((shot) => assignments.has(shot.id) ? { ...shot, approvedAssetId: assignments.get(shot.id)! } : shot) }, "asset-review", "approved")
     : undefined;
   db.exec("BEGIN IMMEDIATE;");
   try {
     saveProjectWithWorkflowInvalidation(review, { withinTransaction: true });
     workflowRunStore.createRun({ id: runId, projectId, stageId: "asset-review", status: "running", runnerId: "asset-review-local", runnerVersion: "asset-review-v1", inputArtifactIds: [acquisition.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now });
-    workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-review", status: "needs_review", runnerId: "asset-review-local", runnerVersion: "asset-review-v1", inputArtifactIds: [acquisition.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId, stageId: "asset-review", stageRunId: runId, type: "asset-review", version: workflowRunStore.listArtifacts(projectId, "asset-review").length + 1, status: "needs_review", payloadJson: automaticOutput, createdAt: now, updatedAt: now }, { withinTransaction: true });
-    if (automaticApproval && approved) { workflowRunStore.approveReviewRun(runId, { withinTransaction: true, approvalMode: "automatic" }); saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); }
+    workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-review", status: "needs_review", runnerId: "asset-review-local", runnerVersion: "asset-review-v1", inputArtifactIds: [acquisition.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId, stageId: "asset-review", stageRunId: runId, type: "asset-review", version: workflowRunStore.listArtifacts(projectId, "asset-review").length + 1, status: "needs_review", payloadJson: persistedOutput, createdAt: now, updatedAt: now }, { withinTransaction: true });
+    if (canAutoApprove && approved) { workflowRunStore.approveReviewRun(runId, { withinTransaction: true, approvalMode: "automatic" }); saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); }
     db.exec("COMMIT;");
   } catch (error) {
     db.exec("ROLLBACK;");
@@ -4146,14 +4162,17 @@ ipcMain.handle("approve-asset-review", (_event, input: unknown) => {
   if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Asset Review exists.");
   const output = assetReviewOutputSchema.parse(artifact.payloadJson);
   if (output.assets.some((item) => item.reviewStatus !== "approved" || !item.assignedShotId)) throw new Error("Approve and explicitly assign every generated asset before completing Asset Review.");
-  if (output.assets.some((item) => !existsSync(resolveWorkspaceArtifactPath(item.asset.relativeFilePath)))) throw new Error("Every approved asset must still exist in the workspace.");
+  for (const item of output.assets) assertCurrentApprovedAsset(item.asset, item.assignedShotId ?? item.asset.shotId);
   const shotIds = new Set(project.shots.map((shot) => shot.id));
   if (output.assets.some((item) => !shotIds.has(item.assignedShotId!))) throw new Error("Assigned asset shot does not exist in the current project.");
   const assignedShotIds = output.assets.map((item) => item.assignedShotId!);
   if (new Set(assignedShotIds).size !== assignedShotIds.length) throw new Error("Only one asset may be assigned to each storyboard frame.");
   const missingShotIds = [...requiredAssetShotIds(project)].filter((shotId) => !assignedShotIds.includes(shotId));
   if (missingShotIds.length) throw new Error(`Asset Review is missing required storyboard frames: ${missingShotIds.join(", ")}.`);
-  const assignments = new Map(output.assets.map((item) => [item.assignedShotId!, `asset-${item.asset.sha256}`]));
+  const assignments = resolveProjectAssetAssignments(project, output.assets);
+  assertReusableAssetAssignments(project, assignments);
+  const approvedAssetIds = new Set(output.assets.map((item) => `asset-${item.asset.sha256}`));
+  if ([...assignments.values()].some((assetId) => !approvedAssetIds.has(assetId))) throw new Error("Every REUSE frame must resolve to an asset in the current approved Asset Review.");
   const approved = transitionProjectStage(markDownstreamStagesStale({ ...project, shots: project.shots.map((shot) => assignments.has(shot.id) ? { ...shot, approvedAssetId: assignments.get(shot.id) } : shot) }, "asset-review"), "asset-review", "approved");
   db.exec("BEGIN IMMEDIATE;");
   try {
@@ -4190,6 +4209,39 @@ function moveManualStageToApproved(project: FactoryProject, stageId: string): Fa
 
 function requiredAssetShotIds(project: FactoryProject): Set<string> {
   return new Set(project.shots.filter((shot) => shot.visualMode !== "reuse").map((shot) => shot.id));
+}
+
+function resolveProjectAssetAssignments(project: FactoryProject, assets: Array<{ asset: { sha256: string }; assignedShotId?: string | undefined }>): Map<string, string> {
+  return resolveReusableAssetAssignments(
+    project.shots,
+    new Map(assets.flatMap((item) => item.assignedShotId ? [[item.assignedShotId, `asset-${item.asset.sha256}`] as const] : []))
+  );
+}
+
+function assertReusableAssetAssignments(project: FactoryProject, assignments: ReadonlyMap<string, string>): void {
+  const unresolved = project.shots.filter((shot) => shot.visualMode === "reuse" && !assignments.has(shot.id)).map((shot) => shot.id);
+  if (unresolved.length) throw new Error(`REUSE storyboard frames must reference an earlier approved frame: ${unresolved.join(", ")}.`);
+}
+
+function assertCurrentApprovedAsset(asset: { relativeFilePath: string; sha256: string }, label: string): string {
+  const outputPath = resolveWorkspaceArtifactPath(asset.relativeFilePath);
+  if (!existsSync(outputPath)) throw new Error(`Approved asset is missing for ${label}.`);
+  const actualSha256 = createHash("sha256").update(readFileSync(outputPath)).digest("hex");
+  if (actualSha256 !== asset.sha256) throw new Error(`Approved asset changed after validation for ${label}; replace the frame before continuing.`);
+  return outputPath;
+}
+
+function assertTimelineVisualAssets(project: FactoryProject, timeline: ReturnType<typeof timelineAssemblyOutputSchema.parse>, reviewed: ReturnType<typeof assetReviewOutputSchema.parse>): void {
+  const assetsById = new Map(reviewed.assets.filter((item) => item.reviewStatus === "approved").map((item) => [`asset-${item.asset.sha256}`, item.asset]));
+  const assignments = resolveProjectAssetAssignments(project, reviewed.assets);
+  assertReusableAssetAssignments(project, assignments);
+  for (const item of timeline.items.filter((candidate) => candidate.track === "primary_visual")) {
+    const shot = project.shots.find((candidate) => `visual-${candidate.id}` === item.id);
+    const assetId = shot ? assignments.get(shot.id) : undefined;
+    const asset = assetId ? assetsById.get(assetId) : undefined;
+    if (!shot || !asset || item.sourceId !== assetId) throw new Error("The approved timeline has a visual without its approved Asset Review source.");
+    assertCurrentApprovedAsset(asset, shot.id);
+  }
 }
 
 function manualAssetWarnings(project: FactoryProject, asset: AcquiredImageAsset, duplicateHash: boolean): string[] {
@@ -4579,11 +4631,15 @@ ipcMain.handle("run-timeline-assembly", (_event, input: unknown) => {
   const fps = project.timeline.fps;
   if (subtitleOutput.fps !== fps) throw new Error("Subtitle timing FPS does not match the project timeline.");
 
-  const approvedAssets = new Map(reviewed.assets.filter((item) => item.reviewStatus === "approved" && item.assignedShotId).map((item) => [item.assignedShotId!, item.asset]));
+  const approvedAssets = new Map(reviewed.assets.filter((item) => item.reviewStatus === "approved").map((item) => [`asset-${item.asset.sha256}`, item.asset]));
+  const assignments = resolveProjectAssetAssignments(project, reviewed.assets);
+  assertReusableAssetAssignments(project, assignments);
   const visuals = [...project.shots].sort((a, b) => a.startFrame - b.startFrame).map((shot) => {
-    const asset = approvedAssets.get(shot.id);
-    if (!asset || !shot.approvedAssetId || shot.approvedAssetId !== `asset-${asset.sha256}` || !existsSync(join(workspaceRoot, asset.relativeFilePath))) throw new Error(`Approved asset is missing for shot ${shot.id}.`);
-    return { id: `visual-${shot.id}`, track: "primary_visual" as const, sourceId: shot.approvedAssetId, startFrame: shot.startFrame, durationFrames: shot.durationFrames, fps, ...(shot.motion ? { motion: shot.motion } : {}) };
+    const approvedAssetId = assignments.get(shot.id);
+    const asset = approvedAssetId ? approvedAssets.get(approvedAssetId) : undefined;
+    if (!asset || !approvedAssetId) throw new Error(`Approved asset is missing for shot ${shot.id}.`);
+    assertCurrentApprovedAsset(asset, shot.id);
+    return { id: `visual-${shot.id}`, track: "primary_visual" as const, sourceId: approvedAssetId, startFrame: shot.startFrame, durationFrames: shot.durationFrames, fps, ...(shot.motion ? { motion: shot.motion } : {}) };
   });
   const visualEnd = visuals.reduce((end, item) => Math.max(end, item.startFrame + item.durationFrames), 0);
   for (let index = 1; index < visuals.length; index += 1) if (visuals[index - 1]!.startFrame + visuals[index - 1]!.durationFrames !== visuals[index]!.startFrame) throw new Error("Primary visual track contains a gap or overlap.");
@@ -4634,7 +4690,21 @@ ipcMain.handle("run-timeline-assembly", (_event, input: unknown) => {
   return factoryProjectResponseSchema.parse(review);
 });
 ipcMain.handle("list-timeline-assembly-artifacts", (_event, input: unknown) => { const { projectId } = timelineAssemblyRequestSchema.parse(input); return timelineAssemblyArtifactsResponseSchema.parse(workflowRunStore.listArtifacts(projectId, "timeline-assembly").map((artifact) => ({ id: artifact.id, ...(artifact.stageRunId ? { stageRunId: artifact.stageRunId } : {}), status: artifact.status, payloadJson: artifact.payloadJson, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt }))); });
-ipcMain.handle("approve-timeline-assembly", (_event, input: unknown) => { const { projectId } = timelineAssemblyRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "timeline-assembly").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Timeline Assembly exists."); const timeline = timelineAssemblyOutputSchema.parse(artifact.payloadJson); const approved = transitionProjectStage({ ...project, timeline }, "timeline-assembly", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
+ipcMain.handle("approve-timeline-assembly", (_event, input: unknown) => {
+  const { projectId } = timelineAssemblyRequestSchema.parse(input);
+  const project = projectRepository.loadProject(projectId);
+  if (!project) throw new Error(`Project not found: ${projectId}`);
+  const artifact = workflowRunStore.listArtifacts(projectId, "timeline-assembly").find((item) => item.status === "needs_review");
+  if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Timeline Assembly exists.");
+  const timeline = timelineAssemblyOutputSchema.parse(artifact.payloadJson);
+  const assetReview = currentApprovedArtifacts(project, "asset-review").find((item) => item.payloadJson);
+  if (!assetReview?.payloadJson) throw new Error("Timeline Assembly approval requires the current approved Asset Review.");
+  assertTimelineVisualAssets(project, timeline, assetReviewOutputSchema.parse(assetReview.payloadJson));
+  const approved = transitionProjectStage({ ...project, timeline }, "timeline-assembly", "approved");
+  db.exec("BEGIN IMMEDIATE;");
+  try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
+  return factoryProjectResponseSchema.parse(approved);
+});
 ipcMain.handle("reject-timeline-assembly", (_event, input: unknown) => { const { projectId } = timelineAssemblyRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "timeline-assembly").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId) throw new Error("No reviewable Timeline Assembly exists."); const rejected = transitionProjectStage(project, "timeline-assembly", "rejected"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(rejected, { withinTransaction: true }); workflowRunStore.rejectReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(rejected); });
 
 function resolveWorkspaceArtifactPath(relativeFilePath: string): string {
@@ -4707,17 +4777,20 @@ ipcMain.handle("run-preview-render", async (_event, input: unknown) => {
   const reviewedAssets = assetReviewOutputSchema.parse(assetReviewArtifact.payloadJson);
   const voiceOutput = voiceGenerationOutputSchema.parse(voiceArtifact.payloadJson);
   const subtitleOutput = subtitlePreparationOutputSchema.parse(subtitleArtifact.payloadJson);
-  const assetsByShot = new Map(reviewedAssets.assets
-    .filter((item) => item.reviewStatus === "approved" && item.assignedShotId)
-    .map((item) => [item.assignedShotId!, item.asset]));
+  const assetsById = new Map(reviewedAssets.assets
+    .filter((item) => item.reviewStatus === "approved")
+    .map((item) => [`asset-${item.asset.sha256}`, item.asset]));
+  const assignments = resolveProjectAssetAssignments(project, reviewedAssets.assets);
+  assertReusableAssetAssignments(project, assignments);
   const visualInputs = timeline.items
     .filter((item) => item.track === "primary_visual")
     .sort((a, b) => a.startFrame - b.startFrame)
     .map((item) => {
-      const shot = project.shots.find((candidate) => `visual-${candidate.id}` === item.id && candidate.approvedAssetId === item.sourceId);
-      const asset = shot ? assetsByShot.get(shot.id) : undefined;
-      if (!asset) throw new Error("The approved timeline has a visual without its approved Asset Review source.");
-      return { filePath: resolveWorkspaceArtifactPath(asset.relativeFilePath), startFrame: item.startFrame, durationFrames: item.durationFrames, ...(item.motion ? { motion: item.motion } : {}) };
+      const shot = project.shots.find((candidate) => `visual-${candidate.id}` === item.id);
+      const assetId = shot ? assignments.get(shot.id) : undefined;
+      const asset = assetId ? assetsById.get(assetId) : undefined;
+      if (!asset || !assetId || item.sourceId !== assetId) throw new Error("The approved timeline has a visual without its approved Asset Review source.");
+      return { filePath: assertCurrentApprovedAsset(asset, shot?.id ?? item.id), startFrame: item.startFrame, durationFrames: item.durationFrames, ...(item.motion ? { motion: item.motion } : {}) };
     });
   const voicesByPath = new Map(voiceOutput.segments.map((segment) => [segment.relativeFilePath, segment]));
   const audioInputs = timeline.items
@@ -4970,12 +5043,16 @@ ipcMain.handle("run-capcut-draft", async (_event, input: unknown) => {
   const reviewed = assetReviewOutputSchema.parse(assets.payloadJson);
   const voiceOutput = voiceGenerationOutputSchema.parse(voice.payloadJson);
   const subtitleOutput = subtitlePreparationOutputSchema.parse(subtitles.payloadJson);
-  const assetsById = new Map(reviewed.assets.filter((item) => item.reviewStatus === "approved" && item.assignedShotId).map((item) => [item.asset.sha256, item.asset]));
+  const assetsById = new Map(reviewed.assets.filter((item) => item.reviewStatus === "approved").map((item) => [`asset-${item.asset.sha256}`, item.asset]));
+  const assignments = resolveProjectAssetAssignments(project, reviewed.assets);
+  assertReusableAssetAssignments(project, assignments);
   const visualInputs = timeline.items.filter((item) => item.track === "primary_visual").map((item) => {
-    const asset = [...assetsById.values()].find((candidate) => project.shots.some((shot) => shot.approvedAssetId === item.sourceId && shot.id === candidate.shotId));
-    if (!asset) throw new Error("Timeline visual is not backed by an approved assigned asset.");
-     return { sourcePath: resolveWorkspaceArtifactPath(asset.relativeFilePath), startFrame: item.startFrame, durationFrames: item.durationFrames, fps: item.fps, ...(item.motion ? { motion: item.motion } : {}) };
-   });
+    const shot = project.shots.find((candidate) => `visual-${candidate.id}` === item.id);
+    const assetId = shot ? assignments.get(shot.id) : undefined;
+    const asset = assetId ? assetsById.get(assetId) : undefined;
+    if (!asset || !assetId || item.sourceId !== assetId) throw new Error("Timeline visual is not backed by an approved assigned asset.");
+    return { sourcePath: assertCurrentApprovedAsset(asset, shot?.id ?? item.id), startFrame: item.startFrame, durationFrames: item.durationFrames, fps: item.fps, ...(item.motion ? { motion: item.motion } : {}) };
+  });
   const voiceByPath = new Map(voiceOutput.segments.map((segment) => [segment.relativeFilePath, segment]));
   const audio = timeline.items.filter((item) => item.track === "narration" || item.track === "music" || item.track === "ambience" || item.track === "sfx").map((item) => {
     const segment = item.track === "narration" ? voiceByPath.get(item.sourceId) : undefined;

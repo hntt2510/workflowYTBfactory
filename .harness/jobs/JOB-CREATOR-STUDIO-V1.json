@@ -1,0 +1,76 @@
+{
+  "jobId": "JOB-CREATOR-STUDIO-V1",
+  "type": "long",
+  "title": "Premium creator studio and manual-first video factory",
+  "status": "active",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Complete the repository-wide manual-first YouTube creator workflow: five-phase creator UI, scene prompt studio, deterministic asset intake, FFmpeg build output, optional CapCut handoff, modular renderer boundaries, and an executable fixture.",
+  "businessContext": "The product must guide a non-technical Vietnamese creator from a brief to a playable MP4. Manual GG Lab image creation and upload is the only mandatory production step; provider setup and CapCut must not block the normal path.",
+  "allowedPaths": [
+    "apps/desktop/src/**",
+    "packages/domain/src/**",
+    "packages/domain/test/**",
+    "packages/db/src/**",
+    "packages/db/test/**",
+    "packages/media/src/**",
+    "packages/media/test/**",
+    "packages/capcut/src/**",
+    "packages/capcut/test/**",
+    "packages/prompts/src/**",
+    "fixtures/**",
+    "scripts/capture-ui-screenshots.cjs",
+    "scripts/verify-electron-ui.cjs",
+    "docs/CREATOR_STUDIO_AUDIT.md",
+    "docs/CREATOR_STUDIO_FIXTURE.md",
+    ".harness/jobs/JOB-CHARACTER-FIRST-VISUALS-V1.json",
+    ".harness/jobs/JOB-CREATOR-STUDIO-V1.json",
+    ".harness/state.json",
+    ".harness/handoffs/JOB-CREATOR-STUDIO-V1.md"
+  ],
+  "forbiddenPaths": [
+    "packages/providers/**",
+    "packages/generation-queue/**",
+    "python/capcut_bridge/**",
+    "OmniVoice/**",
+    "docs/product/acceptance-criteria.md",
+    "docs/product/open-questions.md"
+  ],
+  "dependencies": [
+    "character-first visual workflow V1",
+    "runtime output and character consistency V1.1",
+    "existing typed preload IPC and SQLite persistence",
+    "existing FFmpeg preview and optional CapCut packaging paths"
+  ],
+  "acceptanceCriteria": [
+    "Home, Projects, Asset Library, and Settings are the only permanent workspace navigation items; project screens expose Brief, Story, Director, Assets, and Build phases.",
+    "The default Vietnamese creator path can create a semi-automatic manual-first project without image-model certification, image credentials, generation queue, or CapCut configuration.",
+    "Director exposes approved scene cards, storyboard frames, and exactly one copyable GG Lab scene prompt per scene with frame references, locks, deltas, filenames, and QA checklist.",
+    "Asset Intake supports multi-file drag/drop, numeric mapping, manual assignment, replacement, duplicate warnings, missing-frame detection, and blocks Build until every required non-REUSE frame is approved.",
+    "Editing or replacing one frame preserves unrelated scene assets and invalidates only affected downstream render and QA artifacts.",
+    "FFmpeg renders a deterministic playable MP4 with approved visuals, motion, exact timing, subtitles, voice, and optional supplied music/SFX; FFprobe validates resolution, duration, video, audio, H.264, and yuv420p compatibility.",
+    "CapCut remains optional and receives a new render-safe draft only after validated media exists; it never blocks MP4 export.",
+    "The renderer is split into route/feature modules with no duplicated business logic, typed preload-only IPC access, centralized Vietnamese labels, visible focus states, and reduced-motion-safe GSAP transitions.",
+    "A deterministic fixture covers one project, three scenes, ten storyboard frames, a recurring character, expression/pose changes, a cutaway, a reused frame, voice, subtitles, optional audio, and a real FFmpeg/FFprobe output.",
+    "Legacy projects continue to load and retain their existing provider-based visual pipeline."
+  ],
+  "verificationCommands": [
+    "corepack pnpm install --frozen-lockfile",
+    "corepack pnpm test:unit",
+    "corepack pnpm lint",
+    "corepack pnpm typecheck",
+    "corepack pnpm --filter @lsf/desktop build",
+    "git diff --check",
+    "node scripts/verify-electron-ui.cjs",
+    "node scripts/capture-ui-screenshots.cjs",
+    "corepack pnpm exec vitest run packages/media/test apps/desktop/src/main apps/desktop/src/renderer"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": [
+    "A required external provider, secret, paid call, or manual visual approval cannot be replaced by a deterministic local verification.",
+    "A safe change requires modifying forbidden provider or Python bridge code beyond the current CapCut adapter contract.",
+    "The baseline fails in an unrelated area and cannot be isolated after two targeted attempts.",
+    "A migration would risk existing saved project data or user-uploaded files."
+  ]
+}

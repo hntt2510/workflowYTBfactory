@@ -195,6 +195,26 @@ describe("workflow eligibility", () => {
     expect(available?.runnable).toBe(true);
   });
 
+  it("does not require image certification for character-first manual asset intake", () => {
+    const project = createDomainFixtureProject({
+      topic: "Manual GG Lab assets",
+      format: "short",
+      targetLanguage: "Vietnamese",
+      visualWorkflow: "character_first",
+      characterVersionId: "character-v1"
+    });
+    const readyForManualIntake = approveStages(project, [
+      "project-setup", "reference-intake", "outline", "script", "fact-review", "retention-review",
+      "scene-plan", "shot-plan", "character-preparation",
+      "visual-routing", "asset-concepts", "prompt-preparation"
+    ]);
+    const eligibility = resolveStageEligibilities(readyForManualIntake, { textVerified: false, imageVerified: false })
+      .find((stage) => stage.stageId === "asset-acquisition");
+    expect(eligibility?.status).toBe("ready");
+    expect(eligibility?.runnable).toBe(true);
+    expect(eligibility?.blockingReasons).toEqual([]);
+  });
+
   it("blocks character-first visual stages until an approved character is bound", () => {
     const project = createDomainFixtureProject({
       topic: "Character-first",
