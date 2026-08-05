@@ -2,5 +2,5 @@
   "schemaVersion": 1,
   "updatedAt": "2026-08-04T17:30:00.000+07:00",
   "activeJobs": ["JOB-CREATOR-STUDIO-V1"],
-  "notes": "JOB-CHARACTER-FIRST-VISUALS-V1 is review_required after builder commit 5fe6666f and focused verification. JOB-CREATOR-STUDIO-V1 is the active repository-wide follow-up. Prior review-required VOX jobs and unrelated dirty changes are preserved."
+  "notes": "JOB-CHARACTER-FIRST-VISUALS-V1 is review_required after builder commit 5fe6666f. JOB-CREATOR-STUDIO-V1 is review_required after builder commit c57fd723 and independent unit/Electron/FFprobe verification. Reviewer and QA evidence are still pending. Prior review-required VOX jobs and unrelated dirty changes are preserved."
 }
