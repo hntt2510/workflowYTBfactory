@@ -34,6 +34,24 @@ export type SemiAutomaticClient = Pick<LongShortFactoryApi,
 
 export type SemiAutomaticChain = "reference" | "idea" | "assets" | "preview";
 
+const referenceStageIds = new Set([
+  "reference-validation", "transcript-cleaning", "reference-segmentation", "competitor-dna", "opportunity-map", "idea-lab"
+]);
+const ideaStageIds = new Set([
+  "originality-review", "research-source-intake", "claim-map", "outline", "script", "fact-review", "retention-review",
+  "scene-plan", "shot-plan", "character-preparation", "visual-routing", "asset-concepts", "prompt-preparation", "asset-acquisition", "asset-review"
+]);
+const assetStageIds = new Set(["voice-generation", "subtitle-preparation", "timeline-assembly", "preview-render"]);
+const previewStageIds = new Set(["qa", "capcut-draft", "packaging-export"]);
+
+export function automaticChainForStage(stageId: string): SemiAutomaticChain | undefined {
+  if (referenceStageIds.has(stageId)) return "reference";
+  if (ideaStageIds.has(stageId)) return "idea";
+  if (assetStageIds.has(stageId)) return "assets";
+  if (previewStageIds.has(stageId)) return "preview";
+  return undefined;
+}
+
 export function hasSemiAutomaticAttention(project: FactoryProject): boolean {
   return project.stages.some((stage) => {
     if (stage.status !== "failed" && stage.status !== "needs_attention") return false;
@@ -48,9 +66,13 @@ export function characterVersionNeedsSetup(project: FactoryProject, profile: Cha
 }
 
 /** Returns the next automatic segment without crossing a human checkpoint. */
-export function nextSemiAutomaticChain(project: FactoryProject): SemiAutomaticChain | undefined {
+export function nextSemiAutomaticChain(project: FactoryProject, profile?: ChannelProfile): SemiAutomaticChain | undefined {
   if (project.setup.workflowMode !== "semi_automatic") return undefined;
   if (hasSemiAutomaticAttention(project)) return undefined;
+  if (project.setup.visualWorkflow === "character_first") {
+    if (statusOf(project, "character-preparation") !== "approved") return undefined;
+    if (profile && characterVersionNeedsSetup(project, profile)) return undefined;
+  }
   const referenceValidation = statusOf(project, "reference-validation");
   const ideaLab = statusOf(project, "idea-lab");
   const assetReview = statusOf(project, "asset-review");

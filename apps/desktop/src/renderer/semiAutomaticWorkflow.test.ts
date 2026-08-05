@@ -8,6 +8,7 @@ function projectWithApprovedReferences(): FactoryProject {
     format: "short",
     targetLanguage: "English",
     workflowMode: "semi_automatic",
+    visualWorkflow: "legacy",
     competitorReference: { pastedTranscript: "First transcript" }
   });
   return {
@@ -134,6 +135,14 @@ describe("semi-automatic reference chain", () => {
     expect(nextSemiAutomaticChain(voiceApproved)).toBe("assets");
     const previewApproved = setStatus(voiceApproved, "preview-render", "approved");
     expect(nextSemiAutomaticChain(previewApproved)).toBe("preview");
+  });
+
+  it("does not auto-resume character-first production before the character checkpoint", () => {
+    const characterFirst = createFixtureProject({ topic: "Character checkpoint", format: "short", targetLanguage: "English", workflowMode: "semi_automatic", visualWorkflow: "character_first" });
+    const ideaApproved = setStatus(characterFirst, "idea-lab", "approved");
+    expect(nextSemiAutomaticChain(ideaApproved)).toBeUndefined();
+    const characterApproved = setStatus(ideaApproved, "character-preparation", "approved");
+    expect(nextSemiAutomaticChain(characterApproved)).toBe("idea");
   });
 
   it("does not treat an automatic stage failure as a human checkpoint", () => {

@@ -71,6 +71,7 @@ export function createFixtureProject(input: {
       })()
     : [];
   const selectedCharacterVersion = resolveApprovedCharacterVersion(profile, input.characterVersionId);
+  const boundCharacterVersionId = selectedCharacterVersion?.id ?? input.characterVersionId;
   const stages = createPipelineStages(0).map((stage) => (
     competitorReferences.length && stage.id === "reference-intake"
       ? { ...stage, status: "approved" as const }
@@ -90,7 +91,7 @@ export function createFixtureProject(input: {
       language: input.targetLanguage,
       workflowMode: input.workflowMode ?? "semi_automatic",
       visualWorkflow: input.visualWorkflow ?? (input.workflowMode === "guided" ? "legacy" : "character_first"),
-      ...(selectedCharacterVersion ? { characterVersionId: selectedCharacterVersion.id } : {}),
+      ...(boundCharacterVersionId ? { characterVersionId: boundCharacterVersionId } : {}),
       inputMode: input.inputMode ?? (input.competitorReference ? "reference" : "topic"),
       aspectRatio: input.aspectRatio ?? (input.format === "short" ? "9:16" : "16:9"),
       visualStyle: input.visualStyle ?? "vox-documentary",

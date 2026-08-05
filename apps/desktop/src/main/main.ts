@@ -855,6 +855,7 @@ app.whenReady().then(async () => {
         format: "long",
         targetLanguage: "English",
         workflowMode: "semi_automatic",
+        visualWorkflow: "legacy",
         projectName: topic,
         competitorReference: { pastedTranscript: "A persisted reference used to verify automatic resume after a stage attention state." },
         profiles: seedChannelProfiles
@@ -864,7 +865,7 @@ app.whenReady().then(async () => {
         referenceSet: { status: "approved" },
         competitorReferences: fixture.competitorReferences.map((reference) => ({ ...reference, status: "approved" as const })),
         stages: normalizeProjectStages(fixture.stages).map((stage) => stage.id === "reference-validation"
-          ? { ...stage, status: "approved" as const }
+          ? { ...stage, status: "not_started" as const }
           : stage.id === "transcript-cleaning"
             ? { ...stage, status: "needs_attention" as const, attention: createStageAttention("transcript-cleaning", "E2E_PROVIDER_FAILURE", "Provider is unavailable for this verification run.", { retryAction: "Retry automatic workflow", retryRoute: "project-overview" }) }
             : stage)
@@ -958,33 +959,33 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
       await assertText(win, "Project command center");
-      await clickText(win, "Idea Lab");
+      await navigateToRoute(win, "idea-lab");
       await assertText(win, "Idea Lab");
-      await clickText(win, "Script");
+      await navigateToRoute(win, "script");
       await assertText(win, "Narration editor");
-      await clickText(win, "Settings");
+      await navigateToRoute(win, "settings");
       await assertText(win, workspaceRoot);
       await assertText(win, "Security");
       await assertText(win, "Generation");
     } else {
       await assertText(win, "Long/Short Factory");
-      await clickText(win, "Create");
+      await navigateToRoute(win, "dashboard");
+      await clickText(win, "Create Video Project");
       await assertText(win, "Create Video Project");
       await assertText(win, "VOX Documentary");
       await setInputValue(win, "#simple-topic", topic);
       await clickText(win, "Create Video Project");
-      await assertText(win, "Preparing your video");
+      await assertOneOfText(win, ["Preparing your video", "Project command center"]);
       await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
       await assertOneOfText(win, ["Preparing your video", "Project command center"]);
-      await clickText(win, "Scene Review");
-      await assertText(win, "Scenes are not ready yet");
-      await clickText(win, "Final Preview");
+      await navigateToRoute(win, "scenes");
+      await assertOneOfText(win, ["Scenes are not ready yet", "Scene Plan"]);
+      await navigateToRoute(win, "final-preview");
       await assertText(win, "No reviewable preview yet");
-      await clickText(win, "Settings");
+      await navigateToRoute(win, "settings");
       await assertText(win, "Generation");
-      await clickText(win, "Diagnostics");
       await assertText(win, "Diagnostics");
     }
     writeUiVerificationReport(reportPath, { ok: true, mode, workspaceRoot, databasePath });

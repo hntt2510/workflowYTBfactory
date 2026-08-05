@@ -46,7 +46,7 @@ import type {
 } from "./types";
 import { estimatedDuration, formatDate, formatTimecode, queueCounts, safeRendererError, stageTone } from "./utils";
 import { certificationTone, imageCertificationLabel, textCertificationLabel } from "./certificationLabels";
-import { characterVersionNeedsSetup, hasSemiAutomaticAttention, nextSemiAutomaticChain, type SemiAutomaticChain, type SemiAutomaticProgress } from "./semiAutomaticWorkflow";
+import { automaticChainForStage, characterVersionNeedsSetup, hasSemiAutomaticAttention, nextSemiAutomaticChain, type SemiAutomaticChain, type SemiAutomaticProgress } from "./semiAutomaticWorkflow";
 import { AppShell, LoadingScreen } from "./layouts/AppShell";
 import { AssetIntakePanel } from "./features/assets/AssetIntakePanel";
 import { creatorInputModeLabel, creatorPhaseStateLabel, creatorStatusLabel } from "./creatorStudioCopy";
@@ -244,7 +244,7 @@ function App() {
       return;
     }
     automaticResumeAttemptedProjects.current.delete(project.id);
-    const nextChain = nextSemiAutomaticChain(project);
+    const nextChain = nextSemiAutomaticChain(project, bootstrap.profiles.find((profile) => profile.id === project.profileId));
     if (nextChain && !hasSemiAutomaticAttention(project)) {
       automaticResumeAttemptedProjects.current.add(project.id);
       navigate("project-overview");
@@ -256,7 +256,7 @@ function App() {
 
   useEffect(() => {
     if (loading || !selectedProject || selectedProject.setup.workflowMode !== "semi_automatic" || semiAutomaticRunLock.current) return;
-    const nextChain = nextSemiAutomaticChain(selectedProject);
+    const nextChain = nextSemiAutomaticChain(selectedProject, bootstrap.profiles.find((profile) => profile.id === selectedProject.profileId));
     if (!nextChain || hasSemiAutomaticAttention(selectedProject) || automaticResumeAttemptedProjects.current.has(selectedProject.id)) return;
     automaticResumeAttemptedProjects.current.add(selectedProject.id);
     void startSemiAutomatic(nextChain, selectedProject);
@@ -1409,20 +1409,39 @@ function ProjectOverview(props: {
     return presentation?.state !== "not_applicable" && presentation?.state !== "optional";
   });
   const nextStageName = nextStage ? workflowStageDefinitions.find((stage) => stage.id === nextStage.stageId)?.name ?? nextStage.stageId : undefined;
-  const nextChain = nextSemiAutomaticChain(project);
+  const nextChain = nextSemiAutomaticChain(project, props.selectedProfile);
   const isRunning = props.semiAutomaticRunning || project.stages.some((stage) => stage.status === "queued" || stage.status === "running");
   const actionStage = attention ?? checkpoint;
+  const retryChain = attention && project.setup.workflowMode === "semi_automatic" ? automaticChainForStage(attention.id) : undefined;
   const actionRoute = characterNeedsSetup ? "channel-profiles" : actionStage ? stageRoute(actionStage.id) : nextStage ? stageRoute(nextStage.stageId) : "advanced-pipeline";
   const phaseRows = progress.phases.map((phase) => ({
     ...phase,
     currentStage: phase.currentStageName ?? (phase.state === "not_applicable" ? "Not used" : phase.state === "optional" ? "Optional" : phase.state === "complete" ? "Complete" : "Waiting")
   }));
-  const actionLabel = characterNeedsSetup ? "Set up channel character" : attention ? `Open ${attention.name}` : checkpoint ? `Review ${checkpoint.name}` : nextChain && !isRunning ? "Continue production" : nextStageName ? `Open ${nextStageName}` : "Production complete";
+  const actionLabel = characterNeedsSetup
+    ? "Set up channel character"
+    : retryChain && !isRunning
+      ? attention?.attention?.retryAction && attention.attention.retryAction !== "Retry stage"
+        ? attention.attention.retryAction
+        : "Retry automatic workflow"
+      : attention
+        ? `Open ${attention.name}`
+        : checkpoint
+          ? `Review ${checkpoint.name}`
+          : nextChain && !isRunning
+            ? "Continue production"
+            : nextStageName
+              ? `Open ${nextStageName}`
+              : "Production complete";
   const capcut = presentationById.get("capcut-draft");
 
   async function continueProduction(): Promise<void> {
     if (characterNeedsSetup) {
       props.setRoute("channel-profiles");
+      return;
+    }
+    if (retryChain && !isRunning) {
+      await props.startSemiAutomatic(retryChain, project);
       return;
     }
     if (actionStage) {
