@@ -58,7 +58,6 @@ export const advancedRoutes: NavItem[] = [
   { id: "timeline", label: "Timeline", requiresProject: true },
   { id: "qa", label: "QA", requiresProject: true },
   { id: "production-queue", label: "Production Queue" },
-  { id: "asset-library", label: "Asset Library" },
   { id: "providers", label: "Providers" }
 ];
 
