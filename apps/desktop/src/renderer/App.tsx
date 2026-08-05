@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Plus, Sparkles, Trash2 } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import type { ChannelProfile, ChannelRouteDecision, FactoryProject, ProductionStatus, StageEligibility, SubtitlePreset } from "@lsf/domain";
-import { characterVersionIsApproved, resolveProductionStatus, resolveStageEligibilities, resolveWorkflowProgress, seedChannelProfiles, workflowProgressStateLabel, workflowStageDefinitions } from "@lsf/domain";
+import { characterVersionIsApproved, resolveApprovedCharacterVersion, resolveProductionStatus, resolveStageEligibilities, resolveWorkflowProgress, seedChannelProfiles, workflowProgressStateLabel, workflowStageDefinitions } from "@lsf/domain";
 import { factoryClient } from "./services/factoryClient";
 import { allRoutes, type RouteId } from "./navigation";
 import { DataTable, DisabledAction, EmptyState, FormField, MetricCard, PageHeader, ScoreBar, SectionCard, SettingsList, StatusBadge, TagList } from "./components/ui";
@@ -47,7 +47,9 @@ import { automaticChainForStage, characterVersionNeedsSetup, hasSemiAutomaticAtt
 import { AppShell, LoadingScreen } from "./layouts/AppShell";
 import { StageStatusHeader, canRetryStage } from "./components/workflow";
 import { ScenesScreen, ShotsScreen, VisualsScreen, visualLabel } from "./features/director/DirectorScreens";
+import { Dashboard } from "./features/home/HomeScreens";
 import { ProjectOverview, stageRoute } from "./features/projects/ProjectOverview";
+import { ProjectsScreen } from "./features/projects/ProjectsScreen";
 import { ChannelProfilesScreen } from "./features/settings/ChannelProfilesScreen";
 import { ExportScreen, QaScreen, TimelineScreen } from "./features/build/BuildScreens";
 import { creatorInputModeLabel, creatorPhaseStateLabel, creatorStatusLabel, workflowModeOptions } from "./creatorStudioCopy";
@@ -480,182 +482,6 @@ function RouteScreen(props: {
   return <ExportScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} />;
 }
 
-function Dashboard(props: {
-  bootstrap: BootstrapData;
-  providerPresence: ProviderPresence;
-  setRoute: (route: RouteId) => void;
-  onOpenProject: (projectId: string) => Promise<void>;
-}) {
-  const counts = queueCounts(props.bootstrap.queue);
-  const activeProjects = props.bootstrap.projects.length;
-  return (
-    <>
-      <PageHeader
-        eyebrow="Local production workspace"
-        title="Long/Short Factory"
-        description="Local AI-assisted YouTube production workspace."
-        actions={
-          <>
-            <button className="button primary" type="button" onClick={() => props.setRoute("create")}>
-              <Plus size={16} /> Create Video Project
-            </button>
-            <button className="button secondary" type="button" onClick={() => props.setRoute("projects")}>Open Project</button>
-            <DisabledAction reason="Project ZIP import is not implemented.">Import Project</DisabledAction>
-          </>
-        }
-      />
-      <section className="metric-grid">
-        <MetricCard label="Total projects" value={props.bootstrap.projects.length} detail="SQLite-backed" tone="success" />
-        <MetricCard label="Active projects" value={activeProjects} detail="No archived state yet" />
-        <MetricCard label="Queued jobs" value={counts.queued ?? 0} detail="Queue is JSON-backed" />
-        <MetricCard label="Failed jobs" value={counts.failed ?? 0} />
-        <MetricCard label="Assets generated" value="Not available" detail="Asset persistence is not wired" tone="warning" />
-        <MetricCard label="Provider status" value={props.providerPresence.hasCredential ? "Credential saved" : "Not configured"} tone={props.providerPresence.hasCredential ? "success" : "warning"} />
-      </section>
-      <RecentProjects projects={props.bootstrap.projects} onOpenProject={props.onOpenProject} />
-      <SystemStatus bootstrap={props.bootstrap} providerPresence={props.providerPresence} />
-    </>
-  );
-}
-
-function RecentProjects(props: { projects: ProjectSummary[]; onOpenProject: (projectId: string) => Promise<void> }) {
-  return (
-    <SectionCard title="Recent projects" description="Persisted projects available from SQLite.">
-      {props.projects.length === 0 ? (
-        <EmptyState title="No projects yet" detail="Create a demo project to verify persistence and browse workflow screens." />
-      ) : (
-        <DataTable label="Recent projects">
-          <thead>
-            <tr>
-              <th>Project name</th>
-              <th>Channel profile</th>
-              <th>Format</th>
-              <th>Language</th>
-              <th>Target duration</th>
-              <th>Current stage</th>
-              <th>Last modified</th>
-              <th>Progress</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.projects.map((project) => (
-              <tr key={project.id}>
-                <td>{project.projectName || project.topic}</td>
-                <td>{project.profileId}</td>
-                <td>{project.format === "long" ? "YouTube Long" : "YouTube Short"}</td>
-                <td>{project.targetLanguage}</td>
-                <td>{project.targetDuration}</td>
-                <td>Not loaded</td>
-                <td>{formatDate(project.updatedAt)}</td>
-                <td>Open to calculate</td>
-                <td><StatusBadge tone="success">Persisted</StatusBadge></td>
-                <td className="row-actions">
-                  <button className="button compact" type="button" onClick={() => void props.onOpenProject(project.id)}>Open</button>
-                  <DisabledAction reason="Duplicate is not implemented.">Duplicate</DisabledAction>
-                  <DisabledAction reason="Export ZIP is not implemented.">Export</DisabledAction>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </DataTable>
-      )}
-    </SectionCard>
-  );
-}
-
-function SystemStatus(props: { bootstrap: BootstrapData; providerPresence: ProviderPresence }) {
-  const sqliteUnavailable = /unavailable/i.test(props.bootstrap.databasePath);
-  const runtime = props.bootstrap.runtime;
-  const items = [
-    ["SQLite", sqliteUnavailable ? "Unavailable" : "Ready", props.bootstrap.databasePath],
-    ["9Router", props.providerPresence.hasCredential ? "Credential saved" : "Not configured", "Provider execution is deferred"],
-    ["FFmpeg", runtime.ffmpegAvailable ? "Ready" : "Needs setup", runtime.ffmpegAvailable ? runtime.ffmpegStatus : "Set FFMPEG_PATH or add ffmpeg to PATH"],
-    [
-      "Python sidecar",
-      runtime.pythonExists && runtime.pycapcutStatus === "Installed" ? "Ready" : "Needs setup",
-      `${runtime.pythonVersion}; pycapcut ${runtime.pycapcutStatus}`
-    ],
-    [
-      "CapCut",
-      runtime.capcutInstalled ? "Experimental" : "Unavailable",
-      runtime.capcutInstalled ? `${runtime.capcutInstallPath}; ${runtime.capcutCompatibility}` : "CapCut install path was not found"
-    ],
-    ["Workspace path", "Ready", props.bootstrap.workspaceRoot],
-    ["CodeGraph development index", "Experimental", "Development-only index"]
-  ];
-  return (
-    <SectionCard title="System status">
-      <div className="status-grid">
-        {items.map(([name, status, detail]) => (
-          <div className="status-row" key={name}>
-            <span>{name}</span>
-            <StatusBadge tone={status === "Ready" ? "success" : status === "Experimental" ? "info" : "warning"}>{status}</StatusBadge>
-            <small>{detail}</small>
-          </div>
-        ))}
-      </div>
-    </SectionCard>
-  );
-}
-
-function ProjectsScreen(props: {
-  projectSummaries: ProjectSummary[];
-  onOpenProject: (projectId: string) => Promise<void>;
-  onDeleteProject: (projectId: string) => Promise<void>;
-  setRoute: (route: RouteId) => void;
-}) {
-  return (
-    <>
-      <PageHeader
-        title="Projects"
-        description="Create, open, and manage SQLite-backed local projects."
-        actions={<button className="button primary" type="button" onClick={() => props.setRoute("create")}><Plus size={16} /> Create Video Project</button>}
-      />
-      <SectionCard>
-        {props.projectSummaries.length === 0 ? (
-          <EmptyState title="No persisted projects" detail="The project list is empty because no SQLite-backed project has been created yet." />
-        ) : (
-          <DataTable label="Projects">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Profile</th>
-                <th>Format</th>
-                <th>Language</th>
-                <th>Target duration</th>
-                <th>Updated</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {props.projectSummaries.map((project) => (
-                <tr key={project.id}>
-                  <td>{project.projectName || project.topic}</td>
-                  <td>{project.profileId}</td>
-                  <td>{project.format === "long" ? "YouTube Long" : "YouTube Short"}</td>
-                  <td>{project.targetLanguage}</td>
-                  <td>{project.targetDuration}</td>
-                  <td>{formatDate(project.updatedAt)}</td>
-                  <td><StatusBadge tone="success">Persisted</StatusBadge></td>
-                  <td className="row-actions">
-                    <button className="button compact" type="button" onClick={() => void props.onOpenProject(project.id)}>Open</button>
-                    <button className="button danger compact" type="button" onClick={() => void props.onDeleteProject(project.id)}><Trash2 size={14} /> Delete</button>
-                    <DisabledAction reason="Project duplication is not implemented.">Duplicate</DisabledAction>
-                    <DisabledAction reason="Project export is not implemented.">Export</DisabledAction>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </DataTable>
-        )}
-      </SectionCard>
-    </>
-  );
-}
-
 function SimpleCreateScreen(props: {
   profiles: ChannelProfile[];
   localTtsSettings: LocalTtsSettings | null;
@@ -665,6 +491,7 @@ function SimpleCreateScreen(props: {
     format: "long" | "short";
     targetLanguage: string;
     selectedProfileId?: string;
+    characterVersionId?: string;
     targetDuration?: string;
     projectName?: string;
     workflowMode?: "guided" | "semi_automatic" | "full_automatic";
@@ -685,6 +512,10 @@ function SimpleCreateScreen(props: {
   const [referenceTranscript, setReferenceTranscript] = useState("");
   const [notes, setNotes] = useState("");
   const [profileId, setProfileId] = useState(props.profiles[0]?.id ?? "");
+  const selectedProfile = props.profiles.find((profile) => profile.id === profileId);
+  const approvedCharacterVersions = (selectedProfile?.characterVersions ?? []).filter(characterVersionIsApproved);
+  const defaultCharacterVersion = resolveApprovedCharacterVersion(selectedProfile);
+  const [characterVersionId, setCharacterVersionId] = useState(defaultCharacterVersion?.id ?? "");
   const availableLanguages = simpleCreateLanguageOptions(props.profiles, props.localTtsSettings);
   const [language, setLanguage] = useState(availableLanguages.includes("Vietnamese") ? "Vietnamese" : availableLanguages[0] ?? "English");
   const [duration, setDuration] = useState("45-60 seconds");
@@ -718,6 +549,11 @@ function SimpleCreateScreen(props: {
   const configurationReady = duration !== "Custom" || customDuration.trim().length > 0;
 
   useEffect(() => {
+    const nextDefault = resolveApprovedCharacterVersion(selectedProfile)?.id ?? "";
+    setCharacterVersionId((current) => approvedCharacterVersions.some((version) => version.id === current) ? current : nextDefault);
+  }, [profileId, selectedProfile, approvedCharacterVersions]);
+
+  useEffect(() => {
     if (!voiceOptions.some((voice) => voice.key === voiceId)) setVoiceId(defaultVoiceKey);
   }, [defaultVoiceKey, voiceId, voiceOptions]);
 
@@ -742,6 +578,7 @@ function SimpleCreateScreen(props: {
         inputMode,
         aspectRatio,
         visualStyle: "vox-documentary",
+        ...(characterVersionId ? { characterVersionId } : {}),
         ...(voiceId ? { voiceId: voiceId.startsWith("configured:") ? voiceId.slice("configured:".length) : voiceId } : {}),
         outputResolution: resolution,
         ...(inputMode === "existing_script" ? { sourceScript: script } : {}),
@@ -791,6 +628,12 @@ function SimpleCreateScreen(props: {
         </FormField>
         <FormField label="Visual style" htmlFor="simple-visual-style">
           <select id="simple-visual-style" value="vox-documentary" disabled><option value="vox-documentary">VOX Documentary</option></select>
+        </FormField>
+        <FormField label="Teacher character" htmlFor="simple-character-version" hint={approvedCharacterVersions.length ? "The selected approved version is snapshotted into this project." : "No approved version yet. Create the project, then approve one in Channel Profiles."}>
+          <select id="simple-character-version" value={characterVersionId} onChange={(event) => setCharacterVersionId(event.target.value)}>
+            <option value="">Select after creation</option>
+            {approvedCharacterVersions.map((version) => <option key={version.id} value={version.id}>{version.name} v{version.version}{selectedProfile?.activeCharacterVersionId === version.id ? " (active)" : ""}</option>)}
+          </select>
         </FormField>
         <FormField label="Voice" htmlFor="simple-voice" hint={voiceOptions.length ? "Available configured voices only." : "No available voice preset was detected. The project will need attention before voice generation."}>
           <select id="simple-voice" value={voiceId} onChange={(event) => setVoiceId(event.target.value)}>
