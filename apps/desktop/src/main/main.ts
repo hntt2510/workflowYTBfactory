@@ -23,6 +23,7 @@ import {
   createProjectRequestSchema,
   createFixtureProject,
   characterVersionIsApproved,
+  resolveApprovedCharacterVersion,
   createStageAttention,
   addCompetitorReferenceRequestSchema,
   addCompetitorReferenceResponseSchema,
@@ -840,6 +841,8 @@ app.whenReady().then(async () => {
         topic,
         format: "long",
         targetLanguage: "English",
+        workflowMode: "guided",
+        visualWorkflow: "legacy",
         projectName: topic,
         profiles: seedChannelProfiles
       }));
@@ -885,7 +888,7 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
     writeUiVerificationReport(reportPath, { ok: false, mode, phase: "renderer_loaded", workspaceRoot, databasePath });
     if (mode === "workflow-contract") {
       await assertText(win, "Long/Short Factory");
-      await clickText(win, "Projects");
+      await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
       await assertText(win, "Project command center");
@@ -920,7 +923,7 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
       await assertText(win, "Transcript Cleaning");
       await assertText(win, "eligible chain starts automatically");
     } else if (mode === "reference-restart") {
-      await clickText(win, "Projects");
+      await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
       await assertText(win, "Project command center");
@@ -929,7 +932,7 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
       await clickText(win, "Versions");
       await assertText(win, "v2");
     } else if (mode === "reference-invalidation") {
-      await clickText(win, "Projects");
+      await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
       await assertText(win, "Project command center");
@@ -940,7 +943,7 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
       await assertText(win, "Reference edited. Validate the reference set again.");
       await assertText(win, "stale");
     } else if (mode === "semi-automatic-resume") {
-      await clickText(win, "Projects");
+      await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
       await assertText(win, "Project command center");
@@ -951,7 +954,7 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
       app.quit();
       return;
     } else if (mode === "verify") {
-      await clickText(win, "Projects");
+      await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
       await assertText(win, "Project command center");
@@ -971,7 +974,7 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
       await setInputValue(win, "#simple-topic", topic);
       await clickText(win, "Create Video Project");
       await assertText(win, "Preparing your video");
-      await clickText(win, "Projects");
+      await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
       await assertOneOfText(win, ["Preparing your video", "Project command center"]);
@@ -1021,7 +1024,7 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
   let summary: ReturnType<ProjectRepository["listProjects"]>[number];
   let selectedVoice = "";
   if (resumeProject) {
-    await clickText(win, "Projects");
+      await navigateToRoute(win, "projects");
     await assertText(win, topic);
     await clickProjectOpen(win, topic);
     summary = await waitForPersistedProject(topic);
@@ -1105,7 +1108,7 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
 
   if (!resumedPreviewCompleted) {
     try {
-    await clickText(win, "Projects");
+      await navigateToRoute(win, "projects");
     await assertText(win, topic);
     await clickProjectOpen(win, topic);
     let checkpointText = await waitForOneOfPageText(
@@ -1462,18 +1465,16 @@ function stageDependencyChainApproved(
 function bindActiveApprovedCharacterVersion(project: FactoryProject): FactoryProject {
   if (project.setup.visualWorkflow !== "character_first") return project;
   const profile = projectRepository.loadChannelProfile(project.profileId);
-  const selected = profile?.characterVersions?.find((version) => version.id === project.setup.characterVersionId);
-  if (characterVersionIsApproved(selected)) return project;
-  const character = profile?.characterVersions?.find((version) => version.id === profile.activeCharacterVersionId);
-  if (!character || !characterVersionIsApproved(character)) return project;
+  const character = resolveApprovedCharacterVersion(profile, project.setup.characterVersionId);
+  if (!character || character.id === project.setup.characterVersionId) return project;
   return { ...project, setup: { ...project.setup, characterVersionId: character.id } };
 }
 
 function characterReferenceImagesForProject(project: FactoryProject): ImageReferenceInput[] {
   if (project.setup.visualWorkflow !== "character_first") return [];
   const profile = projectRepository.loadChannelProfile(project.profileId);
-  const character = profile?.characterVersions?.find((version) => version.id === project.setup.characterVersionId);
-  if (!character || !characterVersionIsApproved(character)) return [];
+  const character = resolveApprovedCharacterVersion(profile, project.setup.characterVersionId);
+  if (!character) return [];
   const preferredViews: CharacterReferenceView[] = ["hero", "half_body", "teaching_gesture", "three_quarter", "profile", "full_body"];
   return preferredViews
     .map((view) => character.references.find((reference) => reference.view === view && reference.status === "approved" && reference.relativeFilePath))
@@ -1483,9 +1484,13 @@ function characterReferenceImagesForProject(project: FactoryProject): ImageRefer
 }
 
 function currentApprovedArtifacts(project: FactoryProject, stageId: string): WorkflowArtifact[] {
+  if (project.setup.visualWorkflow === "character_first") {
+    const boundProject = bindActiveApprovedCharacterVersion(project);
+    if (boundProject !== project && boundProject.setup.characterVersionId) project.setup.characterVersionId = boundProject.setup.characterVersionId;
+  }
   if (stageId === "visual-routing" && project.setup.visualWorkflow === "character_first") {
-    const character = projectRepository.loadChannelProfile(project.profileId)?.characterVersions?.find((version) => version.id === project.setup.characterVersionId);
-    if (!character || !characterVersionIsApproved(character)) throw new Error("Visual Routing requires an approved character version.");
+    const character = resolveApprovedCharacterVersion(projectRepository.loadChannelProfile(project.profileId), project.setup.characterVersionId);
+    if (!character) throw new Error("Visual Routing requires an approved character version.");
   }
   const stages = normalizeProjectStages(project.stages, project.setup.visualWorkflow);
   const stage = stages.find((item) => item.id === stageId);
@@ -1847,6 +1852,17 @@ async function clickText(win: BrowserWindow, label: string): Promise<void> {
   if (!result.clicked) {
     throw new Error(`Could not click enabled control: ${label}. Controls: ${JSON.stringify(result.controls).slice(0, 1200)}`);
   }
+  await delay(500);
+}
+
+async function navigateToRoute(win: BrowserWindow, route: string): Promise<void> {
+  await win.webContents.executeJavaScript(
+    `(() => {
+      window.location.hash = ${JSON.stringify(`#${route}`)};
+      return window.location.hash;
+    })()`,
+    true
+  );
   await delay(500);
 }
 
@@ -3737,8 +3753,8 @@ ipcMain.handle("run-asset-concepts", async (_event, input: unknown) => {
   if (!project) throw new Error(`Project not found: ${projectId}`);
   if (project.setup.visualWorkflow !== "character_first") return factoryProjectResponseSchema.parse(project);
   const profile = projectRepository.loadChannelProfile(project.profileId);
-  const character = profile?.characterVersions?.find((version) => version.id === project.setup.characterVersionId);
-  if (!character || !characterVersionIsApproved(character)) throw new Error("Asset Concepts requires an approved character version.");
+  const character = resolveApprovedCharacterVersion(profile, project.setup.characterVersionId);
+  if (!character) throw new Error("Asset Concepts requires an approved character version.");
   const visualArtifact = currentApprovedArtifacts(project, "visual-routing").find((item) => item.payloadJson);
   if (!visualArtifact?.payloadJson) throw new Error("Asset Concepts requires approved Visual Routing.");
   const routing = visualRoutingOutputSchema.parse(visualArtifact.payloadJson);
@@ -4069,38 +4085,18 @@ ipcMain.handle("run-asset-review", (_event, input: unknown) => {
   const artifactId = `artifact-${randomUUID()}`;
   const now = new Date().toISOString();
   const output = assetReviewOutputSchema.parse({ acquisitionArtifactId: acquisition.id, assets: reviewItems });
-  const automaticApproval = project.setup.visualWorkflow === "character_first";
-  const automaticOutput = automaticApproval
-    ? assetReviewOutputSchema.parse({ acquisitionArtifactId: acquisition.id, assets: reviewItems.map((item) => ({ ...item, reviewStatus: "approved" as const, assignedShotId: item.asset.shotId })) })
-    : output;
   const review = transitionProjectStage(transitionProjectStage(transitionProjectStage(project, "asset-review", "queued"), "asset-review", "running"), "asset-review", "needs_review");
-  const assignments = resolveProjectAssetAssignments(project, automaticOutput.assets);
-  const missingShotIds = [...requiredAssetShotIds(project)].filter((shotId) => !assignments.has(shotId));
-  const hashesValid = automaticOutput.assets.every((item) => {
-    try {
-      assertCurrentApprovedAsset(item.asset, item.asset.shotId);
-      return true;
-    } catch {
-      return false;
-    }
-  });
-  const canAutoApprove = automaticApproval && missingShotIds.length === 0 && hashesValid && project.shots.every((shot) => shot.visualMode !== "reuse" || assignments.has(shot.id));
-  const persistedOutput = canAutoApprove ? automaticOutput : output;
-  const approved = canAutoApprove
-    ? transitionProjectStage({ ...review, shots: review.shots.map((shot) => assignments.has(shot.id) ? { ...shot, approvedAssetId: assignments.get(shot.id)! } : shot) }, "asset-review", "approved")
-    : undefined;
   db.exec("BEGIN IMMEDIATE;");
   try {
     saveProjectWithWorkflowInvalidation(review, { withinTransaction: true });
     workflowRunStore.createRun({ id: runId, projectId, stageId: "asset-review", status: "running", runnerId: "asset-review-local", runnerVersion: "asset-review-v1", inputArtifactIds: [acquisition.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now });
-    workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-review", status: "needs_review", runnerId: "asset-review-local", runnerVersion: "asset-review-v1", inputArtifactIds: [acquisition.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId, stageId: "asset-review", stageRunId: runId, type: "asset-review", version: workflowRunStore.listArtifacts(projectId, "asset-review").length + 1, status: "needs_review", payloadJson: persistedOutput, createdAt: now, updatedAt: now }, { withinTransaction: true });
-    if (canAutoApprove && approved) { workflowRunStore.approveReviewRun(runId, { withinTransaction: true, approvalMode: "automatic" }); saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); }
+    workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-review", status: "needs_review", runnerId: "asset-review-local", runnerVersion: "asset-review-v1", inputArtifactIds: [acquisition.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId, stageId: "asset-review", stageRunId: runId, type: "asset-review", version: workflowRunStore.listArtifacts(projectId, "asset-review").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true });
     db.exec("COMMIT;");
   } catch (error) {
     db.exec("ROLLBACK;");
     throw error;
   }
-  return factoryProjectResponseSchema.parse(approved ?? review);
+  return factoryProjectResponseSchema.parse(review);
 });
 ipcMain.handle("list-asset-review-artifacts", (_event, input: unknown) => { const { projectId } = assetReviewRequestSchema.parse(input); return assetReviewArtifactsResponseSchema.parse(workflowRunStore.listArtifacts(projectId, "asset-review").map((artifact) => ({ id: artifact.id, ...(artifact.stageRunId ? { stageRunId: artifact.stageRunId } : {}), status: artifact.status, payloadJson: artifact.payloadJson, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt }))); });
   ipcMain.handle("revise-asset-review", (_event, input: unknown) => {
@@ -4333,7 +4329,10 @@ ipcMain.handle("select-manual-asset-upload", async (_event, input: unknown) => {
   nextProject = markDownstreamStagesStale(nextProject, "asset-review");
   db.exec("BEGIN IMMEDIATE;");
   try {
-    if (reviewArtifact?.stageRunId) workflowRunStore.rejectReviewRun(reviewArtifact.stageRunId, { withinTransaction: true });
+    if (reviewArtifact?.stageRunId) {
+      if (reviewArtifact.status === "needs_review") workflowRunStore.rejectReviewRun(reviewArtifact.stageRunId, { withinTransaction: true });
+      else if (reviewArtifact.status === "approved") workflowRunStore.markStageArtifactsStale(request.projectId, ["asset-review"]);
+    }
     saveProjectWithWorkflowInvalidation(nextProject, { withinTransaction: true });
     workflowRunStore.createRun({ id: acquisitionRunId, projectId: request.projectId, stageId: "asset-acquisition", status: "running", runnerId: "asset-intake-manual", runnerVersion: "asset-intake-v1", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now });
     workflowRunStore.finishRun({ id: acquisitionRunId, projectId: request.projectId, stageId: "asset-acquisition", status: "needs_review", runnerId: "asset-intake-manual", runnerVersion: "asset-intake-v1", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [acquisitionArtifactId], finishedAt: now }, { id: acquisitionArtifactId, projectId: request.projectId, stageId: "asset-acquisition", stageRunId: acquisitionRunId, type: "asset", version: workflowRunStore.listArtifacts(request.projectId, "asset-acquisition").length + 1, status: "needs_review", payloadJson: acquisitionOutput, createdAt: now, updatedAt: now }, { withinTransaction: true });

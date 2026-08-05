@@ -93,7 +93,7 @@ export function AppShell(props: {
           setRoute={props.setRoute}
         />
         {props.selectedProject ? <ProjectPhaseStepper project={props.selectedProject} route={props.route} setRoute={props.setRoute} /> : null}
-        <section className="content-scroll">{props.children}</section>
+        <section className="content-scroll"><RouteTransition route={props.route}>{props.children}</RouteTransition></section>
       </section>
     </main>
   );
@@ -116,6 +116,23 @@ function Sidebar(props: {
       </nav>
     </aside>
   );
+}
+
+function RouteTransition(props: { route: RouteId; children: ReactNode }) {
+  const root = useRef<HTMLDivElement>(null);
+  useGSAP(() => {
+    const media = gsap.matchMedia();
+    media.add({ reduceMotion: "(prefers-reduced-motion: reduce)" }, (context) => {
+      const panel = root.current;
+      if (!panel) return;
+      gsap.set(panel, { autoAlpha: 1, y: 0 });
+      if (context.conditions?.reduceMotion) return;
+      const timeline = gsap.timeline({ defaults: { duration: 0.2, ease: "power2.out" } });
+      timeline.fromTo(panel, { autoAlpha: 0, y: 6 }, { autoAlpha: 1, y: 0 });
+    }, root);
+    return () => media.revert();
+  }, { scope: root, dependencies: [props.route], revertOnUpdate: true });
+  return <div ref={root} data-route={props.route}>{props.children}</div>;
 }
 
 function ProjectPhaseStepper(props: { project: FactoryProject; route: RouteId; setRoute: (route: RouteId) => void }) {

@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "projectId": "fixture-creator-studio-v1",
+  "projectName": "Dòng tiền trong 60 giây",
+  "format": "short",
+  "aspectRatio": "9:16",
+  "fps": 30,
+  "targetDurationSeconds": 10,
+  "character": {
+    "id": "teacher-mina-v1",
+    "name": "Mina",
+    "role": "finance teacher",
+    "invariantTraits": ["round glasses", "navy blazer", "warm amber accent", "half-body framing"],
+    "composition": {
+      "subjectAnchor": "right",
+      "subjectBox": { "x": 0.52, "y": 0.14, "width": 0.42, "height": 0.66 },
+      "safeZone": { "x": 0.04, "y": 0.05, "width": 0.46, "height": 0.84 }
+    }
+  },
+  "scenes": [
+    {
+      "id": "scene-01-hook",
+      "purpose": "Introduce the cash-flow problem",
+      "frames": ["001", "002", "003"],
+      "recurringCharacter": true
+    },
+    {
+      "id": "scene-02-mechanism",
+      "purpose": "Explain money moving through a business",
+      "frames": ["004", "005", "006", "007"],
+      "recurringCharacter": true
+    },
+    {
+      "id": "scene-03-payoff",
+      "purpose": "Show the takeaway and a cutaway chart",
+      "frames": ["008", "009", "010"],
+      "recurringCharacter": true
+    }
+  ],
+  "frames": [
+    { "number": "001", "sceneId": "scene-01-hook", "role": "BASE", "action": "teacher faces camera", "assetStrategy": "NEW_BASE", "motion": "zoom_in" },
+    { "number": "002", "sceneId": "scene-01-hook", "role": "EXPRESSION_CHANGE", "action": "teacher raises eyebrow", "assetStrategy": "EXPRESSION_VARIATION", "motion": "pop" },
+    { "number": "003", "sceneId": "scene-01-hook", "role": "REUSE", "action": "hold the approved hook frame", "assetStrategy": "REUSE_EXISTING", "motion": "zoom_out", "reuseOf": "001" },
+    { "number": "004", "sceneId": "scene-02-mechanism", "role": "POSE_CHANGE", "action": "teacher points to left safe zone", "assetStrategy": "POSE_VARIATION", "motion": "slide_up" },
+    { "number": "005", "sceneId": "scene-02-mechanism", "role": "GRAPHIC", "action": "cash-flow arrow rises", "assetStrategy": "GRAPHIC_ASSET", "motion": "slide_up" },
+    { "number": "006", "sceneId": "scene-02-mechanism", "role": "INSERT", "action": "money stack cutaway", "assetStrategy": "INSERT_DETAIL", "motion": "pan_right" },
+    { "number": "007", "sceneId": "scene-02-mechanism", "role": "POSE_CHANGE", "action": "teacher opens both hands", "assetStrategy": "POSE_VARIATION", "motion": "dissolve" },
+    { "number": "008", "sceneId": "scene-03-payoff", "role": "EXPRESSION_CHANGE", "action": "teacher smiles with confidence", "assetStrategy": "EXPRESSION_VARIATION", "motion": "zoom_in" },
+    { "number": "009", "sceneId": "scene-03-payoff", "role": "CUTAWAY", "action": "simple chart compares inflow and outflow", "assetStrategy": "GRAPHIC_ASSET", "motion": "pan_left" },
+    { "number": "010", "sceneId": "scene-03-payoff", "role": "ACTION_KEYFRAME", "action": "teacher points to the final takeaway", "assetStrategy": "POSE_VARIATION", "motion": "pop" }
+  ],
+  "audio": {
+    "voice": "audio/voice-fixture.wav",
+    "music": "audio/music-fixture.wav",
+    "sfx": "audio/sfx-fixture.wav",
+    "subtitles": "audio/subtitles.srt"
+  },
+  "output": {
+    "mp4": "creator-studio-v1.mp4",
+    "expectedWidth": 1080,
+    "expectedHeight": 1920,
+    "expectedVideoCodec": "h264",
+    "expectedPixelFormat": "yuv420p",
+    "expectedAudioCodec": "aac"
+  }
+}

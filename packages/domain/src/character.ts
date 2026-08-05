@@ -84,6 +84,21 @@ export function characterVersionIsApproved(version: CharacterVersion | undefined
   )));
 }
 
+/** Resolve the requested character first, then the channel's active approved version. */
+export function resolveApprovedCharacterVersion(
+  profile: { characterVersions?: CharacterVersion[]; activeCharacterVersionId?: string } | undefined,
+  requestedVersionId?: string
+): CharacterVersion | undefined {
+  const versions = profile?.characterVersions ?? [];
+  const requested = requestedVersionId ? versions.find((version) => version.id === requestedVersionId) : undefined;
+  if (characterVersionIsApproved(requested)) return requested;
+  const active = profile?.activeCharacterVersionId
+    ? versions.find((version) => version.id === profile.activeCharacterVersionId)
+    : undefined;
+  if (characterVersionIsApproved(active)) return active;
+  return versions.find((version) => characterVersionIsApproved(version));
+}
+
 export function characterReferenceViewsForCount(count = 5): CharacterReferenceView[] {
   if (!Number.isInteger(count) || count < 4 || count > characterReferenceViews.length) throw new Error("Character identity packs must contain 4 to 6 views.");
   return characterReferenceViews.slice(0, count);

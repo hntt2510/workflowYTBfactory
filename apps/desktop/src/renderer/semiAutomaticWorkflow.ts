@@ -1,4 +1,4 @@
-import { characterVersionIsApproved, semiAutomaticAutomaticStageIds, semiAutomaticCheckpointIds, type ChannelProfile, type FactoryProject, type WorkflowStageStatus } from "@lsf/domain";
+import { resolveApprovedCharacterVersion, semiAutomaticAutomaticStageIds, semiAutomaticCheckpointIds, type ChannelProfile, type FactoryProject, type WorkflowStageStatus } from "@lsf/domain";
 import type { LongShortFactoryApi } from "./types";
 import { safeRendererError } from "./utils";
 
@@ -44,9 +44,7 @@ export function hasSemiAutomaticAttention(project: FactoryProject): boolean {
 
 export function characterVersionNeedsSetup(project: FactoryProject, profile: ChannelProfile | undefined): boolean {
   if (project.setup.visualWorkflow !== "character_first") return false;
-  const boundCharacter = profile?.characterVersions?.find((version) => version.id === project.setup.characterVersionId);
-  const activeCharacter = profile?.characterVersions?.find((version) => version.id === profile.activeCharacterVersionId);
-  return !characterVersionIsApproved(boundCharacter) && !characterVersionIsApproved(activeCharacter);
+  return !resolveApprovedCharacterVersion(profile, project.setup.characterVersionId);
 }
 
 /** Returns the next automatic segment without crossing a human checkpoint. */

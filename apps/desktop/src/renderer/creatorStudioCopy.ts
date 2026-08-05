@@ -39,6 +39,16 @@ const routeLabels: Partial<Record<RouteId, string>> = {
 
 const statusLabels: Record<string, string> = {
   not_started: "Chưa bắt đầu",
+  draft: "Bản nháp",
+  preparing: "Đang chuẩn bị",
+  waiting_for_idea: "Chờ chọn ý tưởng",
+  needs_scene_review: "Chờ duyệt cảnh",
+  generating_media: "Đang chuẩn bị hình ảnh",
+  generating_voice: "Đang tạo giọng đọc",
+  rendering_preview: "Đang dựng bản xem trước",
+  needs_final_review: "Chờ duyệt bản xem trước",
+  exporting: "Đang xuất video",
+  completed: "Hoàn tất",
   blocked: "Đang chờ bước trước",
   ready: "Sẵn sàng",
   queued: "Đang xếp hàng",
@@ -52,7 +62,27 @@ const statusLabels: Record<string, string> = {
   complete: "Hoàn tất",
   current: "Đang làm",
   optional: "Tuỳ chọn",
-  not_applicable: "Không dùng"
+  not_applicable: "Không dùng",
+  supported: "Đạt",
+  needs_qualification: "Cần nêu rõ",
+  pass: "Đạt",
+  needs_changes: "Cần chỉnh sửa",
+  low: "Thấp",
+  medium: "Vừa",
+  high: "Cao",
+  blocking: "Chặn",
+  warning: "Cảnh báo",
+  DEPENDENCY_NOT_APPROVED: "Chưa duyệt bước trước",
+  DEPENDENCY_CHAIN_NOT_APPROVED: "Chuỗi bước trước chưa hoàn tất",
+  CHARACTER_VERSION_NOT_APPROVED: "Chưa duyệt nhân vật",
+  NO_INCLUDED_REFERENCES: "Chưa có tài liệu tham khảo",
+  UNRESOLVED_DUPLICATES: "Có tài liệu trùng cần xử lý",
+  INVALID_INCLUDED_REFERENCES: "Tài liệu tham khảo chưa hợp lệ",
+  REFERENCE_SET_NOT_APPROVED: "Chưa duyệt bộ tài liệu tham khảo",
+  TEXT_MODEL_NOT_VERIFIED: "Chưa xác minh model chữ",
+  IMAGE_MODEL_NOT_VERIFIED: "Chưa xác minh model hình ảnh",
+  VIDEO_MODEL_NOT_VERIFIED: "Chưa xác minh model video",
+  AUDIO_MODEL_NOT_VERIFIED: "Chưa xác minh model âm thanh"
 };
 
 export function creatorRouteLabel(route: RouteId): string {
@@ -60,9 +90,13 @@ export function creatorRouteLabel(route: RouteId): string {
 }
 
 export function creatorStatusLabel(status: string): string {
-  return statusLabels[status] ?? status;
+  return statusLabels[status] ?? "Trạng thái chưa xác định";
 }
 
 export function creatorPhaseStateLabel(state: string): string {
-  return statusLabels[state] ?? state;
+  return statusLabels[state] ?? "Trạng thái chưa xác định";
+}
+
+export function creatorInputModeLabel(inputMode: string): string {
+  return ({ topic: "Chủ đề", existing_script: "Kịch bản có sẵn", reference: "Tài liệu tham khảo" } as Record<string, string>)[inputMode] ?? "Khác";
 }
