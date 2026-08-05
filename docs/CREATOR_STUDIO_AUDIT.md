@@ -6,7 +6,7 @@ New character-first projects currently move through project setup, story/review 
 
 ## Architectural bottlenecks
 
-- `apps/desktop/src/renderer/App.tsx` contains app state, route dispatch, data fetching, mutations, and nearly every screen in a 4,266-line module.
+- `apps/desktop/src/renderer/App.tsx` contains app state, route dispatch, data fetching, mutations, and the remaining story, project-creation, production, and voice-settings screen logic in a 2,342-line module after the current extraction slices.
 - `AppShell` and `styles.css` provide a dark foundation, but permanent navigation and copy still expose technical routes/statuses instead of a creator journey.
 - Manual asset intake exists and preserves scene assets, but the normal path still shares eligibility and orchestration assumptions with automatic image acquisition.
 - Prompt preparation already compiles scene-level GG Lab prompts and numeric frame manifests, but the creator-facing flow needs a single scene prompt surface and explicit upload gate.
