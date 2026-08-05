@@ -3,7 +3,7 @@ import { getDownstreamWorkflowStageIds, getWorkflowStageImpactIds, perReferenceA
 import type { WorkflowStageDefinition } from "../src";
 
 describe("workflow registry", () => {
-  it("keeps the canonical 28-stage order stable", () => {
+  it("keeps the canonical 30-stage order stable", () => {
     expect(workflowStageDefinitions.map((stage) => stage.id)).toEqual([
       "project-setup",
       "reference-intake",
@@ -22,7 +22,9 @@ describe("workflow registry", () => {
       "retention-review",
       "scene-plan",
       "shot-plan",
+      "character-preparation",
       "visual-routing",
+      "asset-concepts",
       "prompt-preparation",
       "asset-acquisition",
       "asset-review",
@@ -56,7 +58,9 @@ describe("workflow registry", () => {
     const byId = new Map(workflowStageDefinitions.map((stage) => [stage.id, stage]));
     expect(byId.get("scene-plan")?.invalidates).toEqual(["shot-plan"]);
     expect(byId.get("shot-plan")?.invalidates).toEqual(["visual-routing"]);
-    expect(byId.get("visual-routing")?.invalidates).toEqual(["prompt-preparation"]);
+    expect(byId.get("character-preparation")?.invalidates).toEqual(["asset-concepts"]);
+    expect(byId.get("visual-routing")?.invalidates).toEqual(["asset-concepts"]);
+    expect(byId.get("asset-concepts")?.invalidates).toEqual(["prompt-preparation"]);
     expect(byId.get("prompt-preparation")?.invalidates).toEqual(["asset-acquisition"]);
     expect(byId.get("asset-acquisition")?.invalidates).toEqual(["asset-review"]);
     expect(byId.get("asset-review")?.invalidates).toEqual(["voice-generation"]);
@@ -66,6 +70,7 @@ describe("workflow registry", () => {
     expect([...getDownstreamWorkflowStageIds("scene-plan")]).toEqual([
       "shot-plan",
       "visual-routing",
+      "asset-concepts",
       "prompt-preparation",
       "asset-acquisition",
       "asset-review",

@@ -17,7 +17,8 @@ describe("workflow progress", () => {
       "claim-map"
     ]));
     expect(progress.currentStageId).toBe("idea-lab");
-    expect(progress.totalCount).toBe(19);
+    expect(progress.totalCount).toBe(21);
+    expect(progress.phases.find((phase) => phase.id === "scene-review")).toMatchObject({ totalCount: 6 });
   });
 
   it("keeps the reference branch in progress when a reference is supplied", () => {
@@ -55,7 +56,7 @@ describe("workflow progress", () => {
     const project = createFixtureProject({ topic: "Complete project", format: "short", targetLanguage: "Vietnamese", inputMode: "topic" });
     const requiredTopicStages = new Set([
       "project-setup", "idea-lab", "originality-review", "outline", "script", "fact-review", "retention-review", "scene-plan", "shot-plan",
-      "visual-routing", "prompt-preparation", "asset-acquisition", "asset-review", "voice-generation", "subtitle-preparation", "timeline-assembly",
+      "visual-routing", "character-preparation", "asset-concepts", "prompt-preparation", "asset-acquisition", "asset-review", "voice-generation", "subtitle-preparation", "timeline-assembly",
       "preview-render", "qa", "packaging-export"
     ]);
     const complete = { ...project, stages: project.stages.map((stage) => requiredTopicStages.has(stage.id) ? { ...stage, status: "approved" as const } : stage) };

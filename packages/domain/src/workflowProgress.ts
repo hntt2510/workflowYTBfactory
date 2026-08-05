@@ -53,7 +53,7 @@ export const workflowProgressPhaseDefinitions = [
   {
     id: "scene-review",
     name: "Scene review",
-    stageIds: ["visual-routing", "prompt-preparation", "asset-acquisition", "asset-review"]
+    stageIds: ["character-preparation", "visual-routing", "asset-concepts", "prompt-preparation", "asset-acquisition", "asset-review"]
   },
   {
     id: "voice-and-captions",
