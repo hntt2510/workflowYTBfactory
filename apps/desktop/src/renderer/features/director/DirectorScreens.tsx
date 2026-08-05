@@ -19,8 +19,9 @@ import { creatorStatusLabel } from "../../creatorStudioCopy";
 import type { SemiAutomaticChain } from "../../semiAutomaticWorkflow";
 import { AssetIntakePanel } from "../assets/AssetIntakePanel";
 import { StageStatusHeader, canRetryStage } from "../../components/workflow";
+import type { RouteId } from "../../navigation";
 
-export function ScenesScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; textCertification: TextModelCertificationResponse }) {
+export function ScenesScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; setRoute: (route: RouteId) => void; textCertification: TextModelCertificationResponse }) {
   const [artifacts, setArtifacts] = useState<ScenePlanArtifact[]>([]); const [running, setRunning] = useState(false); const [message, setMessage] = useState("");
   const eligibility = resolveStageEligibilities(props.project, { textVerified: props.textCertification.status === "verified" }).find((stage) => stage.stageId === "scene-plan")!;
   const refresh = () => factoryClient.listScenePlanArtifacts({ projectId: props.project.id }).then(setArtifacts);
@@ -34,17 +35,42 @@ export function ScenesScreen(props: { project: FactoryProject; setSelectedProjec
       <div className="card-grid">
         {props.project.scenes.map((scene) => (
           <SectionCard key={scene.id} className="compact-card">
-            <div className="scene-card">
-              <strong>{scene.id}</strong>
-              <span>{scene.purpose}</span>
-              <small>{formatTimecode(scene.startFrame, props.project.timeline.fps)} / {formatTimecode(scene.durationFrames, props.project.timeline.fps)}</small>
-              <StatusBadge tone="demo">{scene.visualMode}</StatusBadge>
-            </div>
+            <SceneCard scene={scene} shots={props.project.shots.filter((shot) => shot.sceneId === scene.id)} fps={props.project.timeline.fps} status={eligibility.status} onOpenStoryboard={() => props.setRoute("shots")} />
           </SectionCard>
         ))}
       </div>
     </>
   );
+}
+
+function SceneCard(props: { scene: FactoryProject["scenes"][number]; shots: FactoryProject["shots"]; fps: number; status: string; onOpenStoryboard: () => void }) {
+  const firstShot = props.shots[0];
+  const lastShot = props.shots.at(-1);
+  const requiredImageCount = props.shots.filter((shot) => shot.visualMode !== "reuse").length;
+  const stateBefore = summarizeState(firstShot?.startState, "Narrative setup");
+  const stateAfter = summarizeState(lastShot?.endState, "Narrative state after the scene");
+  const dramaticChange = props.shots.map((shot) => shot.subjectAction).filter(Boolean).join(" -> ") || "No dramatic change specified";
+  const transition = props.scene.continuityRefs.length ? `Continues from ${props.scene.continuityRefs.join(", ")}` : "Fresh scene entry";
+  return <div className="scene-card">
+    <div className="scene-card-heading"><div><strong>{props.scene.id}</strong><span>{props.scene.purpose}</span></div><StatusBadge tone={props.status === "approved" ? "success" : "info"}>{creatorStatusLabel(props.status)}</StatusBadge></div>
+    <p className="scene-narration">{props.scene.narration}</p>
+    <dl className="scene-details">
+      <div><dt>State before</dt><dd>{stateBefore}</dd></div>
+      <div><dt>Dramatic change</dt><dd>{dramaticChange}</dd></div>
+      <div><dt>State after</dt><dd>{stateAfter}</dd></div>
+      <div><dt>Emotional arc</dt><dd>{props.scene.emotionalState}</dd></div>
+      <div><dt>Narration range</dt><dd>{formatTimecode(props.scene.startFrame, props.fps)} - {formatTimecode(props.scene.startFrame + props.scene.durationFrames, props.fps)}</dd></div>
+      <div><dt>Duration / images</dt><dd>{(props.scene.durationFrames / props.fps).toFixed(1)}s · {requiredImageCount} new / {props.shots.length} frames</dd></div>
+      <div><dt>Audio intention</dt><dd>Clear narration emphasis with a breath after the scene turn.</dd></div>
+      <div><dt>Transition</dt><dd>{transition}</dd></div>
+    </dl>
+    <div className="button-row"><button className="button primary compact" type="button" onClick={props.onOpenStoryboard}>Open storyboard</button></div>
+  </div>;
+}
+
+function summarizeState(state: Record<string, unknown> | undefined, fallback: string): string {
+  if (!state || Object.keys(state).length === 0) return fallback;
+  return Object.entries(state).slice(0, 2).map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value) ?? "set"}`).join(" · ");
 }
 
 export function ShotsScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; textCertification: TextModelCertificationResponse }) {
