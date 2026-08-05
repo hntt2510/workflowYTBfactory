@@ -1,13 +1,19 @@
 export type RouteId =
-  | "dashboard"
   | "projects"
+  | "create"
+  | "production"
+  | "scene-review"
+  | "final-preview"
+  | "export"
+  | "settings"
+  | "diagnostics"
+  | "dashboard"
   | "new-project"
   | "project-overview"
   | "channel-profiles"
   | "reference-intake"
   | "competitor-dna"
   | "idea-lab"
-  | "research-claims"
   | "script"
   | "scenes"
   | "shots"
@@ -15,12 +21,10 @@ export type RouteId =
   | "voice"
   | "timeline"
   | "qa"
-  | "export"
   | "production-queue"
   | "asset-library"
   | "providers"
-  | "settings"
-  | "diagnostics";
+  | "advanced-pipeline";
 
 export interface NavItem {
   id: RouteId;
@@ -29,22 +33,23 @@ export interface NavItem {
 }
 
 export const workspaceRoutes: NavItem[] = [
-  { id: "dashboard", label: "Overview" },
+  { id: "dashboard", label: "Home" },
   { id: "projects", label: "Projects" },
-  { id: "channel-profiles", label: "Channel Profiles" },
-  { id: "production-queue", label: "Production Queue" },
   { id: "asset-library", label: "Asset Library" },
-  { id: "providers", label: "Providers" },
-  { id: "settings", label: "Settings" },
-  { id: "diagnostics", label: "Diagnostics" }
+  { id: "settings", label: "Settings" }
 ];
 
 export const projectRoutes: NavItem[] = [
-  { id: "project-overview", label: "Project Overview", requiresProject: true },
+  { id: "project-overview", label: "Project Diagnostic", requiresProject: true },
+  { id: "final-preview", label: "Final Preview", requiresProject: true },
+  { id: "export", label: "Export", requiresProject: true }
+];
+
+export const advancedRoutes: NavItem[] = [
+  { id: "advanced-pipeline", label: "Advanced Pipeline Details", requiresProject: true },
   { id: "reference-intake", label: "Reference Intake", requiresProject: true },
   { id: "competitor-dna", label: "Competitor DNA", requiresProject: true },
   { id: "idea-lab", label: "Idea Lab", requiresProject: true },
-  { id: "research-claims", label: "Research & Claims", requiresProject: true },
   { id: "script", label: "Script", requiresProject: true },
   { id: "scenes", label: "Scenes", requiresProject: true },
   { id: "shots", label: "Shots", requiresProject: true },
@@ -52,10 +57,12 @@ export const projectRoutes: NavItem[] = [
   { id: "voice", label: "Voice", requiresProject: true },
   { id: "timeline", label: "Timeline", requiresProject: true },
   { id: "qa", label: "QA", requiresProject: true },
-  { id: "export", label: "Export", requiresProject: true }
+  { id: "production-queue", label: "Production Queue" },
+  { id: "asset-library", label: "Asset Library" },
+  { id: "providers", label: "Providers" }
 ];
 
-export const allRoutes = [...workspaceRoutes, { id: "new-project", label: "New Project" } satisfies NavItem, ...projectRoutes];
+export const allRoutes = [...workspaceRoutes, { id: "new-project", label: "New Project" } satisfies NavItem, ...projectRoutes, ...advancedRoutes];
 
 export function routeLabel(route: RouteId): string {
   return allRoutes.find((item) => item.id === route)?.label ?? "Overview";

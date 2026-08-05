@@ -18,7 +18,6 @@ When a project is open, project routes are available:
 
 - `#project-overview`
 - `#idea-lab`
-- `#research-claims`
 - `#script`
 - `#scenes`
 - `#shots`
@@ -39,7 +38,7 @@ The New Project Wizard collects topic, project name, format, language, target du
 Project overview displays persisted project statistics, saved setup values, workflow stages, dependencies, blocked reasons, and links to project workflow screens. Stage screens show real persisted data where available:
 
 - Idea Lab: demo generated ideas.
-- Research & Claims: starter claims.
+- Outline: generated directly from the approved idea and Originality Review; no web research or Claim Map stage is required.
 - Script: read-only script sections.
 - Scenes: persisted scene data.
 - Shots: persisted shot data.

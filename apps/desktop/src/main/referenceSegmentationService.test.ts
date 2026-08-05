@@ -27,11 +27,11 @@ describe("reference segmentation service", () => {
     const { db, credentialStore, certificationStore } = await setup();
     const cleanedTranscript = "Hello world. Evidence follows.";
     const result = await runReferenceSegmentation({
-      referenceId: "ref-1", cleanedTranscript, credentialStore, certificationStore,
+      referenceId: "ref-1", cleanedTranscriptArtifactId: "artifact-cleaned-1", cleanedTranscript, credentialStore, certificationStore,
       createClient: () => ({ createResponseText: async () => ({ returnedModelId: "segmenter-v1", text: JSON.stringify({
-        referenceId: "ref-1", segments: [
-          { id: "segment-1", order: 0, startCharacter: 0, endCharacter: 12, type: "hook", text: "Hello world.", function: "Open the topic" },
-          { id: "segment-2", order: 1, startCharacter: 13, endCharacter: cleanedTranscript.length, type: "evidence", text: "Evidence follows.", function: "Support the opening" }
+        referenceId: "ref-1", cleanedTranscriptArtifactId: "artifact-cleaned-1", excludedSegmentIds: [], segments: [
+          { id: "segment-1", order: 0, startCharacter: 0, endCharacter: 12, type: "hook", text: "Hello world.", function: "Open the topic", includedForDna: true },
+          { id: "segment-2", order: 1, startCharacter: 12, endCharacter: cleanedTranscript.length, type: "evidence", text: " Evidence follows.", function: "Support the opening", includedForDna: true }
         ]
       }) }) })
     });
@@ -39,10 +39,30 @@ describe("reference segmentation service", () => {
     db.close();
   });
 
+  it("segments long cleaned transcripts sequentially and merges exact ranges", async () => {
+    const { db, credentialStore, certificationStore } = await setup();
+    const cleanedTranscript = "First paragraph.\n\nSecond paragraph.";
+    let calls = 0;
+    const result = await runReferenceSegmentation({
+      referenceId: "ref-1", cleanedTranscriptArtifactId: "artifact-cleaned-1", cleanedTranscript, maxChunkCharacters: 18, credentialStore, certificationStore,
+      createClient: () => ({ createResponseText: async ({ input }) => {
+        calls += 1;
+        const chunk = input.split("Approved cleaned transcript chunk follows:\n")[1] ?? "";
+        return { text: JSON.stringify({ referenceId: "ref-1", cleanedTranscriptArtifactId: "artifact-cleaned-1", excludedSegmentIds: [], segments: [
+          { id: "segment-1", order: 0, startCharacter: 0, endCharacter: chunk.length, type: "story", text: chunk, function: "Advance the narrative", includedForDna: true }
+        ] }) };
+      } })
+    });
+    expect(calls).toBeGreaterThan(1);
+    expect(result.output.segments.map((segment) => segment.text).join("")).toBe(cleanedTranscript);
+    expect(result.output.segments.every((segment, index, segments) => index === 0 ? segment.startCharacter === 0 : segment.startCharacter === segments[index - 1]!.endCharacter)).toBe(true);
+    db.close();
+  });
+
   it("fails closed when a segment invents text outside the approved transcript", async () => {
     const { db, credentialStore, certificationStore } = await setup();
     await expect(runReferenceSegmentation({
-      referenceId: "ref-1", cleanedTranscript: "Hello world.", credentialStore, certificationStore,
+      referenceId: "ref-1", cleanedTranscriptArtifactId: "artifact-cleaned-1", cleanedTranscript: "Hello world.", credentialStore, certificationStore,
       createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify({ referenceId: "ref-1", segments: [
         { id: "segment-1", order: 0, startCharacter: 0, endCharacter: 12, type: "hook", text: "Invented text", function: "Invalid" }
       ] }) }) })

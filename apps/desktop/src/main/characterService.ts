@@ -124,6 +124,9 @@ export async function retryCharacterReference(input: {
   workspaceRoot: string;
   generateImage?: CharacterImageGenerator;
 }): Promise<CharacterVersion> {
+  if (!input.version.references.some((reference) => reference.view === input.view)) {
+    throw new CharacterGenerationError("invalid_input", `Character reference view was not found: ${input.view}.`);
+  }
   const generateImage = input.generateImage ?? defaultCharacterImageGenerator;
   const referenceImages = input.version.references
     .filter((reference) => reference.view !== input.view && reference.relativeFilePath)

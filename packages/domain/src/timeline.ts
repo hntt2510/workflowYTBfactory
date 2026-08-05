@@ -9,8 +9,8 @@ export function assembleTimeline(shots: Shot[], fps = 30): Timeline {
       sourceId: shot.approvedAssetId ?? shot.id,
       startFrame: shot.startFrame,
       durationFrames: shot.durationFrames,
-      fps
+      fps,
+      ...(shot.motion ? { motion: shot.motion } : {})
     }))
   };
 }
-

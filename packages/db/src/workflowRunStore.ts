@@ -1,4 +1,4 @@
-import { getWorkflowStageDefinition, perReferenceArtifactStages, semiAutomaticAutomaticStageIds, type WorkflowArtifact, type WorkflowStageRun } from "@lsf/domain";
+import { createStageAttention, getWorkflowStageDefinition, normalizeStageAttention, perReferenceArtifactStages, semiAutomaticAutomaticStageIds, type WorkflowArtifact, type WorkflowStageRun } from "@lsf/domain";
 import type { FactoryDatabase } from "./connection";
 
 interface StageRunRow {
@@ -187,7 +187,7 @@ export class WorkflowRunStore {
       const row = this.db.prepare("SELECT * FROM workflow_stage_runs WHERE id = ? AND status IN ('needs_review', 'failed')").get(runId) as StageRunRow | undefined;
       if (!row) throw new Error("Stage run is not awaiting review.");
       const payload = parseJsonRecord(row.payload_json);
-      payload.attention = { code: category, message };
+      payload.attention = createStageAttention(row.stage_id, category, message);
       const artifactResult = this.db.prepare(
         "UPDATE workflow_artifacts SET status = 'needs_attention', updated_at = CURRENT_TIMESTAMP WHERE stage_run_id = ? AND status IN ('needs_review', 'needs_attention')"
       ).run(runId);
@@ -268,11 +268,13 @@ export class WorkflowRunStore {
     const stages = Array.isArray(payload.stages) ? payload.stages : [];
     const definition = getWorkflowStageDefinition(run.stageId);
     const attention = run.status === "failed" || run.status === "needs_attention"
-      ? {
-          code: run.safeErrorCategory ?? "STAGE_FAILED",
-          message: run.safeErrorMessage ?? `${definition?.name ?? run.stageId} failed. Review the failed run before retrying.`,
-          actions: [{ label: "Review stage", ...(definition?.screenRoute ? { route: definition.screenRoute } : {}) }]
-        }
+      ? run.payloadJson?.attention && typeof run.payloadJson.attention === "object"
+        ? normalizeStageAttention(run.stageId, run.payloadJson.attention as Partial<import("@lsf/domain").StageAttention>)
+        : createStageAttention(
+            run.stageId,
+            run.safeErrorCategory ?? "STAGE_FAILED",
+            run.safeErrorMessage ?? `${definition?.name ?? run.stageId} failed. Review the failed run before retrying.`
+          )
       : undefined;
     const nextStages = stages.map((stage) => {
       if (!stage || typeof stage !== "object" || (stage as { id?: unknown }).id !== run.stageId) return stage;
@@ -319,7 +321,7 @@ export class WorkflowRunStore {
     const syntheticEnabled = process.env.LSF_MAIN_FLOW_SYNTHETIC_APPROVALS === "1";
     const workflowMode = (projectPayload.setup as { workflowMode?: unknown } | undefined)?.workflowMode;
     const automatic = requestedApprovalMode === "automatic"
-      || (requestedApprovalMode === undefined && workflowMode === "semi_automatic" && !!row.stage_id && semiAutomaticAutomaticStageIds.has(row.stage_id));
+      || (requestedApprovalMode === undefined && !(synthetic && syntheticEnabled) && workflowMode === "semi_automatic" && !!row.stage_id && semiAutomaticAutomaticStageIds.has(row.stage_id));
     if (automatic && (workflowMode !== "semi_automatic" || !row.stage_id || !semiAutomaticAutomaticStageIds.has(row.stage_id))) {
       throw new Error("Automatic approval is only allowed for eligible Semi-automatic stages.");
     }

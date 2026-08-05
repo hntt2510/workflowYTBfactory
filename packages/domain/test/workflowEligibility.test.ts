@@ -1,7 +1,38 @@
 import { describe, expect, it } from "vitest";
-import { createFixtureProject, resolveStageEligibilities } from "../src";
+import { createFixtureProject as createDomainFixtureProject, normalizeProjectStages, resolveStageEligibilities } from "../src";
+
+function createFixtureProject(input: Parameters<typeof createDomainFixtureProject>[0]) {
+  return createDomainFixtureProject({ ...input, visualWorkflow: input.visualWorkflow ?? "legacy" });
+}
+
+function approveStages<T extends { stages: Array<{ id: string; status: string }> }>(project: T, stageIds: string[]): T {
+  const approved = new Set(stageIds);
+  return { ...project, stages: project.stages.map((stage) => approved.has(stage.id) ? { ...stage, status: "approved" } : stage) };
+}
 
 describe("workflow eligibility", () => {
+  it("backfills restored research stages for legacy projects with approved downstream content", () => {
+    const project = createFixtureProject({ topic: "Legacy project", format: "short", targetLanguage: "Vietnamese" });
+    const legacyStages = project.stages
+      .filter((stage) => !["research-source-intake", "claim-map"].includes(stage.id))
+      .map((stage) => stage.id === "outline" ? { ...stage, status: "approved" as const } : stage);
+
+    const normalized = normalizeProjectStages(legacyStages);
+
+    expect(normalized.find((stage) => stage.id === "research-source-intake")?.status).toBe("approved");
+    expect(normalized.find((stage) => stage.id === "claim-map")?.status).toBe("approved");
+  });
+
+  it("does not backfill restored research stages before legacy content reaches Outline", () => {
+    const project = createFixtureProject({ topic: "Legacy draft", format: "short", targetLanguage: "Vietnamese" });
+    const legacyStages = project.stages.filter((stage) => !["research-source-intake", "claim-map"].includes(stage.id));
+
+    const normalized = normalizeProjectStages(legacyStages);
+
+    expect(normalized.find((stage) => stage.id === "research-source-intake")?.status).toBe("not_started");
+    expect(normalized.find((stage) => stage.id === "claim-map")?.status).toBe("not_started");
+  });
+
   it("allows Topic Mode to approve ideas without Opportunity Map", () => {
     const project = createFixtureProject({ topic: "Topic", format: "short", targetLanguage: "Vietnamese", inputMode: "topic" });
     const ideaReviewProject = {
@@ -17,6 +48,35 @@ describe("workflow eligibility", () => {
       stages: ideaReviewProject.stages.map((stage) => stage.id === "idea-lab" ? { ...stage, status: "approved" as const } : stage)
     };
     expect(resolveStageEligibilities(ideaApprovedProject, { textVerified: true }).find((stage) => stage.stageId === "originality-review")?.status).toBe("ready");
+  });
+
+  it("allows Existing Script preparation to bypass research and claim stages", () => {
+    const project = createFixtureProject({
+      topic: "Existing script",
+      format: "short",
+      targetLanguage: "Vietnamese",
+      inputMode: "existing_script",
+      sourceScript: "A prepared script section."
+    });
+    const prepared = {
+      ...project,
+      stages: project.stages.map((stage) => ["outline", "script"].includes(stage.id) ? { ...stage, status: "approved" as const } : stage)
+    };
+    expect(resolveStageEligibilities(prepared).find((stage) => stage.stageId === "outline")?.status).toBe("approved");
+    expect(resolveStageEligibilities(prepared).find((stage) => stage.stageId === "fact-review")?.status).toBe("ready");
+  });
+
+  it("allows Topic Mode to continue from Originality Review to Outline without research or Claim Map", () => {
+    const project = createFixtureProject({ topic: "Topic", format: "short", targetLanguage: "Vietnamese", inputMode: "topic" });
+    const prepared = {
+      ...project,
+      stages: project.stages.map((stage) => ["idea-lab", "originality-review", "outline"].includes(stage.id)
+        ? { ...stage, status: "approved" as const }
+        : stage)
+    };
+    const eligibilities = resolveStageEligibilities(prepared, { textVerified: true });
+    expect(eligibilities.find((stage) => stage.stageId === "outline")?.status).toBe("approved");
+    expect(eligibilities.find((stage) => stage.stageId === "script")?.status).toBe("ready");
   });
 
   it("keeps Opportunity Map required for Reference Mode Idea Lab", () => {
@@ -116,11 +176,7 @@ describe("workflow eligibility", () => {
 
   it("accepts an available local OmniVoice capability for voice generation", () => {
     const project = createFixtureProject({ topic: "Topic", format: "long", targetLanguage: "English" });
-    const readyForVoice = {
-      ...project,
-      referenceSet: { status: "approved" as const },
-      stages: project.stages.map((stage, index) => index < 19 ? { ...stage, status: "approved" as const } : stage)
-    };
+    const readyForVoice = { ...approveStages(project, ["project-setup", "reference-intake", "reference-validation", "transcript-cleaning", "reference-segmentation", "competitor-dna", "opportunity-map", "idea-lab", "originality-review", "research-source-intake", "claim-map", "outline", "script", "fact-review", "retention-review", "scene-plan", "shot-plan", "visual-routing", "prompt-preparation", "asset-acquisition", "asset-review"]), referenceSet: { status: "approved" as const } };
     const blocked = resolveStageEligibilities(readyForVoice).find((stage) => stage.stageId === "voice-generation");
     const available = resolveStageEligibilities(readyForVoice, { localAudioAvailable: true }).find((stage) => stage.stageId === "voice-generation");
     expect(blocked?.blockingReasons[0]?.code).toBe("AUDIO_MODEL_NOT_VERIFIED");
@@ -130,11 +186,7 @@ describe("workflow eligibility", () => {
 
   it("blocks image provider stages until image capability is verified", () => {
     const project = createFixtureProject({ topic: "Topic", format: "long", targetLanguage: "English" });
-    const readyForAssets = {
-      ...project,
-      referenceSet: { status: "approved" as const },
-      stages: project.stages.map((stage, index) => index < 17 ? { ...stage, status: "approved" as const } : stage)
-    };
+    const readyForAssets = { ...approveStages(project, ["project-setup", "reference-intake", "reference-validation", "transcript-cleaning", "reference-segmentation", "competitor-dna", "opportunity-map", "idea-lab", "originality-review", "research-source-intake", "claim-map", "outline", "script", "fact-review", "retention-review", "scene-plan", "shot-plan", "visual-routing", "prompt-preparation"]), referenceSet: { status: "approved" as const } };
     const blocked = resolveStageEligibilities(readyForAssets, { textVerified: true }).find((stage) => stage.stageId === "asset-acquisition");
     const available = resolveStageEligibilities(readyForAssets, { textVerified: true, imageVerified: true }).find((stage) => stage.stageId === "asset-acquisition");
     expect(blocked?.status).toBe("blocked");
@@ -143,22 +195,33 @@ describe("workflow eligibility", () => {
     expect(available?.runnable).toBe(true);
   });
 
+  it("blocks character-first visual stages until an approved character is bound", () => {
+    const project = createDomainFixtureProject({
+      topic: "Character-first",
+      format: "short",
+      targetLanguage: "Vietnamese",
+      visualWorkflow: "character_first",
+      characterVersionId: "character-v1"
+    });
+    const prepared = {
+      ...approveStages(project, ["project-setup", "reference-intake", "shot-plan"]),
+      setup: { ...project.setup, characterVersionId: "character-v1" }
+    };
+    const blocked = resolveStageEligibilities(prepared, { textVerified: true, imageVerified: true });
+    expect(blocked.find((stage) => stage.stageId === "visual-routing")?.blockingReasons[0]?.code).toBe("CHARACTER_VERSION_NOT_APPROVED");
+
+    const approved = approveStages(prepared, ["character-preparation"]);
+    expect(resolveStageEligibilities(approved, { textVerified: true }).find((stage) => stage.stageId === "visual-routing")?.blockingReasons.map((reason) => reason.code)).not.toContain("CHARACTER_VERSION_NOT_APPROVED");
+  });
+
   it("allows combined provider capabilities to unlock downstream provider stages together", () => {
     const assetProject = createFixtureProject({ topic: "Topic", format: "long", targetLanguage: "English" });
-    const readyForAssets = {
-      ...assetProject,
-      referenceSet: { status: "approved" as const },
-      stages: assetProject.stages.map((stage, index) => index < 17 ? { ...stage, status: "approved" as const } : stage)
-    };
+    const readyForAssets = { ...approveStages(assetProject, ["project-setup", "reference-intake", "reference-validation", "transcript-cleaning", "reference-segmentation", "competitor-dna", "opportunity-map", "idea-lab", "originality-review", "research-source-intake", "claim-map", "outline", "script", "fact-review", "retention-review", "scene-plan", "shot-plan", "visual-routing", "prompt-preparation"]), referenceSet: { status: "approved" as const } };
     const assetEligibility = resolveStageEligibilities(readyForAssets, { textVerified: true, imageVerified: true, localAudioAvailable: true });
     expect(assetEligibility.find((stage) => stage.stageId === "asset-acquisition")?.status).toBe("ready");
 
     const voiceProject = createFixtureProject({ topic: "Topic", format: "long", targetLanguage: "English" });
-    const readyForVoice = {
-      ...voiceProject,
-      referenceSet: { status: "approved" as const },
-      stages: voiceProject.stages.map((stage, index) => index < 19 ? { ...stage, status: "approved" as const } : stage)
-    };
+    const readyForVoice = { ...approveStages(voiceProject, ["project-setup", "reference-intake", "reference-validation", "transcript-cleaning", "reference-segmentation", "competitor-dna", "opportunity-map", "idea-lab", "originality-review", "research-source-intake", "claim-map", "outline", "script", "fact-review", "retention-review", "scene-plan", "shot-plan", "visual-routing", "prompt-preparation", "asset-acquisition", "asset-review"]), referenceSet: { status: "approved" as const } };
     const voiceEligibility = resolveStageEligibilities(readyForVoice, { textVerified: true, imageVerified: true, localAudioAvailable: true });
     expect(voiceEligibility.find((stage) => stage.stageId === "voice-generation")?.status).toBe("ready");
   });
@@ -315,7 +378,7 @@ describe("workflow eligibility", () => {
       stages: project.stages.map((stage) => {
         if (stage.id === "preview-render") return { ...stage, status: "stale" as const };
         if (stage.id === "qa") return { ...stage, status: "blocked" as const };
-        if (["reference-validation", "transcript-cleaning", "reference-segmentation", "competitor-dna", "opportunity-map", "idea-lab", "originality-review", "outline", "script", "fact-review", "retention-review", "scene-plan", "shot-plan", "visual-routing", "prompt-preparation", "asset-acquisition", "asset-review", "voice-generation", "subtitle-preparation", "timeline-assembly"].includes(stage.id)) {
+        if (["reference-validation", "transcript-cleaning", "reference-segmentation", "competitor-dna", "opportunity-map", "idea-lab", "originality-review", "research-source-intake", "claim-map", "outline", "script", "fact-review", "retention-review", "scene-plan", "shot-plan", "visual-routing", "prompt-preparation", "asset-acquisition", "asset-review", "voice-generation", "subtitle-preparation", "timeline-assembly"].includes(stage.id)) {
           return { ...stage, status: "approved" as const };
         }
         return stage;
@@ -334,7 +397,7 @@ describe("workflow eligibility", () => {
       stages: project.stages.map((stage) => {
         if (stage.id === "timeline-assembly") return { ...stage, status: "needs_review" as const };
         if (stage.id === "preview-render") return { ...stage, status: "blocked" as const };
-        if (["project-setup", "reference-intake", "reference-validation", "transcript-cleaning", "reference-segmentation", "competitor-dna", "opportunity-map", "idea-lab", "originality-review", "outline", "script", "fact-review", "retention-review", "scene-plan", "shot-plan", "visual-routing", "prompt-preparation", "asset-acquisition", "asset-review", "voice-generation", "subtitle-preparation"].includes(stage.id)) {
+        if (["project-setup", "reference-intake", "reference-validation", "transcript-cleaning", "reference-segmentation", "competitor-dna", "opportunity-map", "idea-lab", "originality-review", "research-source-intake", "claim-map", "outline", "script", "fact-review", "retention-review", "scene-plan", "shot-plan", "visual-routing", "prompt-preparation", "asset-acquisition", "asset-review", "voice-generation", "subtitle-preparation"].includes(stage.id)) {
           return { ...stage, status: "approved" as const };
         }
         return stage;
@@ -363,6 +426,8 @@ describe("workflow eligibility", () => {
       "opportunity-map",
       "idea-lab",
       "originality-review",
+      "research-source-intake",
+      "claim-map",
       "outline",
       "script",
       "fact-review",

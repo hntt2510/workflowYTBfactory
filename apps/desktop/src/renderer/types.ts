@@ -1,4 +1,4 @@
-import type { ChannelProfile, ChannelRouteDecision, CompetitorDnaOutput, CompetitorReference, FactoryProject, CleanedTranscriptOutput, ReferenceSegmentationOutput, StageEligibility, WorkflowStageStatus } from "@lsf/domain";
+import type { AssetConcept, ChannelProfile, ChannelRouteDecision, CharacterReferenceView, CharacterVersion, CompetitorDnaOutput, CompetitorReference, FactoryProject, CleanedTranscriptOutput, ReferenceSegmentationOutput, StageEligibility, SubtitlePreset, WorkflowStageStatus } from "@lsf/domain";
 
 export interface ProjectSummary {
   id: string;
@@ -206,18 +206,20 @@ export interface ScriptArtifact { id: string; stageRunId?: string; status: "draf
 export interface FactReviewArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { reviewer: "local_deterministic"; findings: Array<{ claimId: string; verdict: "supported" | "needs_qualification" | "blocked"; reason: string }> }; createdAt: string; updatedAt: string; }
 export interface RetentionReviewArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { overallVerdict: "pass" | "needs_changes" | "blocked"; findings: Array<{ sectionId: string; severity: "low" | "medium" | "high"; reason: string; recommendedChange: string }> }; createdAt: string; updatedAt: string; }
 export interface ScenePlanArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { fps: number; scenes: Array<{ id: string; scriptSectionId: string; narration: string; purpose: string; startFrame: number; durationFrames: number; visualMode: string; emotionalState: string; requiredAssets: string[]; continuityRefs: string[] }> }; createdAt: string; updatedAt: string; }
-export interface ShotPlanArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { shots: Array<{ id: string; sceneId: string; order: number; startFrame: number; durationFrames: number; fps: number; purpose: string; visualMode: string; framing: string; cameraAngle: string; cameraMovement: string; subjectAction: string }> }; createdAt: string; updatedAt: string; }
+export interface ShotPlanArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { shots: Array<{ id: string; sceneId: string; order: number; startFrame: number; durationFrames: number; fps: number; purpose: string; visualMode: string; framing: string; cameraAngle: string; cameraMovement: string; subjectAction: string; semanticBeat?: string; assetConceptIds?: string[]; motion?: FactoryProject["shots"][number]["motion"] }> }; createdAt: string; updatedAt: string; }
 export interface VisualRoutingArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: ShotPlanArtifact["payloadJson"]; createdAt: string; updatedAt: string; }
-export interface PromptPreparationArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { prompts: Array<{ shotId: string; promptVersionId: string; positivePrompt: string; negativePrompt: string; aspectRatio: "16:9" | "9:16"; continuityConstraints: string[]; prohibitedElements: string[] }> }; createdAt: string; updatedAt: string; }
+export interface ScenePromptPackage { sceneId: string; promptVersionId: string; promptText: string; frameNumbers: string[]; referenceInstructions: string[]; continuityLocks: string[]; expectedAspectRatio: "16:9" | "9:16"; frameManifest: Array<{ shotId: string; displayNumber: string; role: "BASE" | "EXPRESSION_CHANGE" | "POSE_CHANGE" | "ACTION_KEYFRAME" | "CUTAWAY" | "INSERT" | "ENVIRONMENT" | "GRAPHIC" | "REUSE"; purpose: string; durationFrames: number; delta: string; continuityRefs: string[] }> }
+export interface PromptPreparationArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { prompts: Array<{ shotId: string; promptVersionId: string; positivePrompt: string; negativePrompt: string; aspectRatio: "16:9" | "9:16"; continuityConstraints: string[]; prohibitedElements: string[]; semanticBeat?: string; assetConceptIds?: string[]; motion?: FactoryProject["shots"][number]["motion"] }>; scenePrompts?: ScenePromptPackage[] }; createdAt: string; updatedAt: string; }
+export interface AssetConceptArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { concepts: AssetConcept[] }; createdAt: string; updatedAt: string; }
 export interface AssetAcquisitionArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { assets: Array<{ shotId: string; promptVersionId: string; relativeFilePath: string; sha256: string; mimeType: "image/png" | "image/jpeg" | "image/webp"; byteLength: number; width: number; height: number }> }; createdAt: string; updatedAt: string; }
 export interface AssetReviewArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { acquisitionArtifactId: string; assets: Array<{ asset: AssetAcquisitionArtifact["payloadJson"]["assets"][number]; reviewStatus: "needs_review" | "approved" | "rejected"; assignedShotId?: string }> }; createdAt: string; updatedAt: string; }
 export interface VoiceGenerationArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { ttsJobId?: string; requestedProvider?: TtsJobProviderId; mergedRelativeFilePath?: string; timingWarnings?: string[]; segments: Array<{ scriptSectionId: string; relativeFilePath: string; durationSeconds: number; codec: string; byteLength: number; sha256: string; startSeconds?: number; requestedProvider?: TtsJobProviderId; actualProvider?: TtsJobProviderId; voiceId?: string; attemptCount?: number; fallbackUsed?: boolean; fallbackReason?: string; timingOverflowSeconds?: number }> }; createdAt: string; updatedAt: string; }
 export interface SubtitlePreparationArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { fps: number; cues: Array<{ id: string; scriptSectionId: string; startFrame: number; durationFrames: number; text: string }> }; createdAt: string; updatedAt: string; }
 export interface TimelineAssemblyArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: FactoryProject["timeline"]; createdAt: string; updatedAt: string; }
-export interface PreviewRenderArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; relativeFilePath: string; payloadJson: { relativeFilePath: string; subtitleRelativeFilePath?: string; durationSeconds: number; width: number; height: number; sha256?: string; inputArtifactIds: string[] }; createdAt: string; updatedAt: string; }
+export interface PreviewRenderArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; relativeFilePath: string; payloadJson: { relativeFilePath: string; subtitleRelativeFilePath?: string; subtitlePreset?: SubtitlePreset; durationSeconds: number; width: number; height: number; sha256?: string; inputArtifactIds: string[] }; createdAt: string; updatedAt: string; }
 export interface QaArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { runner: "local_deterministic"; findings: Array<{ code: string; severity: "blocking" | "warning"; message: string; evidence: string }>; inputArtifactIds: string[] }; createdAt: string; updatedAt: string; }
-export interface CapCutDraftArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { draftName: string; structurallyValidated: true; trackCounts: { video: number; audio: number; text: number }; inputArtifactIds: string[] }; createdAt: string; updatedAt: string; }
-export interface PackagingExportArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; relativeFilePath: string; payloadJson: { relativeFilePath: string; artifactIds: string[]; sha256: string; mp4RelativeFilePath?: string }; createdAt: string; updatedAt: string; }
+export interface CapCutDraftArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; payloadJson: { draftName: string; structurallyValidated: true; mediaValidated?: boolean; visualClipCount?: number; trackCounts: { video: number; audio: number; text: number }; inputArtifactIds: string[]; motionEffects: Array<{ sourceId: string; effect: string; intensity: string; rationale: string }> }; createdAt: string; updatedAt: string; }
+export interface PackagingExportArtifact { id: string; stageRunId?: string; status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale"; relativeFilePath: string; payloadJson: { relativeFilePath: string; manifestRelativeFilePath?: string; subtitleRelativeFilePath?: string; artifactIds: string[]; sha256: string; mp4RelativeFilePath?: string }; createdAt: string; updatedAt: string; }
 
 export interface EditCompetitorReferenceInput extends ReferenceMutationInput {
   sourceUrl?: string;
@@ -240,6 +242,15 @@ export interface DevCapcutTestResult {
   contentPath: string;
   fixtureDirectory: string;
   trackCounts: { video: number; audio: number; text: number };
+}
+
+export interface CharacterGenerationInput {
+  profileId: string;
+  name: string;
+  persona: CharacterVersion["persona"];
+  invariantTraits: string[];
+  prohibitedChanges: string[];
+  viewCount?: number;
 }
 
 export interface DevIdeaTestResult { model: string; responseText: string; relativeFilePath: string; }
@@ -323,6 +334,13 @@ export interface ImageModelCertificationResponse { status: "not_tested" | "verif
 
 export interface LongShortFactoryApi {
   bootstrap: () => Promise<BootstrapData>;
+  listChannelProfiles: () => Promise<ChannelProfile[]>;
+  generateCharacterPack: (input: CharacterGenerationInput) => Promise<ChannelProfile>;
+  retryCharacterReference: (input: { profileId: string; versionId: string; view: CharacterReferenceView }) => Promise<ChannelProfile>;
+  approveCharacterVersion: (input: { profileId: string; versionId: string }) => Promise<ChannelProfile>;
+  getCharacterPreviewUrl: (input: { profileId: string; versionId: string; view: CharacterReferenceView }) => Promise<{ url: string }>;
+  runCharacterPreparation: (input: { projectId: string }) => Promise<FactoryProject>;
+  approveCharacterPreparation: (input: { projectId: string }) => Promise<FactoryProject>;
   startProductionPreparation: (input: { projectId: string }) => Promise<FactoryProject>;
   continueAfterIdeaSelection: (input: { projectId: string; ideaId: string }) => Promise<FactoryProject>;
   startMediaGeneration: (input: { projectId: string }) => Promise<FactoryProject>;
@@ -430,8 +448,9 @@ export interface LongShortFactoryApi {
   listOpportunityMapArtifacts: (input: { projectId: string }) => Promise<OpportunityMapArtifact[]>;
   approveOpportunityMap: (input: { projectId: string }) => Promise<FactoryProject>;
   rejectOpportunityMap: (input: { projectId: string }) => Promise<FactoryProject>;
-  runIdeaLab: (input: { projectId: string }) => Promise<FactoryProject>;
+  runIdeaLab: (input: { projectId: string; force?: boolean }) => Promise<FactoryProject>;
   approveIdea: (input: { projectId: string; ideaId: string }) => Promise<FactoryProject>;
+  editIdea: (input: { projectId: string; ideaId: string; changes: Partial<Pick<FactoryProject["ideas"][number], "workingTitle" | "angle" | "corePromise" | "viewerProblem" | "dramaticQuestion" | "targetEmotion" | "thumbnailConcept" | "noveltyExplanation" | "productionDifficulty">> }) => Promise<FactoryProject>;
   rejectIdeaLab: (input: { projectId: string }) => Promise<FactoryProject>;
   runOriginalityReview: (input: { projectId: string }) => Promise<FactoryProject>;
   listOriginalityReviewArtifacts: (input: { projectId: string }) => Promise<OriginalityReviewArtifact[]>;
@@ -451,6 +470,8 @@ export interface LongShortFactoryApi {
   approveOutline: (input: { projectId: string }) => Promise<FactoryProject>;
   rejectOutline: (input: { projectId: string }) => Promise<FactoryProject>;
   runScript: (input: { projectId: string }) => Promise<FactoryProject>;
+  regenerateScript: (input: { projectId: string }) => Promise<FactoryProject>;
+  editScript: (input: { projectId: string; artifactId: string; sectionId: string; narration: string }) => Promise<FactoryProject>;
   listScriptArtifacts: (input: { projectId: string }) => Promise<ScriptArtifact[]>;
   approveScript: (input: { projectId: string }) => Promise<FactoryProject>;
   rejectScript: (input: { projectId: string }) => Promise<FactoryProject>;
@@ -472,9 +493,11 @@ export interface LongShortFactoryApi {
   rejectShotPlan: (input: { projectId: string }) => Promise<FactoryProject>;
   runVisualRouting: (input: { projectId: string }) => Promise<FactoryProject>;
   listVisualRoutingArtifacts: (input: { projectId: string }) => Promise<VisualRoutingArtifact[]>;
-  editVisualRouting: (input: { projectId: string; artifactId: string; shotId: string; visualMode: FactoryProject["shots"][number]["visualMode"] }) => Promise<FactoryProject>;
+  editVisualRouting: (input: { projectId: string; artifactId: string; shotId: string; visualMode: FactoryProject["shots"][number]["visualMode"]; motionEffect?: NonNullable<FactoryProject["shots"][number]["motion"]>["effect"] }) => Promise<FactoryProject>;
   approveVisualRouting: (input: { projectId: string }) => Promise<FactoryProject>;
   rejectVisualRouting: (input: { projectId: string }) => Promise<FactoryProject>;
+  runAssetConcepts: (input: { projectId: string }) => Promise<FactoryProject>;
+  listAssetConceptsArtifacts: (input: { projectId: string }) => Promise<AssetConceptArtifact[]>;
   runPromptPreparation: (input: { projectId: string }) => Promise<FactoryProject>;
   listPromptPreparationArtifacts: (input: { projectId: string }) => Promise<PromptPreparationArtifact[]>;
   approvePromptPreparation: (input: { projectId: string }) => Promise<FactoryProject>;
@@ -486,10 +509,10 @@ export interface LongShortFactoryApi {
   runAssetReview: (input: { projectId: string }) => Promise<FactoryProject>;
   listAssetReviewArtifacts: (input: { projectId: string }) => Promise<AssetReviewArtifact[]>;
   reviseAssetReview: (input: { projectId: string; artifactId: string; assetSha256: string; action: "approve" | "reject" | "assign" | "unassign"; shotId?: string }) => Promise<FactoryProject>;
-  selectManualAssetUpload: (input: { projectId: string; artifactId: string; shotId: string }) => Promise<FactoryProject>;
+  selectManualAssetUpload: (input: { projectId: string; artifactId?: string; shotId?: string }) => Promise<FactoryProject>;
   approveAssetReview: (input: { projectId: string }) => Promise<FactoryProject>;
   rejectAssetReview: (input: { projectId: string }) => Promise<FactoryProject>;
-  runVoiceGeneration: (input: { projectId: string }) => Promise<FactoryProject>;
+  runVoiceGeneration: (input: { projectId: string; voiceId: string; force?: boolean }) => Promise<FactoryProject>;
   listVoiceGenerationArtifacts: (input: { projectId: string }) => Promise<VoiceGenerationArtifact[]>;
   approveVoiceGeneration: (input: { projectId: string }) => Promise<FactoryProject>;
   rejectVoiceGeneration: (input: { projectId: string }) => Promise<FactoryProject>;
@@ -501,9 +524,10 @@ export interface LongShortFactoryApi {
   listTimelineAssemblyArtifacts: (input: { projectId: string }) => Promise<TimelineAssemblyArtifact[]>;
   approveTimelineAssembly: (input: { projectId: string }) => Promise<FactoryProject>;
   rejectTimelineAssembly: (input: { projectId: string }) => Promise<FactoryProject>;
-  runPreviewRender: (input: { projectId: string; force?: boolean }) => Promise<FactoryProject>;
+  runPreviewRender: (input: { projectId: string; force?: boolean; subtitlePreset?: SubtitlePreset; resolution?: "1080p" | "720p"; includeSubtitles?: boolean }) => Promise<FactoryProject>;
   listPreviewRenderArtifacts: (input: { projectId: string }) => Promise<PreviewRenderArtifact[]>;
   getPreviewVideoUrl: (input: { projectId: string; artifactId: string }) => Promise<{ url: string }>;
+  downloadPreviewVideo: (input: { projectId: string; artifactId: string }) => Promise<{ canceled: boolean; fileName?: string; savedPath?: string }>;
   getAssetPreviewUrl: (input: { projectId: string; artifactId: string; assetSha256: string }) => Promise<{ url: string }>;
   approvePreviewRender: (input: { projectId: string }) => Promise<FactoryProject>;
   rejectPreviewRender: (input: { projectId: string }) => Promise<FactoryProject>;
@@ -515,7 +539,7 @@ export interface LongShortFactoryApi {
   listCapCutDraftArtifacts: (input: { projectId: string }) => Promise<CapCutDraftArtifact[]>;
   approveCapCutDraft: (input: { projectId: string; confirmation: "I opened the draft in CapCut and verified editable tracks" }) => Promise<FactoryProject>;
   rejectCapCutDraft: (input: { projectId: string }) => Promise<FactoryProject>;
-  runPackagingExport: (input: { projectId: string }) => Promise<FactoryProject>;
+  runPackagingExport: (input: { projectId: string; exportSubtitleFile?: boolean; includeProjectManifest?: boolean }) => Promise<FactoryProject>;
   listPackagingExportArtifacts: (input: { projectId: string }) => Promise<PackagingExportArtifact[]>;
   approvePackagingExport: (input: { projectId: string }) => Promise<FactoryProject>;
   rejectPackagingExport: (input: { projectId: string }) => Promise<FactoryProject>;

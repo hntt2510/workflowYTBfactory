@@ -21,10 +21,10 @@ const candidates = generateIdeaLab("A safe topic", profile as never).map(({ esti
 const input = { opportunityMap: { recommendedContentSpaces: [] }, topic: "A safe topic", profile, format: "long", language: "en", targetDuration: "10 minutes" };
 
 describe("idea lab service", () => {
-  it("accepts the required four-by-four-by-four candidate distribution", async () => {
+  it("accepts the required two-by-two-by-two candidate distribution", async () => {
     const { db, credentialStore, certificationStore } = await setup();
     const result = await runIdeaLab({ ...input, credentialStore, certificationStore, createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify({ candidates }) }) }) });
-    expect(result.output.candidates).toHaveLength(12);
+    expect(result.output.candidates).toHaveLength(6);
     db.close();
   });
 

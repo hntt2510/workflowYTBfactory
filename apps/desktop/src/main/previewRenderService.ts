@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
-import { planFfmpegPreviewCommand } from "@lsf/media";
+import { planFfmpegPreviewCommand, type PreviewResolution } from "@lsf/media";
+import type { ShotMotionPlan, SubtitlePreset } from "@lsf/domain";
 import type { Timeline } from "@lsf/domain";
 
 const execFileAsync = promisify(execFile);
@@ -19,10 +20,11 @@ export async function getPreviewFileSha256(filePath: string): Promise<string> {
 export async function renderPreview(input: {
   timeline: Timeline;
   outputPath: string;
-  resolution: "1080p-horizontal" | "1080p-vertical";
-  visualInputs: Array<{ filePath: string; startFrame: number; durationFrames: number }>;
+  resolution: PreviewResolution;
+  visualInputs: Array<{ filePath: string; startFrame: number; durationFrames: number; motion?: ShotMotionPlan | undefined }>;
   audioInputs: Array<{ filePath: string }>;
   subtitleFilePath?: string;
+  subtitlePreset?: SubtitlePreset;
   ffmpegPath?: string;
   ffprobePath?: string;
 }) {
@@ -38,7 +40,12 @@ export async function renderPreview(input: {
     const video = payload.streams?.find((stream) => stream.codec_type === "video"); const audio = payload.streams?.find((stream) => stream.codec_type === "audio"); const duration = Number(payload.format?.duration);
     const [numerator, denominator] = video?.r_frame_rate?.split("/").map(Number) ?? [];
     const fps = numerator && denominator ? numerator / denominator : Number.NaN;
-    const expectedSize = input.resolution === "1080p-horizontal" ? [1920, 1080] : [1080, 1920];
+    const expectedSize = input.resolution === "1080p-horizontal" ? [1920, 1080]
+      : input.resolution === "1080p-vertical" ? [1080, 1920]
+        : input.resolution === "1080p-square" ? [1080, 1080]
+          : input.resolution === "720p-horizontal" ? [1280, 720]
+            : input.resolution === "720p-vertical" ? [720, 1280]
+              : [720, 720];
     const narrationEndFrame = input.timeline.items.filter((item) => item.track === "narration").reduce((end, item) => Math.max(end, item.startFrame + item.durationFrames), 0);
     const expectedDuration = narrationEndFrame / input.timeline.fps;
     if (!video?.width || !video.height || video.width !== expectedSize[0] || video.height !== expectedSize[1] || !audio || !Number.isFinite(fps) || Math.abs(fps - input.timeline.fps) > 0.01 || !Number.isFinite(duration) || duration <= 0 || !expectedDuration || Math.abs(duration - expectedDuration) > 0.5) throw new Error("invalid media");

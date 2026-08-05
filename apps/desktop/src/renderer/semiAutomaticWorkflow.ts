@@ -1,5 +1,6 @@
-import { semiAutomaticAutomaticStageIds, semiAutomaticCheckpointIds, type FactoryProject, type WorkflowStageStatus } from "@lsf/domain";
+import { characterVersionIsApproved, semiAutomaticAutomaticStageIds, semiAutomaticCheckpointIds, type ChannelProfile, type FactoryProject, type WorkflowStageStatus } from "@lsf/domain";
 import type { LongShortFactoryApi } from "./types";
+import { safeRendererError } from "./utils";
 
 export type SemiAutomaticClient = Pick<LongShortFactoryApi,
   | "loadProject"
@@ -17,6 +18,8 @@ export type SemiAutomaticClient = Pick<LongShortFactoryApi,
   | "runScenePlan" | "approveScenePlan"
   | "runShotPlan" | "approveShotPlan"
   | "runVisualRouting" | "approveVisualRouting"
+  | "runCharacterPreparation"
+  | "runAssetConcepts"
   | "runPromptPreparation" | "approvePromptPreparation"
   | "runAssetAcquisition" | "approveAssetAcquisition"
   | "runAssetReview"
@@ -32,18 +35,24 @@ export type SemiAutomaticClient = Pick<LongShortFactoryApi,
 export type SemiAutomaticChain = "reference" | "idea" | "assets" | "preview";
 
 export function hasSemiAutomaticAttention(project: FactoryProject): boolean {
-  return project.stages.some((stage) =>
-    (stage.status === "failed" || stage.status === "needs_attention")
-    && !semiAutomaticAutomaticStageIds.has(stage.id)
-    && (!semiAutomaticCheckpointIds.has(stage.id) || stage.id === "reference-validation")
-  );
+  return project.stages.some((stage) => {
+    if (stage.status !== "failed" && stage.status !== "needs_attention") return false;
+    if (stage.id === "reference-validation") return true;
+    return !semiAutomaticAutomaticStageIds.has(stage.id) && !semiAutomaticCheckpointIds.has(stage.id);
+  });
+}
+
+export function characterVersionNeedsSetup(project: FactoryProject, profile: ChannelProfile | undefined): boolean {
+  if (project.setup.visualWorkflow !== "character_first") return false;
+  const boundCharacter = profile?.characterVersions?.find((version) => version.id === project.setup.characterVersionId);
+  const activeCharacter = profile?.characterVersions?.find((version) => version.id === profile.activeCharacterVersionId);
+  return !characterVersionIsApproved(boundCharacter) && !characterVersionIsApproved(activeCharacter);
 }
 
 /** Returns the next automatic segment without crossing a human checkpoint. */
 export function nextSemiAutomaticChain(project: FactoryProject): SemiAutomaticChain | undefined {
   if (project.setup.workflowMode !== "semi_automatic") return undefined;
   if (hasSemiAutomaticAttention(project)) return undefined;
-
   const referenceValidation = statusOf(project, "reference-validation");
   const ideaLab = statusOf(project, "idea-lab");
   const assetReview = statusOf(project, "asset-review");
@@ -58,9 +67,11 @@ export function nextSemiAutomaticChain(project: FactoryProject): SemiAutomaticCh
   if (ideaLab !== "approved") {
     return ideaLab === "needs_review" || ideaLab === "rejected" ? undefined : "reference";
   }
+  if (project.setup.visualWorkflow === "character_first" && statusOf(project, "prompt-preparation") === "approved" && assetReview !== "approved") return undefined;
   if (assetReview !== "approved") {
     return assetReview === "needs_review" || assetReview === "rejected" ? undefined : "idea";
   }
+  if (statusOf(project, "voice-generation") !== "approved") return undefined;
   if (previewRender !== "approved") {
     return previewRender === "needs_review" || previewRender === "rejected" ? undefined : "assets";
   }
@@ -85,7 +96,7 @@ export class SemiAutomaticAttentionError extends Error {
 }
 
 const referenceStages = ["Transcript Cleaning", "Reference Segmentation", "Competitor DNA", "Opportunity Map", "Idea Lab"];
-const ideaStages = ["Originality Review", "Outline", "Script", "Fact Review", "Retention Review", "Scene Plan", "Shot Plan", "Visual Routing", "Prompt Preparation", "Asset Acquisition", "Asset Review"];
+const ideaStages = ["Originality Review", "Outline", "Script", "Fact Review", "Retention Review", "Scene Plan", "Shot Plan", "Character Preparation", "Visual Routing", "Asset Concepts", "Prompt Preparation", "Asset Acquisition", "Asset Review"];
 const assetStages = ["Voice Generation", "Subtitle Preparation", "Timeline Assembly", "Preview Render"];
 const previewStages = ["QA", "Packaging Export"];
 const automaticRecoveryMaxAttempts = 2;
@@ -106,7 +117,7 @@ function assertSemiAutomatic(project: FactoryProject): void {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return safeRendererError(error);
 }
 
 async function waitForAutomaticRetry(attempt: number): Promise<void> {
@@ -129,13 +140,13 @@ async function runAndApprove(
   project: FactoryProject,
   stageId: string,
   run: () => Promise<FactoryProject>,
-  approve: () => Promise<FactoryProject>,
+  approve: (() => Promise<FactoryProject>) | undefined,
   chain: SemiAutomaticChain,
   completed: number,
   total: number,
   onProgress?: (progress: SemiAutomaticProgress) => void
 ): Promise<FactoryProject> {
-  if (isApproved(project, stageId)) return project;
+  if (isApproved(project, stageId) && stageId !== "asset-concepts") return project;
   let lastMessage = `${stageId} did not complete.`;
   for (let attempt = 1; attempt <= automaticRecoveryMaxAttempts; attempt += 1) {
     report(onProgress, chain, completed, total, stageId, attempt === 1 ? `Running ${stageId}.` : `Retrying ${stageId} (attempt ${attempt}/${automaticRecoveryMaxAttempts}).`);
@@ -146,6 +157,7 @@ async function runAndApprove(
       if (status === "failed" || status === "needs_attention") throw new Error(`${stageId} stopped with status ${status}.`);
       if (status === "approved") return generated;
       if (status !== "needs_review") throw new Error(`${stageId} returned unexpected status ${status ?? "unknown"}.`);
+      if (!approve) return generated;
       report(onProgress, chain, completed, total, stageId, `Validating ${stageId}.`);
       attentionCode = "AUTO_APPROVAL_BLOCKED";
       const approved = await approve();
@@ -158,45 +170,6 @@ async function runAndApprove(
     }
   }
   throw new SemiAutomaticAttentionError(`${stageId} needs attention after ${automaticRecoveryMaxAttempts} attempts: ${lastMessage}`);
-}
-
-async function runVoiceAndApprove(
-  client: SemiAutomaticClient,
-  project: FactoryProject,
-  onProgress?: (progress: SemiAutomaticProgress) => void
-): Promise<FactoryProject> {
-  if (isApproved(project, "voice-generation")) return project;
-  let lastMessage = "Voice Generation did not complete.";
-  for (let attempt = 1; attempt <= automaticRecoveryMaxAttempts; attempt += 1) {
-    report(onProgress, "assets", 0, assetStages.length, "voice-generation", attempt === 1 ? "Starting Voice Generation." : `Retrying Voice Generation (attempt ${attempt}/${automaticRecoveryMaxAttempts}).`);
-    let attentionCode = "AUTOMATIC_RUN_FAILED";
-    let currentStatus: WorkflowStageStatus | undefined;
-    try {
-      let current = await client.runVoiceGeneration({ projectId: project.id });
-      for (let poll = 0; poll < 120; poll += 1) {
-        const status = statusOf(current, "voice-generation");
-        currentStatus = status;
-        if (status !== "queued" && status !== "running") break;
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        current = await client.loadProject(project.id) ?? current;
-      }
-      const status = statusOf(current, "voice-generation");
-      currentStatus = status;
-      if (status === "needs_attention" || status === "failed") throw new Error(`Voice Generation stopped with status ${status}.`);
-      if (status !== "needs_review") throw new Error("Voice Generation is still running. Wait for the TTS job to finish, then retry the Semi-automatic chain.");
-      attentionCode = "AUTO_APPROVAL_BLOCKED";
-      const approved = await client.approveVoiceGeneration({ projectId: project.id });
-      if (!isApproved(approved, "voice-generation")) throw new Error("Voice Generation approval did not produce an approved stage.");
-      return approved;
-    } catch (error) {
-      lastMessage = errorMessage(error);
-      if (currentStatus !== "queued" && currentStatus !== "running") {
-        await client.markStageAttention({ projectId: project.id, stageId: "voice-generation", code: attentionCode, message: lastMessage }).catch(() => undefined);
-      }
-      if (attempt < automaticRecoveryMaxAttempts) await waitForAutomaticRetry(attempt);
-    }
-  }
-  throw new SemiAutomaticAttentionError(`voice-generation needs attention after ${automaticRecoveryMaxAttempts} attempts: ${lastMessage}`);
 }
 
 async function runPerReferenceStage(
@@ -312,9 +285,12 @@ export async function runIdeaChain(
   current = await runAndApprove(client, current, "retention-review", () => client.runRetentionReview({ projectId: current.id }), () => client.approveRetentionReview({ projectId: current.id }), "idea", 4, total, input.onProgress);
   current = await runAndApprove(client, current, "scene-plan", () => client.runScenePlan({ projectId: current.id }), () => client.approveScenePlan({ projectId: current.id }), "idea", 5, total, input.onProgress);
   current = await runAndApprove(client, current, "shot-plan", () => client.runShotPlan({ projectId: current.id }), () => client.approveShotPlan({ projectId: current.id }), "idea", 6, total, input.onProgress);
-  current = await runAndApprove(client, current, "visual-routing", () => client.runVisualRouting({ projectId: current.id }), () => client.approveVisualRouting({ projectId: current.id }), "idea", 7, total, input.onProgress);
-  current = await runAndApprove(client, current, "prompt-preparation", () => client.runPromptPreparation({ projectId: current.id }), () => client.approvePromptPreparation({ projectId: current.id }), "idea", 8, total, input.onProgress);
-  current = await runAndApprove(client, current, "asset-acquisition", () => client.runAssetAcquisition({ projectId: current.id }), () => client.approveAssetAcquisition({ projectId: current.id }), "idea", 9, total, input.onProgress);
+  current = await runCheckpoint(client, current, "character-preparation", () => client.runCharacterPreparation({ projectId: current.id }), "idea", 7, total, "Character Pack is ready for the manual checkpoint before visual production.", input.onProgress);
+  current = await runAndApprove(client, current, "visual-routing", () => client.runVisualRouting({ projectId: current.id }), () => client.approveVisualRouting({ projectId: current.id }), "idea", 8, total, input.onProgress);
+  current = await runAndApprove(client, current, "asset-concepts", () => client.runAssetConcepts({ projectId: current.id }), undefined, "idea", 9, total, input.onProgress);
+  current = await runAndApprove(client, current, "prompt-preparation", () => client.runPromptPreparation({ projectId: current.id }), () => client.approvePromptPreparation({ projectId: current.id }), "idea", 10, total, input.onProgress);
+  if (current.setup.visualWorkflow === "character_first") return current;
+  current = await runAndApprove(client, current, "asset-acquisition", () => client.runAssetAcquisition({ projectId: current.id }), () => client.approveAssetAcquisition({ projectId: current.id }), "idea", 11, total, input.onProgress);
   return runCheckpoint(client, current, "asset-review", () => client.runAssetReview({ projectId: current.id }), "idea", total, total, "Asset Review is ready for the manual checkpoint.", input.onProgress);
 }
 
@@ -324,7 +300,7 @@ export async function runAssetChain(
 ): Promise<FactoryProject> {
   assertSemiAutomatic(input.project);
   let current = input.project;
-  current = await runVoiceAndApprove(client, current, input.onProgress);
+  if (!isApproved(current, "voice-generation")) return current;
   current = await runAndApprove(client, current, "subtitle-preparation", () => client.runSubtitlePreparation({ projectId: current.id }), () => client.approveSubtitlePreparation({ projectId: current.id }), "assets", 1, assetStages.length, input.onProgress);
   current = await runAndApprove(client, current, "timeline-assembly", () => client.runTimelineAssembly({ projectId: current.id }), () => client.approveTimelineAssembly({ projectId: current.id }), "assets", 2, assetStages.length, input.onProgress);
   return runCheckpoint(client, current, "preview-render", () => client.runPreviewRender({ projectId: current.id }), "assets", 3, assetStages.length, "Preview Render is ready for the final human checkpoint.", input.onProgress);

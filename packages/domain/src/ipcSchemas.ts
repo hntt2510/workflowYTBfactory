@@ -797,7 +797,26 @@ export const visualRoutingArtifactResponseSchema = z.object({ id: idSchema, stag
 export const visualRoutingArtifactsResponseSchema = z.array(visualRoutingArtifactResponseSchema);
 export const editVisualRoutingRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema, shotId: idSchema, visualMode: shotPlanShotSchema.shape.visualMode, motionEffect: motionPlanSchema.shape.effect.optional() }).strict();
 export const visualPromptSchema = z.object({ shotId: idSchema, promptVersionId: idSchema, positivePrompt: z.string().min(1).max(10000), negativePrompt: z.string().min(1).max(5000), aspectRatio: z.enum(["16:9", "9:16"]), continuityConstraints: z.array(z.string().min(1).max(1000)).max(50), prohibitedElements: z.array(z.string().min(1).max(1000)).max(50), semanticBeat: z.string().min(1).max(2000).optional(), assetConceptIds: z.array(idSchema).max(20).optional(), motion: motionPlanSchema.optional() }).strict();
-export const promptPreparationOutputSchema = z.object({ prompts: z.array(visualPromptSchema).max(500) }).strict();
+const storyboardFrameSpecSchema = z.object({
+  shotId: idSchema,
+  displayNumber: z.string().regex(/^\d{3}$/),
+  role: z.enum(["BASE", "EXPRESSION_CHANGE", "POSE_CHANGE", "ACTION_KEYFRAME", "CUTAWAY", "INSERT", "ENVIRONMENT", "GRAPHIC", "REUSE"]),
+  purpose: z.string().min(1).max(2000),
+  durationFrames: z.number().int().positive(),
+  delta: z.string().min(1).max(2000),
+  continuityRefs: z.array(z.string().min(1).max(1000)).max(50)
+}).strict();
+const scenePromptPackageSchema = z.object({
+  sceneId: idSchema,
+  promptVersionId: idSchema,
+  promptText: z.string().min(1).max(30000),
+  frameNumbers: z.array(z.string().regex(/^\d{3}$/)).min(1).max(20),
+  referenceInstructions: z.array(z.string().min(1).max(2000)).max(20),
+  continuityLocks: z.array(z.string().min(1).max(2000)).max(50),
+  expectedAspectRatio: z.enum(["16:9", "9:16"]),
+  frameManifest: z.array(storyboardFrameSpecSchema).min(1).max(20)
+}).strict();
+export const promptPreparationOutputSchema = z.object({ prompts: z.array(visualPromptSchema).max(500), scenePrompts: z.array(scenePromptPackageSchema).max(200).optional() }).strict();
 export const promptPreparationRequestSchema = z.object({ projectId: idSchema }).strict();
 export const promptPreparationArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: promptPreparationOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const promptPreparationArtifactsResponseSchema = z.array(promptPreparationArtifactResponseSchema);
@@ -835,7 +854,7 @@ export const assetReviewRequestSchema = z.object({ projectId: idSchema, sceneId:
 export const assetReviewArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: assetReviewOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const assetReviewArtifactsResponseSchema = z.array(assetReviewArtifactResponseSchema);
 export const reviseAssetReviewRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema, assetSha256: z.string().length(64), action: z.enum(["approve", "reject", "assign", "unassign"]), shotId: idSchema.optional() }).strict();
-export const manualAssetUploadRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema, shotId: idSchema }).strict();
+export const manualAssetUploadRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema.optional(), shotId: idSchema.optional() }).strict();
 export const sceneReviewRevisionRequestSchema = z.discriminatedUnion("action", [
   z.object({ projectId: idSchema, artifactId: idSchema, action: z.literal("edit_prompt"), shotId: idSchema, positivePrompt: z.string().trim().min(1).max(10000), negativePrompt: z.string().trim().min(1).max(5000) }).strict(),
   z.object({ projectId: idSchema, artifactId: idSchema, action: z.literal("edit_direction"), shotId: idSchema, framing: z.string().trim().min(1).max(1000), cameraAngle: z.string().trim().min(1).max(1000), cameraMovement: z.string().trim().min(1).max(1000), subjectAction: z.string().trim().min(1).max(2000) }).strict(),

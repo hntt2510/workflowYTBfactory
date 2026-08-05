@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from pycapcut import AudioSegment, DraftFolder, TextSegment, TextStyle, Timerange, TrackType, VideoSegment
+from pycapcut import AudioSegment, ClipSettings, DraftFolder, GroupAnimationType, TextSegment, TextStyle, Timerange, TrackType, VideoSegment
 
 
 def require_int(value: Any, name: str, minimum: int = 1) -> int:
@@ -14,16 +14,36 @@ def require_int(value: Any, name: str, minimum: int = 1) -> int:
     return value
 
 
-def require_media_item(value: Any, name: str) -> tuple[Path, Timerange]:
+def require_media_item(value: Any, name: str, *, require_mp4: bool = False) -> tuple[Path, Timerange]:
     if not isinstance(value, dict):
         raise ValueError(f"{name} must be an object")
     path = Path(value.get("filePath", ""))
     if not path.is_file():
         raise ValueError(f"{name}.filePath does not exist")
+    if require_mp4 and path.suffix.lower() != ".mp4":
+        raise ValueError(f"{name}.filePath must be a validated MP4 visual clip")
     return path, Timerange(
         require_int(value.get("startUs"), f"{name}.startUs", 0),
         require_int(value.get("durationUs"), f"{name}.durationUs"),
     )
+
+
+def add_motion_animation(segment: VideoSegment, item: dict[str, Any], timerange: Timerange) -> None:
+    motion = item.get("motion")
+    effect = motion.get("effect") if isinstance(motion, dict) else "none"
+    animation_names = {
+        "slide_up": "\u4e0a\u5347\u65cb\u8f6c",
+        "slide_down": "\u4e0b\u964d\u5411\u53f3",
+        "pan_left": "\u5411\u5de6\u7f29\u5c0f",
+        "pan_right": "\u5411\u53f3\u7f29\u5c0f",
+        "zoom_in": "\u653e\u5927\u5f39\u52a8",
+        "zoom_out": "\u7f29\u5c0f\u5f39\u52a8",
+        "pop": "\u5f39\u5165\u65cb\u8f6c",
+        "dissolve": "\u65cb\u51fa\u6e10\u9690"
+    }
+    animation_name = animation_names.get(effect)
+    if animation_name:
+        segment.add_animation(getattr(GroupAnimationType, animation_name), duration=timerange.duration)
 
 
 def create_draft(payload: dict[str, Any]) -> dict[str, Any]:
@@ -58,8 +78,10 @@ def create_draft(payload: dict[str, Any]) -> dict[str, Any]:
         script.add_track(TrackType.text, "subtitles")
 
     for index, item in enumerate(visuals):
-        media_path, timerange = require_media_item(item, f"timeline.visuals[{index}]")
-        script.add_segment(VideoSegment(str(media_path), timerange), "primary_visual")
+        media_path, timerange = require_media_item(item, f"timeline.visuals[{index}]", require_mp4=True)
+        segment = VideoSegment(str(media_path), timerange)
+        add_motion_animation(segment, item, timerange)
+        script.add_segment(segment, "primary_visual")
     for index, item in enumerate(audio):
         media_path, timerange = require_media_item(item, f"timeline.audio[{index}]")
         script.add_segment(AudioSegment(str(media_path), timerange), "narration")
@@ -70,7 +92,7 @@ def create_draft(payload: dict[str, Any]) -> dict[str, Any]:
             require_int(item.get("startUs"), f"timeline.subtitles[{index}].startUs", 0),
             require_int(item.get("durationUs"), f"timeline.subtitles[{index}].durationUs"),
         )
-        script.add_segment(TextSegment(item["text"], timerange, style=TextStyle(size=12.0, bold=True)), "subtitles")
+        script.add_segment(TextSegment(item["text"], timerange, style=TextStyle(size=12.0, bold=True, align=1, auto_wrapping=False, max_line_width=0.82), clip_settings=ClipSettings(transform_x=0.0, transform_y=0.0)), "subtitles")
     script.save()
 
     content_path = draft_dir / "draft_content.json"

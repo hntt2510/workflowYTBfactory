@@ -1,0 +1,35 @@
+{
+  "jobId": "JOB-TRANSCRIPT-CLEANING-HARDENING",
+  "type": "short",
+  "title": "Harden Transcript Cleaning output validation",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Preserve locally removed formatting noise in the cleaning artifact and reject materially unchanged long model outputs.",
+  "businessContext": "Long transcript cleaning must preserve an auditable record of local normalization and fail closed when a provider returns no meaningful cleanup.",
+  "allowedPaths": [
+    "apps/desktop/src/main/transcriptCleaningService.ts",
+    "apps/desktop/src/main/transcriptCleaningService.test.ts",
+    "apps/desktop/src/renderer/App.tsx",
+    ".harness/jobs/JOB-TRANSCRIPT-CLEANING-HARDENING.json"
+  ],
+  "forbiddenPaths": [
+    "apps/desktop/src/main/competitorDnaService.ts",
+    "apps/desktop/src/main/referenceSegmentationService.ts",
+    "packages/domain/src/workflowRegistry.ts"
+  ],
+  "dependencies": ["JOB-TRANSCRIPT-CLEANING"],
+  "acceptanceCriteria": [
+    "Formatting noise removed before provider execution is persisted as removedSegments with reason formatting_noise.",
+    "A long provider response that changes only an insignificant number of characters fails closed with output_content_invalid.",
+    "Existing Transcript Cleaning focused tests remain green."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run apps/desktop/src/main/transcriptCleaningService.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": []
+}

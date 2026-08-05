@@ -1,4 +1,5 @@
 import type { FactoryProject, PipelineStage, ReferenceSetState, StageEligibility, WorkflowStageDefinition, WorkflowStageStatus } from "./types";
+import { normalizeStageAttention } from "./stageAttention";
 import { workflowStageDefinitions } from "./workflowRegistry";
 
 export interface ProviderCapabilitySnapshot {
@@ -11,6 +12,8 @@ export interface ProviderCapabilitySnapshot {
 
 export interface WorkflowStateSnapshot {
   stages: PipelineStage[];
+  visualWorkflow?: FactoryProject["setup"]["visualWorkflow"];
+  characterVersionId?: string;
   referenceSetStatus?: ReferenceSetState["status"];
   inputMode?: FactoryProject["setup"]["inputMode"];
   includedReferenceCount: number;
@@ -21,7 +24,9 @@ export interface WorkflowStateSnapshot {
 
 export function buildWorkflowStateSnapshot(project: FactoryProject, providerCapabilities: ProviderCapabilitySnapshot = {}): WorkflowStateSnapshot {
   return {
-    stages: normalizeProjectStages(project.stages),
+    stages: normalizeProjectStages(project.stages, project.setup.visualWorkflow),
+    ...(project.setup.visualWorkflow ? { visualWorkflow: project.setup.visualWorkflow } : {}),
+    ...(project.setup.characterVersionId ? { characterVersionId: project.setup.characterVersionId } : {}),
     ...(project.referenceSet?.status ? { referenceSetStatus: project.referenceSet.status } : {}),
     ...(project.setup.inputMode ? { inputMode: project.setup.inputMode } : {}),
     includedReferenceCount: project.competitorReferences.filter((reference) => reference.included !== false).length,
@@ -33,24 +38,42 @@ export function buildWorkflowStateSnapshot(project: FactoryProject, providerCapa
   };
 }
 
-export function normalizeProjectStages(stages: PipelineStage[]): PipelineStage[] {
+export function normalizeProjectStages(stages: PipelineStage[], visualWorkflow: FactoryProject["setup"]["visualWorkflow"] = "legacy"): PipelineStage[] {
   const known = new Map(stages.map((stage) => [stage.id, stage]));
   return workflowStageDefinitions.map((definition, index) => {
     const existing = known.get(definition.id);
     if (existing) {
+      const attention = existing.attention ? normalizeStageAttention(definition.id, existing.attention) : undefined;
+      const legacyAutomaticStage = visualWorkflow !== "character_first" && (definition.id === "character-preparation" || definition.id === "asset-concepts");
       return {
         ...existing,
         name: definition.name,
-        dependsOn: definition.dependsOn
+        dependsOn: definition.dependsOn,
+        ...(legacyAutomaticStage ? { status: "approved" as const } : {}),
+        ...(attention ? { attention } : {})
       };
     }
+    const legacyAutomaticStage = visualWorkflow !== "character_first" && (definition.id === "character-preparation" || definition.id === "asset-concepts");
     return {
       id: definition.id,
       name: definition.name,
-      status: index === 0 ? "approved" : "not_started",
+      status: legacyAutomaticStage ? "approved"
+        : index === 0
+        ? "approved"
+        : legacyStageWasAlreadyPassed(definition.id, known) ? "approved" : "not_started",
       dependsOn: definition.dependsOn
     };
   });
+}
+
+const legacyRestoredStageIds = new Set(["research-source-intake", "claim-map"]);
+
+function legacyStageWasAlreadyPassed(stageId: string, known: Map<string, PipelineStage>, visiting = new Set<string>()): boolean {
+  if (!legacyRestoredStageIds.has(stageId) || visiting.has(stageId)) return false;
+  const nextVisiting = new Set(visiting).add(stageId);
+  return workflowStageDefinitions
+    .filter((definition) => (definition.dependsOn as readonly string[]).includes(stageId))
+    .some((definition) => known.get(definition.id)?.status === "approved" || legacyStageWasAlreadyPassed(definition.id, known, nextVisiting));
 }
 
 export function resolveStageEligibilities(project: FactoryProject, providerCapabilities: ProviderCapabilitySnapshot = {}): StageEligibility[] {
@@ -142,9 +165,11 @@ function dependencyChainApproved(stageId: string, snapshot: WorkflowStateSnapsho
 
 function effectiveDependencies(definition: WorkflowStageDefinition, snapshot: WorkflowStateSnapshot): string[] {
   const topicMode = (snapshot.inputMode ?? "topic") === "topic";
+  const existingScriptMode = snapshot.inputMode === "existing_script";
   if (definition.id === "idea-lab" && topicMode && snapshot.includedReferenceCount === 0) {
     return definition.dependsOn.filter((dependencyId) => dependencyId !== "opportunity-map");
   }
+  if (definition.id === "outline" && (existingScriptMode || topicMode && snapshot.includedReferenceCount === 0)) return [];
   return definition.dependsOn;
 }
 
@@ -153,6 +178,18 @@ function hasRequiredInput(definition: WorkflowStageDefinition, inputType: string
 }
 
 function referenceBlockingReasons(definition: WorkflowStageDefinition, snapshot: WorkflowStateSnapshot): StageEligibility["blockingReasons"] {
+  if (snapshot.visualWorkflow !== "character_first" && (definition.id === "character-preparation" || definition.id === "asset-concepts")) return [];
+  if (
+    snapshot.visualWorkflow === "character_first"
+    && ["visual-routing", "asset-concepts", "prompt-preparation", "asset-acquisition"].includes(definition.id)
+    && (!snapshot.characterVersionId || snapshot.stages.find((stage) => stage.id === "character-preparation")?.status !== "approved")
+  ) {
+    return [{
+      code: "CHARACTER_VERSION_NOT_APPROVED",
+      message: "Approve a channel character version before running character-first visual production.",
+      actionRoute: "channel-profiles"
+    }];
+  }
   if (definition.id === "reference-validation") {
     if (snapshot.includedReferenceCount === 0) {
       return [{
@@ -187,6 +224,7 @@ function referenceBlockingReasons(definition: WorkflowStageDefinition, snapshot:
 }
 
 function providerBlockingReasons(definition: WorkflowStageDefinition, snapshot: WorkflowStateSnapshot): StageEligibility["blockingReasons"] {
+  if (snapshot.visualWorkflow === "character_first" && (definition.id === "asset-concepts" || definition.id === "prompt-preparation")) return [];
   if (definition.executionKind === "provider_text" && !snapshot.providerCapabilities?.textVerified) {
     return [{
       code: "TEXT_MODEL_NOT_VERIFIED",

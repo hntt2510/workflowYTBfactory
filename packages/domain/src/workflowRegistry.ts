@@ -2,6 +2,14 @@ import type { WorkflowStageDefinition } from "./types";
 
 export const perReferenceArtifactStages: ReadonlySet<string> = new Set(["transcript-cleaning", "reference-segmentation", "competitor-dna"]);
 
+export const semiAutomaticCheckpointIds: ReadonlySet<string> = new Set(["reference-validation", "idea-lab", "character-preparation", "voice-generation", "preview-render"]);
+export const semiAutomaticAutomaticStageIds: ReadonlySet<string> = new Set([
+  "reference-validation", "transcript-cleaning", "reference-segmentation", "competitor-dna", "opportunity-map",
+  "originality-review", "research-source-intake", "claim-map", "outline", "script", "fact-review",
+  "retention-review", "scene-plan", "shot-plan", "visual-routing", "asset-concepts", "prompt-preparation", "asset-acquisition", "asset-review",
+  "voice-generation", "subtitle-preparation", "timeline-assembly", "qa", "capcut-draft", "packaging-export"
+]);
+
 export const workflowStageDefinitions = [
   {
     id: "project-setup",
@@ -129,7 +137,7 @@ export const workflowStageDefinitions = [
     id: "research-source-intake",
     name: "Research Source Intake",
     order: 10,
-    screenRoute: "research-claims",
+    screenRoute: "advanced-pipeline",
     dependsOn: ["originality-review"],
     requiredInputTypes: ["idea.originality-approved"],
     outputArtifactTypes: ["research-sources"],
@@ -142,7 +150,7 @@ export const workflowStageDefinitions = [
     id: "claim-map",
     name: "Claim Map",
     order: 11,
-    screenRoute: "research-claims",
+    screenRoute: "advanced-pipeline",
     dependsOn: ["research-source-intake"],
     requiredInputTypes: ["research-sources.approved"],
     outputArtifactTypes: ["claim-map"],
@@ -236,9 +244,22 @@ export const workflowStageDefinitions = [
     invalidates: ["visual-routing"]
   },
   {
+    id: "character-preparation",
+    name: "Character Preparation",
+    order: 18,
+    screenRoute: "channel-profiles",
+    dependsOn: ["shot-plan"],
+    requiredInputTypes: ["channel-character.approved"],
+    outputArtifactTypes: ["channel-character.approved"],
+    runnerId: "channel-character-user-action",
+    executionKind: "manual_input",
+    approvalRequired: true,
+    invalidates: ["asset-concepts"]
+  },
+  {
     id: "visual-routing",
     name: "Visual Routing",
-    order: 18,
+    order: 19,
     screenRoute: "visuals",
     dependsOn: ["shot-plan"],
     requiredInputTypes: ["shot-plan.approved"],
@@ -246,15 +267,29 @@ export const workflowStageDefinitions = [
     runnerId: "visual-routing-local",
     executionKind: "local_deterministic",
     approvalRequired: true,
+    invalidates: ["asset-concepts"]
+  },
+  {
+    id: "asset-concepts",
+    name: "Asset Concepts",
+    order: 20,
+    screenRoute: "visuals",
+    dependsOn: ["visual-routing", "character-preparation"],
+    requiredInputTypes: ["visual-routing.approved", "channel-character.approved"],
+    outputArtifactTypes: ["asset-concepts"],
+    runnerId: "asset-concepts-9router",
+    executionKind: "provider_text",
+    requiredCapability: "text",
+    approvalRequired: false,
     invalidates: ["prompt-preparation"]
   },
   {
     id: "prompt-preparation",
     name: "Prompt Preparation",
-    order: 19,
+    order: 21,
     screenRoute: "visuals",
-    dependsOn: ["visual-routing"],
-    requiredInputTypes: ["visual-routing.approved"],
+    dependsOn: ["asset-concepts"],
+    requiredInputTypes: ["asset-concepts.approved", "channel-character.approved"],
     outputArtifactTypes: ["visual-prompts"],
     runnerId: "prompt-preparation-9router",
     executionKind: "provider_text",
@@ -265,7 +300,7 @@ export const workflowStageDefinitions = [
   {
     id: "asset-acquisition",
     name: "Asset Acquisition",
-    order: 20,
+    order: 22,
     screenRoute: "visuals",
     dependsOn: ["prompt-preparation"],
     requiredInputTypes: ["visual-prompts.approved"],
@@ -279,7 +314,7 @@ export const workflowStageDefinitions = [
   {
     id: "asset-review",
     name: "Asset Review",
-    order: 21,
+    order: 23,
     screenRoute: "visuals",
     dependsOn: ["asset-acquisition"],
     requiredInputTypes: ["asset.draft"],
@@ -292,7 +327,7 @@ export const workflowStageDefinitions = [
   {
     id: "voice-generation",
     name: "Voice Generation",
-    order: 22,
+    order: 24,
     screenRoute: "voice",
     dependsOn: ["asset-review"],
     requiredInputTypes: ["script.approved", "asset.approved"],
@@ -306,7 +341,7 @@ export const workflowStageDefinitions = [
   {
     id: "subtitle-preparation",
     name: "Subtitle Preparation",
-    order: 23,
+    order: 25,
     screenRoute: "timeline",
     dependsOn: ["voice-generation"],
     requiredInputTypes: ["script.approved", "voice.approved"],
@@ -319,7 +354,7 @@ export const workflowStageDefinitions = [
   {
     id: "timeline-assembly",
     name: "Timeline Assembly",
-    order: 24,
+    order: 26,
     screenRoute: "timeline",
     dependsOn: ["subtitle-preparation"],
     requiredInputTypes: ["voice.approved", "asset.approved", "subtitles.approved"],
@@ -332,7 +367,7 @@ export const workflowStageDefinitions = [
   {
     id: "preview-render",
     name: "Preview Render",
-    order: 25,
+    order: 27,
     screenRoute: "timeline",
     dependsOn: ["timeline-assembly"],
     requiredInputTypes: ["timeline.approved"],
@@ -345,7 +380,7 @@ export const workflowStageDefinitions = [
   {
     id: "qa",
     name: "QA",
-    order: 26,
+    order: 28,
     screenRoute: "qa",
     dependsOn: ["preview-render"],
     requiredInputTypes: ["preview-video.approved"],
@@ -358,7 +393,7 @@ export const workflowStageDefinitions = [
   {
     id: "capcut-draft",
     name: "CapCut Draft",
-    order: 27,
+    order: 29,
     screenRoute: "export",
     dependsOn: ["qa"],
     requiredInputTypes: ["qa.approved", "timeline.approved"],
@@ -371,7 +406,7 @@ export const workflowStageDefinitions = [
   {
     id: "packaging-export",
     name: "Packaging Export",
-    order: 28,
+    order: 30,
     screenRoute: "export",
     dependsOn: ["qa"],
     requiredInputTypes: ["qa.approved", "timeline.approved"],

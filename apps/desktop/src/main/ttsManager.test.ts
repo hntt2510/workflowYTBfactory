@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { TtsManager, TtsManagerError } from "./ttsManager";
+import { TtsManager, TtsManagerError, voiceMatchesLanguage } from "./ttsManager";
 import { TtsWorkerError } from "./ttsWorkerService";
 
 function createWorker(options: { failEdgeAttempts?: number } = {}) {
@@ -42,6 +42,14 @@ function createManager(worker = createWorker()) {
 }
 
 describe("TtsManager", () => {
+  it("accepts only voices that match the requested language", () => {
+    expect(voiceMatchesLanguage("edge-tts", "en-AU-WilliamMultilingualNeural", "en")).toBe(true);
+    expect(voiceMatchesLanguage("edge-tts", "vi-VN-NamMinhNeural", "en")).toBe(false);
+    expect(voiceMatchesLanguage("nine-router-tts", "edge-tts/en-AU-WilliamMultilingualNeural", "English")).toBe(true);
+    expect(voiceMatchesLanguage("gtts", "en", "English")).toBe(true);
+    expect(voiceMatchesLanguage("kokoro-vietnamese", "diem_trinh", "en")).toBe(false);
+  });
+
   it("lists the five provider registry entries without exposing credentials", async () => {
     const { manager } = createManager();
     const catalog = await manager.listProviders("vi");

@@ -2,7 +2,7 @@
   {
     "id": "ISSUE-001",
     "severity": "P1",
-    "status": "open",
+    "status": "fixed",
     "checkpoint": "workflow-stage-engine",
     "projectId": null,
     "stageId": "reference-segmentation",
@@ -106,5 +106,43 @@
     "safeIndependentWorkRemains": true,
     "suggestedFixBatch": "Restore or reinstall OmniVoice in its own checkout, configure the exact local executable, then run one explicit audio generation and FFprobe validation.",
     "acceptanceCriteria": ["omnivoice-infer --help runs from the configured path", "A manually initiated voice run produces FFprobe-valid audio inside the workspace", "No alternate voice provider is used"]
+  },
+  {
+    "id": "ISSUE-007",
+    "severity": "P1",
+    "status": "fixed",
+    "checkpoint": "competitor-dna",
+    "projectId": "project-ae9df5f8-5d1c-426d-8bca-bd5957ff78cf",
+    "stageId": "competitor-dna",
+    "stageRunId": "stage-run-41f8fb68-30a8-4148-b0b9-3c54f2bc640e",
+    "title": "Competitor DNA provider output failed strict schema validation",
+    "expected": "Competitor DNA returns the strict evidence-backed schema and enters needs_review.",
+    "actual": "The configured 9Router model response did not match the Competitor DNA schema; the run was persisted as failed with safe error category invalid_output.",
+    "reproduction": ["Use the approved synthetic runtime project", "Invoke runCompetitorDna through the Electron IPC bridge"],
+    "evidence": ["workflow_stage_runs row stage-run-41f8fb68-30a8-4148-b0b9-3c54f2bc640e", "Safe error: Competitor DNA returned an invalid structured output."],
+    "blocksDownstream": true,
+    "safeIndependentWorkRemains": true,
+    "suggestedFixBatch": "Capture a redacted schema-diagnostic summary, tighten the prompt or parser only with evidence, then rerun with a new implementation fingerprint.",
+    "acceptanceCriteria": ["Provider output passes the Competitor DNA schema and evidence checks", "Cited segments are included for DNA", "Output reaches needs_review before explicit approval"],
+    "fixedBy": "current worktree change: competitor-dna-v5 prompt and validation contract",
+    "verification": ["stage-run-10de6c42-c715-4a33-9587-a2e4feea70a8 reached needs_review", "Sponsor exclusion and evidence checks passed", "Restart preserved the artifact"]
+  },
+  {
+    "id": "ISSUE-008",
+    "severity": "P1",
+    "status": "open",
+    "checkpoint": "asset-acquisition",
+    "projectId": "project-09d4fcb0-0637-4bc3-95fe-1c83f19c6e9d",
+    "stageId": "asset-acquisition",
+    "stageRunId": null,
+    "title": "Asset Acquisition has no applicable AI-image input",
+    "expected": "The selected visual route has an applicable, reviewable asset acquisition path.",
+    "actual": "All seven approved routes are stock_video or document and the approved Prompt Preparation artifact contains zero AI-image prompts; the handler fails closed before creating a run.",
+    "reproduction": ["Use the isolated project after approved Visual Routing and Prompt Preparation", "Invoke runAssetAcquisition through Electron IPC"],
+    "evidence": ["SQLite project shots and prompt artifact", "Runtime error: Asset Acquisition requires at least one approved AI image prompt.", "No verified image certification record"],
+    "blocksDownstream": true,
+    "safeIndependentWorkRemains": true,
+    "suggestedFixBatch": "Provide a real AI-image route and verified image certification, or implement trusted stock/document acquisition before Asset Review.",
+    "acceptanceCriteria": ["No placeholder asset is inserted", "Applicable asset route creates a needs_review artifact", "Asset Review receives only validated workspace media"]
   }
 ]

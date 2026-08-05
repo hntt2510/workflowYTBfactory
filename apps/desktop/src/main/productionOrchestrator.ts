@@ -41,13 +41,13 @@ export function createProductionOrchestrator(dependencies: ProductionOrchestrato
     }
   }
 
-  async function runStage(projectId: string, stageId: string, runChannel: string, approveChannel: string, runInput: Record<string, unknown> = {}, approveInput: Record<string, unknown> = {}, options: { force?: boolean; leaveForReview?: boolean } = {}): Promise<FactoryProject> {
+  async function runStage(projectId: string, stageId: string, runChannel: string, approveChannel: string, runInput: Record<string, unknown> = {}, approveInput: Record<string, unknown> = {}, options: { force?: boolean; leaveForReview?: boolean; maxPollAttempts?: number } = {}): Promise<FactoryProject> {
     let project = await current(projectId);
     const status = project.stages.find((stage) => stage.id === stageId)?.status;
     if (status === "approved" && !options.force) return project;
     let generated = await dependencies.invoke<FactoryProject>(runChannel, { projectId, ...runInput });
     let generatedStatus = generated.stages.find((stage) => stage.id === stageId)?.status;
-    for (let attempt = 0; (generatedStatus === "queued" || generatedStatus === "running") && attempt < 120; attempt += 1) {
+    for (let attempt = 0; (generatedStatus === "queued" || generatedStatus === "running") && attempt < (options.maxPollAttempts ?? 120); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 500));
       generated = await current(projectId);
       generatedStatus = generated.stages.find((stage) => stage.id === stageId)?.status;
@@ -67,7 +67,7 @@ export function createProductionOrchestrator(dependencies: ProductionOrchestrato
     let project = await current(projectId);
     const isReference = project.setup.inputMode === "reference" || project.competitorReferences.length > 0;
     if (isReference) {
-      await runStage(projectId, "reference-validation", "validate-reference-set", "approve-reference-set");
+      await runStage(projectId, "reference-validation", "validate-reference-set", "approve-reference-set", {}, { approvalMode: "automatic" });
       project = await current(projectId);
       for (const reference of project.competitorReferences.filter((item) => item.included !== false && item.status === "approved")) {
         const referenceInput = { referenceId: reference.id };
@@ -86,6 +86,23 @@ export function createProductionOrchestrator(dependencies: ProductionOrchestrato
     return project;
   }
 
+  async function runVisualProduction(projectId: string, initialProject: FactoryProject): Promise<FactoryProject> {
+    const characterFirst = initialProject.setup.visualWorkflow === "character_first";
+    let project = initialProject;
+    if (characterFirst) {
+      project = await runStage(projectId, "character-preparation", "run-character-preparation", "approve-character-preparation", {}, {}, { force: true });
+    }
+    project = await runStage(projectId, "visual-routing", "run-visual-routing", "approve-visual-routing");
+    if (characterFirst) {
+      // Recheck the persisted artifact when resuming older projects whose stage status may be stale.
+      project = await runStage(projectId, "asset-concepts", "run-asset-concepts", "approve-asset-concepts", {}, {}, { force: true });
+    }
+    project = await runStage(projectId, "prompt-preparation", "run-prompt-preparation", "approve-prompt-preparation");
+    if (characterFirst) return project;
+    project = await runStage(projectId, "asset-acquisition", "run-asset-acquisition", "approve-asset-acquisition");
+    return dependencies.invoke<FactoryProject>("run-asset-review", { projectId });
+  }
+
   async function continueAfterIdeaSelection(projectId: string, ideaId: string): Promise<FactoryProject> {
     return withLock(projectId, async () => {
       let selected = await current(projectId);
@@ -97,28 +114,29 @@ export function createProductionOrchestrator(dependencies: ProductionOrchestrato
         selected = await runStage(projectId, "retention-review", "run-retention-review", "approve-retention-review");
         selected = await runStage(projectId, "scene-plan", "run-scene-plan", "approve-scene-plan");
         selected = await runStage(projectId, "shot-plan", "run-shot-plan", "approve-shot-plan");
-        selected = await runStage(projectId, "visual-routing", "run-visual-routing", "approve-visual-routing");
-        selected = await runStage(projectId, "prompt-preparation", "run-prompt-preparation", "approve-prompt-preparation");
-        selected = await runStage(projectId, "asset-acquisition", "run-asset-acquisition", "approve-asset-acquisition");
-        return dependencies.invoke<FactoryProject>("run-asset-review", { projectId });
+        return runVisualProduction(projectId, selected);
       }
       let project = await runStage(projectId, "originality-review", "run-originality-review", "approve-originality-review");
+      const topicModeWithoutReferences = project.setup.inputMode === "topic"
+        && project.competitorReferences.every((reference) => reference.included === false);
+      if (!topicModeWithoutReferences) {
+        project = await runStage(projectId, "research-source-intake", "run-research-source-search", "approve-research-sources");
+        project = await runStage(projectId, "claim-map", "run-claim-map", "approve-claim-map");
+      }
       project = await runStage(projectId, "outline", "run-outline", "approve-outline");
       project = await runStage(projectId, "script", "run-script", "approve-script");
       project = await runStage(projectId, "fact-review", "run-fact-review", "approve-fact-review");
       project = await runStage(projectId, "retention-review", "run-retention-review", "approve-retention-review");
       project = await runStage(projectId, "scene-plan", "run-scene-plan", "approve-scene-plan");
       project = await runStage(projectId, "shot-plan", "run-shot-plan", "approve-shot-plan");
-      project = await runStage(projectId, "visual-routing", "run-visual-routing", "approve-visual-routing");
-      project = await runStage(projectId, "prompt-preparation", "run-prompt-preparation", "approve-prompt-preparation");
-      project = await runStage(projectId, "asset-acquisition", "run-asset-acquisition", "approve-asset-acquisition");
-      return dependencies.invoke<FactoryProject>("run-asset-review", { projectId });
+      return runVisualProduction(projectId, project);
     });
   }
 
   async function startMediaGeneration(projectId: string): Promise<FactoryProject> {
     return withLock(projectId, async () => {
-      let project = await runStage(projectId, "voice-generation", "run-voice-generation", "approve-voice-generation");
+      let project = await current(projectId);
+      if (project.stages.find((stage) => stage.id === "voice-generation")?.status !== "approved") return project;
       project = await runStage(projectId, "subtitle-preparation", "run-subtitle-preparation", "approve-subtitle-preparation");
       project = await runStage(projectId, "timeline-assembly", "run-timeline-assembly", "approve-timeline-assembly");
       return runStage(projectId, "preview-render", "run-preview-render", "approve-preview-render", {}, {}, { leaveForReview: true });

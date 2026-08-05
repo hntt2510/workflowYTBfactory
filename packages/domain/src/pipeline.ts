@@ -1,7 +1,8 @@
 import { routeChannelProfile } from "./router";
 import { seedChannelProfiles } from "./seedProfiles";
-import type { ChannelProfile, FactoryProject, PipelineStage, VideoFormat, WorkflowMode } from "./types";
+import type { ChannelProfile, FactoryProject, PipelineStage, VideoFormat, VisualWorkflowMode, WorkflowMode } from "./types";
 import { normalizeReferenceIdentity } from "./referenceIdentity";
+import { characterVersionIsApproved } from "./character";
 import { workflowStageDefinitions } from "./workflowRegistry";
 
 function uniqueId(prefix: string): string {
@@ -26,11 +27,22 @@ export function createPipelineStages(approvedThroughIndex = 0): PipelineStage[] 
 
 export function createFixtureProject(input: {
   topic: string;
+  synthetic?: boolean;
   format: VideoFormat;
   targetLanguage: string;
+  selectedProfileId?: string;
   targetDuration?: string;
   projectName?: string;
   workflowMode?: WorkflowMode;
+  visualWorkflow?: VisualWorkflowMode;
+  characterVersionId?: string;
+  inputMode?: "topic" | "existing_script" | "reference";
+  aspectRatio?: "16:9" | "9:16" | "1:1";
+  visualStyle?: "vox-documentary";
+  voiceId?: string;
+  outputResolution?: "1080p" | "720p";
+  sourceScript?: string;
+  referenceUrl?: string;
   competitorReference?: {
     sourceUrl?: string;
     pastedTranscript: string;
@@ -58,11 +70,17 @@ export function createFixtureProject(input: {
         }];
       })()
     : [];
+  const selectedCharacterVersion = profile.characterVersions?.find((version) => version.id === (input.characterVersionId ?? profile.activeCharacterVersionId));
   const stages = createPipelineStages(0).map((stage) => (
-    competitorReferences.length && stage.id === "reference-intake" ? { ...stage, status: "approved" as const } : stage
+    competitorReferences.length && stage.id === "reference-intake"
+      ? { ...stage, status: "approved" as const }
+      : stage.id === "character-preparation" && input.visualWorkflow !== "legacy" && characterVersionIsApproved(selectedCharacterVersion)
+        ? { ...stage, status: "approved" as const }
+        : stage
   ));
   return {
     id: uniqueId("project"),
+    ...(input.synthetic ? { synthetic: true } : {}),
     topic: input.topic,
     format: input.format,
     targetLanguage: input.targetLanguage,
@@ -70,7 +88,16 @@ export function createFixtureProject(input: {
       projectName: input.projectName?.trim() || input.topic,
       targetDuration: input.targetDuration?.trim() || defaultTargetDuration(input.format),
       language: input.targetLanguage,
-      workflowMode: input.workflowMode ?? "guided"
+      workflowMode: input.workflowMode ?? "semi_automatic",
+      visualWorkflow: input.visualWorkflow ?? (input.workflowMode === "guided" ? "legacy" : "character_first"),
+      ...(input.characterVersionId ?? profile.activeCharacterVersionId ? { characterVersionId: input.characterVersionId ?? profile.activeCharacterVersionId } : {}),
+      inputMode: input.inputMode ?? (input.competitorReference ? "reference" : "topic"),
+      aspectRatio: input.aspectRatio ?? (input.format === "short" ? "9:16" : "16:9"),
+      visualStyle: input.visualStyle ?? "vox-documentary",
+      ...(input.voiceId ? { voiceId: input.voiceId } : {}),
+      outputResolution: input.outputResolution ?? "1080p",
+      ...(input.sourceScript?.trim() ? { sourceScript: input.sourceScript.trim() } : {}),
+      ...(input.referenceUrl?.trim() ? { referenceUrl: input.referenceUrl.trim() } : {})
     },
     profileId: profile.id,
     routeDecision,

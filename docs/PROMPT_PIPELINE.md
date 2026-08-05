@@ -11,19 +11,17 @@ Required flow:
 5. Pattern synthesis
 6. Originality gate
 7. Idea Lab
-8. Claim mapper
-9. Outline builder
-10. Script writer
-11. Retention reviewer
-12. Fact reviewer
-13. Scene planner
-14. Shot planner
-15. Visual router
-16. Image prompt compiler
-17. Video prompt compiler
-18. TTS preparer
-19. Continuity reviewer
-20. Final QA
+8. Outline builder
+9. Script writer
+10. Retention reviewer
+11. Fact reviewer
+12. Scene planner
+13. Shot planner
+14. Visual router
+15. Image prompt compiler
+16. Video prompt compiler
+17. TTS preparer
+18. Continuity reviewer
+19. Final QA
 
 Each template requests strict JSON and should be paired with Zod validation before provider output is trusted.
-
