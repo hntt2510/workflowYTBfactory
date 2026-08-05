@@ -51,7 +51,9 @@ import { Dashboard } from "./features/home/HomeScreens";
 import { ProjectOverview, stageRoute } from "./features/projects/ProjectOverview";
 import { ProjectsScreen } from "./features/projects/ProjectsScreen";
 import { ChannelProfilesScreen } from "./features/settings/ChannelProfilesScreen";
+import { DiagnosticsScreen, SettingsScreen } from "./features/settings/SettingsScreens";
 import { ExportScreen, QaScreen, TimelineScreen } from "./features/build/BuildScreens";
+import { FinalPreviewScreen } from "./features/build/FinalPreviewScreen";
 import { creatorInputModeLabel, creatorPhaseStateLabel, creatorStatusLabel, workflowModeOptions } from "./creatorStudioCopy";
 import "./styles.css";
 
@@ -853,101 +855,6 @@ function SceneReviewScreen(props: { project: FactoryProject; setSelectedProject:
       {message ? <p className={message.toLowerCase().includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}
     </>
   );
-}
-
-function FinalPreviewScreen(props: { project: FactoryProject; localTtsSettings: LocalTtsSettings | null; setSelectedProject: (project: FactoryProject | null) => void; setRoute: (route: RouteId) => void; startSemiAutomatic: (chain: SemiAutomaticChain, project: FactoryProject) => Promise<void> }) {
-  const [artifacts, setArtifacts] = useState<PreviewRenderArtifact[]>([]);
-  const [mediaUrl, setMediaUrl] = useState("");
-  const [running, setRunning] = useState(false);
-  const [message, setMessage] = useState("");
-  const preview = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "preview-render");
-  const currentArtifact = artifacts.find((artifact) => artifact.status === "needs_review") ?? artifacts.find((artifact) => artifact.status === "approved");
-  const warnings = preview?.blockingReasons ?? [];
-
-  async function refresh(): Promise<void> {
-    const next = await factoryClient.listPreviewRenderArtifacts({ projectId: props.project.id });
-    setArtifacts(next);
-    const candidate = next.find((artifact) => artifact.status === "needs_review") ?? next.find((artifact) => artifact.status === "approved");
-    if (!candidate) {
-      setMediaUrl("");
-      return;
-    }
-    const response = await factoryClient.getPreviewVideoUrl({ projectId: props.project.id, artifactId: candidate.id });
-    setMediaUrl(response.url);
-  }
-
-  useEffect(() => { void refresh().catch((error) => setMessage(safeRendererError(error, "The final preview could not be loaded. Render it again or open Timeline."))); }, [props.project.id]);
-
-  async function perform(action: () => Promise<FactoryProject>, success: string): Promise<FactoryProject | null> {
-    setRunning(true);
-    setMessage("");
-    try {
-      const next = await action();
-      props.setSelectedProject(next);
-      await refresh();
-      setMessage(success);
-      return next;
-    } catch (error) {
-      setMessage(safeRendererError(error, "The final preview action could not be completed. Retry the preview step."));
-      return null;
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  async function approveFinalVideo(): Promise<FactoryProject> {
-    const next = await factoryClient.approvePreviewRender({ projectId: props.project.id });
-    if (next.setup.workflowMode === "semi_automatic") void props.startSemiAutomatic("preview", next);
-    return next;
-  }
-
-  async function downloadVideo(): Promise<void> {
-    if (!currentArtifact) return;
-    setRunning(true);
-    setMessage("");
-    try {
-      const result = await factoryClient.downloadPreviewVideo({ projectId: props.project.id, artifactId: currentArtifact.id });
-      setMessage(result.canceled ? "MP4 download canceled." : `MP4 saved as ${result.fileName ?? "video.mp4"}.`);
-    } catch (error) {
-      setMessage(safeRendererError(error, "The MP4 could not be downloaded."));
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  const canRenderAgain = Boolean(currentArtifact) && ["needs_review", "approved", "failed", "needs_attention", "stale"].includes(preview?.status ?? "");
-  const voiceLabel = props.project.setup.voiceId ?? props.localTtsSettings?.ttsVoiceId ?? "Existing configured voice";
-  const subtitleLabel = currentArtifact?.payloadJson.subtitleRelativeFilePath
-    ? currentArtifact.payloadJson.subtitlePreset === "minimal" ? "Minimal - local UTF-8" : currentArtifact.payloadJson.subtitlePreset === "high-contrast" ? "High Contrast - local UTF-8" : "VOX Clean - local UTF-8"
-    : "Subtitle cues pending";
-
-  return <>
-    <PageHeader title="Final Preview" description="Review the real rendered video and its persisted metadata before export." actions={<div className="button-row"><button className="button secondary" type="button" onClick={() => props.setRoute("scene-review")}>Return to Scene Review</button><button className="button secondary" type="button" onClick={() => props.setRoute("timeline")}>Open subtitle controls</button></div>} />
-    <SectionCard title="Rendered video" description="This player uses a safe workspace URL for the persisted reviewable or approved MP4.">
-      {mediaUrl ? <video className="preview-video" controls preload="metadata" src={mediaUrl}>Your browser cannot play this preview.</video> : <EmptyState title="No reviewable preview yet" detail="Render an approved timeline after voice and subtitle preparation complete." action={<button className="button primary" type="button" onClick={() => props.setRoute("timeline")}>Open Timeline</button>} />}
-      {message ? <p className={message.toLowerCase().includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}
-    </SectionCard>
-    <section className="metric-grid">
-      <MetricCard label="Preview status" value={creatorStatusLabel(preview?.status ?? "not_started")} tone={preview?.status === "approved" ? "success" : preview?.status === "needs_review" ? "info" : "warning"} />
-      <MetricCard label="Duration" value={currentArtifact ? `${currentArtifact.payloadJson.durationSeconds.toFixed(2)}s` : "-"} />
-      <MetricCard label="Resolution" value={currentArtifact ? `${currentArtifact.payloadJson.width} × ${currentArtifact.payloadJson.height}` : "-"} />
-      <MetricCard label="Scenes" value={props.project.scenes.length} />
-    </section>
-    <SectionCard title="Preview details">
-      <p><strong>Voice:</strong> {voiceLabel}</p>
-      <p><strong>Subtitle preset:</strong> {subtitleLabel}</p>
-      <p><strong>Preview file:</strong> {currentArtifact?.relativeFilePath ?? "Not rendered"}</p>
-      {warnings.length ? <div><strong>Warnings</strong>{warnings.map((warning) => <p key={`${warning.code}-${warning.message}`}>{warning.message}</p>)}</div> : <p className="safe-message">No blocking preview warnings.</p>}
-      <div className="button-row">
-        {currentArtifact ? <button className="button secondary" type="button" disabled={running} onClick={() => void downloadVideo()}>Download MP4</button> : null}
-        {currentArtifact?.status === "needs_review" ? <button className="button primary" type="button" disabled={running || !preview?.approvable} onClick={() => void perform(approveFinalVideo, "Final video approved.").then((updated) => { if (updated?.stages.find((stage) => stage.id === "preview-render")?.status === "approved") props.setRoute("project-overview"); })}>Approve Final Video</button> : null}
-        {canRenderAgain ? <button className="button secondary" type="button" disabled={running} onClick={() => void perform(() => factoryClient.runPreviewRender({ projectId: props.project.id, force: true, subtitlePreset: currentArtifact?.payloadJson.subtitlePreset ?? "vox-clean" }), "Preview rendered again; approval is still required.")}>{running ? "Rendering..." : "Render Again"}</button> : null}
-        <button className="button secondary" type="button" onClick={() => props.setRoute("scene-review")}>Return to Scene Review</button>
-        <button className="button secondary" type="button" disabled={running} onClick={() => props.setRoute("voice")}>Change Voice / Regenerate</button>
-        <button className="button secondary" type="button" onClick={() => props.setRoute("timeline")}>Change Subtitle Preset</button>
-      </div>
-    </SectionCard>
-  </>;
 }
 
 function NewProjectWizard(props: {
@@ -2970,43 +2877,6 @@ function VoiceScreen(props: { project: FactoryProject; localTtsSettings: LocalTt
   );
 }
 
-function SettingsScreen(props: {
-  bootstrap: BootstrapData;
-  setRoute: (route: RouteId) => void;
-}) {
-  const runtime = props.bootstrap.runtime;
-  return (
-    <>
-      <PageHeader title="Settings" description="Dark-only local workspace settings. Most backend settings are read-only until persistence endpoints exist." />
-      <div className="settings-grid">
-        <SectionCard title="General"><SettingsList items={[["Mode", "Local desktop"], ["Project persistence", "SQLite"], ["Cloud sync", "Unavailable"]]} /></SectionCard>
-        <SectionCard title="Workspace">
-          <SettingsList items={[["Workspace location", props.bootstrap.workspaceRoot], ["Database location", props.bootstrap.databasePath], ["Asset location", "Not configured"], ["Logs location", "Not configured"]]} />
-          <DisabledAction reason="Open-folder IPC is not implemented.">Open folder</DisabledAction>
-        </SectionCard>
-        <SectionCard title="Appearance"><SettingsList items={[["Theme", "Dark only"], ["Density", "Comfortable"], ["Sidebar", "Expanded / collapsed"]]} /></SectionCard>
-        <SectionCard title="Generation"><SettingsList items={[["Approval policy", "Guided"], ["Paid generation", "Explicit stage runs only; never automatic"], ["Provider concurrency", "Five-worker queue exists; provider-specific setting unavailable"]]} /></SectionCard>
-        <SectionCard title="Advanced workflow" description="The stage-by-stage guided experience is hidden from the default navigation but remains available for debugging and recovery.">
-          <button className="button secondary" type="button" onClick={() => props.setRoute("new-project")}>Open Advanced Guided Wizard</button>
-        </SectionCard>
-        <SectionCard title="CapCut"><SettingsList items={[
-          ["Installation status", runtime.capcutInstalled ? "Detected" : "Unavailable"],
-          ["Version", "Not verified"],
-          ["Install path", runtime.capcutInstallPath],
-          ["Draft directory", runtime.capcutDraftDir],
-          ["Python status", runtime.pythonExists ? runtime.pythonVersion : "Needs setup"],
-          ["Python path", runtime.sidecarPythonPath],
-          ["pycapcut status", runtime.pycapcutStatus],
-          ["Compatibility status", runtime.capcutCompatibility]
-        ]} /></SectionCard>
-        <SectionCard title="FFmpeg"><SettingsList items={[["Status", runtime.ffmpegAvailable ? "Detected" : "Needs setup"], ["Path", runtime.ffmpegPath], ["Version", runtime.ffmpegStatus], ["Preview IPC", runtime.ffmpegAvailable ? "Ready for explicit approved-media renders" : "Blocked until FFmpeg is configured"], ["Competitor video processing", runtime.ffmpegAvailable ? "Ready for future downloader/transcriber wiring" : "Blocked until FFmpeg is configured"]]} /></SectionCard>
-        <SectionCard title="Security"><SettingsList items={[["Credential storage", "OS keychain reference"], ["Renderer API keys", "Write-only input"], ["Log redaction", "Enabled"], ["Generic filesystem IPC", "Unavailable"]]} /></SectionCard>
-        <SectionCard title="Diagnostics"><SettingsList items={[["CodeGraph", "Development index only"], ["Queue snapshot", `${props.bootstrap.queue.jobs.length} jobs`], ["Project count", `${props.bootstrap.projects.length}`]]} /></SectionCard>
-      </div>
-    </>
-  );
-}
-
 function ttsLanguageCode(value: string | undefined): string {
   const normalized = value?.trim().toLowerCase() ?? "";
   const option = ttsLanguageOptions.find((item) => item.code === normalized || item.label.toLowerCase() === normalized);
@@ -3262,24 +3132,6 @@ function modelListTone(status: ModelListStatus): "default" | "success" | "warnin
   if (status === "testing") return "info";
   if (status === "not_tested") return "warning";
   return "danger";
-}
-
-function DiagnosticsScreen(props: { bootstrap: BootstrapData; presence: ProviderPresence }) {
-  const diagnostics = {
-    workspaceRoot: props.bootstrap.workspaceRoot,
-    databasePath: props.bootstrap.databasePath,
-    projectCount: props.bootstrap.projects.length,
-    queueJobs: props.bootstrap.queue.jobs.length,
-    providerStatus: props.presence.hasCredential ? "credential_saved" : "not_configured"
-  };
-  return (
-    <>
-      <PageHeader title="Diagnostics" description="Redacted local state for troubleshooting." />
-      <SectionCard>
-        <pre className="diagnostics">{JSON.stringify(diagnostics, null, 2)}</pre>
-      </SectionCard>
-    </>
-  );
 }
 
 function UnavailableWorkflow(props: { title: string; reason: string }) {
