@@ -1,5 +1,25 @@
+import type { AssetConcept } from "./assetConcepts";
+import type { CharacterVersion } from "./character";
+import type { ShotMotionPlan } from "./motion";
+
 export type VideoFormat = "long" | "short";
 export type WorkflowMode = "guided" | "semi_automatic" | "full_automatic";
+export type ProductionInputMode = "topic" | "existing_script" | "reference";
+export type VisualWorkflowMode = "legacy" | "character_first";
+export type SubtitlePreset = "vox-clean" | "minimal" | "high-contrast";
+export type ProductionStatus =
+  | "draft"
+  | "preparing"
+  | "waiting_for_idea"
+  | "generating_media"
+  | "needs_scene_review"
+  | "generating_voice"
+  | "rendering_preview"
+  | "needs_final_review"
+  | "exporting"
+  | "completed"
+  | "needs_attention"
+  | "failed";
 
 export type WorkflowStageStatus =
   | "not_started"
@@ -8,6 +28,7 @@ export type WorkflowStageStatus =
   | "queued"
   | "running"
   | "needs_review"
+  | "needs_attention"
   | "approved"
   | "rejected"
   | "failed"
@@ -22,6 +43,15 @@ export interface ProjectSetup {
   targetDuration: string;
   language: string;
   workflowMode: WorkflowMode;
+  visualWorkflow?: VisualWorkflowMode;
+  characterVersionId?: string;
+  inputMode?: ProductionInputMode;
+  aspectRatio?: "16:9" | "9:16" | "1:1";
+  visualStyle?: "vox-documentary";
+  voiceId?: string;
+  outputResolution?: "1080p" | "720p";
+  sourceScript?: string;
+  referenceUrl?: string;
 }
 
 export interface CompetitorReference {
@@ -82,6 +112,8 @@ export interface ChannelProfile {
   avoidList: string[];
   routerSignals: string[];
   safetyRules: string[];
+  characterVersions?: CharacterVersion[];
+  activeCharacterVersionId?: string;
 }
 
 export interface ChannelRouteInput {
@@ -201,8 +233,11 @@ export interface Shot {
   startState: Record<string, unknown>;
   endState: Record<string, unknown>;
   continuityRefs: string[];
-  promptVersionId?: string;
-  approvedAssetId?: string;
+  semanticBeat?: string | undefined;
+  assetConceptIds?: string[] | undefined;
+  motion?: ShotMotionPlan | undefined;
+  promptVersionId?: string | undefined;
+  approvedAssetId?: string | undefined;
 }
 
 export interface PipelineStage {
@@ -210,6 +245,24 @@ export interface PipelineStage {
   name: string;
   status: StageStatus;
   dependsOn: string[];
+  attention?: StageAttention;
+}
+
+export interface StageAttentionAction {
+  label: string;
+  route?: string;
+}
+
+export interface StageAttention {
+  code: string;
+  message: string;
+  phase: string;
+  safeReason: string;
+  failedItem?: string;
+  recommendedAction: string;
+  retryAction: string;
+  settingsRoute?: string;
+  actions: StageAttentionAction[];
 }
 
 export type WorkflowExecutionKind =
@@ -252,6 +305,7 @@ export interface WorkflowStageRun {
   inputArtifactIds: string[];
   inputFingerprint: string;
   outputArtifactIds: string[];
+  payloadJson?: Record<string, unknown>;
   startedAt?: string;
   finishedAt?: string;
   safeErrorCategory?: string;
@@ -265,7 +319,7 @@ export interface WorkflowArtifact {
   stageRunId?: string;
   type: string;
   version: number;
-  status: "draft" | "needs_review" | "approved" | "rejected" | "stale";
+  status: "draft" | "needs_review" | "needs_attention" | "approved" | "rejected" | "stale";
   payloadJson?: Record<string, unknown>;
   relativeFilePath?: string;
   createdAt: string;
@@ -283,6 +337,7 @@ export interface StageEligibility {
     code: string;
     message: string;
     actionRoute?: string;
+    actions?: StageAttentionAction[];
   }>;
 }
 
@@ -293,6 +348,7 @@ export interface TimelineItem {
   startFrame: number;
   durationFrames: number;
   fps: number;
+  motion?: ShotMotionPlan | undefined;
 }
 
 export interface Timeline {
@@ -302,6 +358,7 @@ export interface Timeline {
 
 export interface FactoryProject {
   id: string;
+  synthetic?: boolean;
   topic: string;
   format: VideoFormat;
   targetLanguage: string;
@@ -317,5 +374,6 @@ export interface FactoryProject {
   scriptSections: ScriptSection[];
   scenes: Scene[];
   shots: Shot[];
+  assetConcepts?: AssetConcept[] | undefined;
   timeline: Timeline;
 }

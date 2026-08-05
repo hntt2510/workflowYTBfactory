@@ -3,10 +3,13 @@ import {
   channelRouteInputSchema,
   createProjectRequestSchema,
   factoryProjectResponseSchema,
+  createStageAttention,
   listNineRouterModelsRequestSchema,
   modelListStatusSchema,
   nineRouterModelListResponseSchema,
   projectIdRequestSchema,
+  ideaLabRequestSchema,
+  editIdeaRequestSchema,
   run9RouterTextCertificationRequestSchema,
   save9RouterModelConfigurationRequestSchema,
   editCompetitorReferenceRequestSchema,
@@ -31,6 +34,8 @@ import {
   , timelineAssemblyOutputSchema
   , previewRenderRequestSchema
   , previewMediaRequestSchema
+  , downloadPreviewVideoRequestSchema
+  , downloadPreviewVideoResponseSchema
   , previewMediaUrlResponseSchema
   , previewRenderOutputSchema
   , previewRenderArtifactResponseSchema
@@ -58,6 +63,10 @@ import {
   , devStockTestResponseSchema
   , localTtsSettingsSchema
   , localTtsReferenceAudioResponseSchema
+  , voiceGenerationRequestSchema
+  , voiceGenerationStartRequestSchema
+  , scriptRequestSchema
+  , editScriptRequestSchema
 } from "../src";
 import { createFixtureProject } from "../src";
 
@@ -80,6 +89,19 @@ describe("ipc schemas", () => {
     expect(() => projectIdRequestSchema.parse({ projectId: "../bad" })).toThrow();
   });
 
+  it("validates Idea Lab regeneration and candidate edit payloads", () => {
+    expect(ideaLabRequestSchema.parse({ projectId: "project-1", force: true }).force).toBe(true);
+    expect(editIdeaRequestSchema.parse({ projectId: "project-1", ideaId: "idea-1", changes: { workingTitle: "Edited title" } }).changes.workingTitle).toBe("Edited title");
+    expect(() => editIdeaRequestSchema.parse({ projectId: "project-1", ideaId: "idea-1", changes: {} })).toThrow();
+    expect(() => editIdeaRequestSchema.parse({ projectId: "project-1", ideaId: "idea-1", changes: { id: "idea-2" } })).toThrow();
+  });
+
+  it("validates script regeneration and section edit payloads", () => {
+    expect(scriptRequestSchema.parse({ projectId: "project-1" }).projectId).toBe("project-1");
+    expect(editScriptRequestSchema.parse({ projectId: "project-1", artifactId: "artifact-1", sectionId: "section-1", narration: "Edited narration." }).narration).toBe("Edited narration.");
+    expect(() => editScriptRequestSchema.parse({ projectId: "project-1", artifactId: "artifact-1", sectionId: "section-1", narration: " " })).toThrow();
+  });
+
   it("keeps voice cloning settings local and validates their reference fields", () => {
     expect(localTtsSettingsSchema.parse({ omnivoiceBinPath: "D:/OmniVoice/omnivoice-infer.exe", outputDir: "D:/workspace/tts", referenceAudioPath: "D:/voices/narrator.wav", referenceTranscript: "Reference words" }).referenceAudioPath).toContain("narrator.wav");
     expect(localTtsReferenceAudioResponseSchema.parse({ referenceAudioPath: "D:/voices/narrator.wav" }).referenceAudioPath).toContain("narrator.wav");
@@ -94,6 +116,9 @@ describe("ipc schemas", () => {
 
   it("accepts subtitle-backed preview renders and safe media requests", () => {
     expect(previewRenderRequestSchema.parse({ projectId: "project-1", force: true }).force).toBe(true);
+    expect(voiceGenerationRequestSchema.parse({ projectId: "project-1", force: true }).force).toBe(true);
+    expect(voiceGenerationStartRequestSchema.parse({ projectId: "project-1", voiceId: "en-US-voice", force: true }).voiceId).toBe("en-US-voice");
+    expect(() => voiceGenerationStartRequestSchema.parse({ projectId: "project-1" })).toThrow();
     expect(previewRenderOutputSchema.parse({
       relativeFilePath: "previews/project-1/render.mp4",
       subtitleRelativeFilePath: "previews/project-1/render.srt",
@@ -141,6 +166,14 @@ describe("ipc schemas", () => {
       referenceSet: { status: "rejected" }
     });
     expect((rejectedReferenceProject.referenceSet as { status: string }).status).toBe("rejected");
+
+    const attentionProject = factoryProjectResponseSchema.parse({
+      ...project,
+      stages: project.stages.map((stage) => stage.id === "script"
+        ? { ...stage, status: "needs_attention", attention: createStageAttention("script", "provider_failed", "The script provider failed.") }
+        : stage)
+    });
+    expect(attentionProject.stages.find((stage) => stage.id === "script")?.attention?.actions).toContainEqual({ label: "Open Settings", route: "providers" });
   });
 
   it("validates 9Router model list contracts", () => {
@@ -405,6 +438,12 @@ describe("ipc schemas", () => {
     expect(() => previewRenderOutputSchema.parse({ relativeFilePath: "../outside.mp4", durationSeconds: 0, width: 0, height: 0, inputArtifactIds: [] })).toThrow();
     expect(previewRenderArtifactResponseSchema.parse({ id: "artifact-preview", stageRunId: "stage-run-1", status: "needs_review", payloadJson: { relativeFilePath: "previews/project-1/run-1.mp4", durationSeconds: 3.2, width: 1080, height: 1920, sha256: "a".repeat(64), inputArtifactIds: ["artifact-timeline", "artifact-assets", "artifact-voice"] }, relativeFilePath: "previews/project-1/run-1.mp4", createdAt: "2026-07-30T00:00:00.000Z", updatedAt: "2026-07-30T00:00:00.000Z" }).status).toBe("needs_review");
     expect(previewRenderArtifactsResponseSchema.parse([{ id: "artifact-preview", status: "needs_review", payloadJson: { relativeFilePath: "previews/project-1/run-1.mp4", durationSeconds: 3.2, width: 1080, height: 1920, sha256: "a".repeat(64), inputArtifactIds: ["artifact-timeline", "artifact-assets", "artifact-voice"] }, relativeFilePath: "previews/project-1/run-1.mp4", createdAt: "2026-07-30T00:00:00.000Z", updatedAt: "2026-07-30T00:00:00.000Z" }])).toHaveLength(1);
+  });
+
+  it("keeps MP4 downloads typed and free of renderer-controlled paths", () => {
+    expect(downloadPreviewVideoRequestSchema.parse({ projectId: "project-1", artifactId: "artifact-preview" })).toEqual({ projectId: "project-1", artifactId: "artifact-preview" });
+    expect(() => downloadPreviewVideoRequestSchema.parse({ projectId: "project-1", artifactId: "artifact-preview", destination: "C:/outside.mp4" })).toThrow();
+    expect(downloadPreviewVideoResponseSchema.parse({ canceled: false, fileName: "channel-topic-project.mp4", savedPath: "C:/Users/test/Downloads/video.mp4" }).fileName).toBe("channel-topic-project.mp4");
   });
 
   it("keeps deterministic QA findings bounded and reviewable", () => {

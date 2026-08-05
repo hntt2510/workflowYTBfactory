@@ -32,6 +32,31 @@ describe("NineRouterClient", () => {
     expect(String(calls[0])).toBe("http://localhost/v1/models/image");
   });
 
+  it("discovers web-search models at the dedicated endpoint", async () => {
+    const calls: string[] = [];
+    const client = new NineRouterClient({ baseUrl: "http://localhost/v1", fetchImpl: async (url) => { calls.push(String(url)); return new Response(JSON.stringify({ data: [{ id: "search-combo", kind: "webSearch" }, { id: "" }] })); } });
+    await expect(client.listWebSearchModels()).resolves.toEqual([{ id: "search-combo", kind: "webSearch" }]);
+    expect(calls).toEqual(["http://localhost/v1/models/web"]);
+  });
+
+  it("sends web-search requests and preserves provider citations", async () => {
+    let request: { url?: string; body?: unknown } = {};
+    const client = new NineRouterClient({
+      baseUrl: "http://localhost/v1",
+      apiKey: "sk-secret",
+      fetchImpl: async (url, init) => {
+        request = { url: String(url), body: JSON.parse(String(init?.body)) };
+        return new Response(JSON.stringify({ provider: "tavily", query: "life insurance", results: [{ title: "Source", url: "https://example.com/source", snippet: "Excerpt", citation: { provider: "tavily", retrieved_at: "2026-08-02T00:00:00Z" } }] }));
+      }
+    });
+    await expect(client.searchWeb({ model: "tavily", query: "life insurance", maxResults: 3 })).resolves.toEqual({
+      provider: "tavily",
+      query: "life insurance",
+      results: [{ title: "Source", url: "https://example.com/source", snippet: "Excerpt", citation: { provider: "tavily", retrievedAt: "2026-08-02T00:00:00Z" } }]
+    });
+    expect(request).toEqual({ url: "http://localhost/v1/search", body: { model: "tavily", query: "life insurance", max_results: 3 } });
+  });
+
   it.each([
     [401, "unauthorized"],
     [403, "unauthorized"],
@@ -103,6 +128,19 @@ describe("NineRouterClient", () => {
     }
   });
 
+  it("sends a stable idempotency key for retry-safe text requests", async () => {
+    let receivedHeaders: HeadersInit | undefined;
+    const client = new NineRouterClient({
+      baseUrl: "http://localhost/v1",
+      fetchImpl: async (_url, init) => {
+        receivedHeaders = init?.headers;
+        return new Response(JSON.stringify({ output_text: "MODEL_OK" }));
+      }
+    });
+    await client.createResponseText({ model: "model-a", input: "x", idempotencyKey: "chunk-fingerprint" });
+    expect(receivedHeaders).toMatchObject({ "Idempotency-Key": "chunk-fingerprint" });
+  });
+
   it("creates OpenAI-compatible chat completion requests", async () => {
     const calls: Array<{ url: RequestInfo | URL; init?: RequestInit }> = [];
     const client = new NineRouterClient({ baseUrl: "http://localhost/v1", apiKey: "sk-secret", fetchImpl: async (url, init) => { calls.push({ url, ...(init ? { init } : {}) }); return new Response(JSON.stringify({ model: "chat-model", choices: [{ message: { content: "IDEA_OK" } }] })); } });
@@ -151,5 +189,24 @@ describe("NineRouterClient", () => {
     });
     await expect(timeoutClient.createResponseText({ model: "model-a", input: "x" })).rejects.toBeInstanceOf(NineRouterTextResponseError);
     await expect(timeoutClient.createResponseText({ model: "model-a", input: "x" })).rejects.toMatchObject({ status: "timeout" });
+  });
+
+  it("keeps the timeout active while reading the response body", async () => {
+    const client = new NineRouterClient({
+      baseUrl: "http://localhost/v1",
+      timeoutMs: 1,
+      fetchImpl: async (_url, init) => ({
+        ok: true,
+        status: 200,
+        json: () => new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const error = new Error("aborted");
+            error.name = "AbortError";
+            reject(error);
+          });
+        })
+      } as Response)
+    });
+    await expect(client.createResponseText({ model: "model-a", input: "x" })).rejects.toMatchObject({ status: "timeout" });
   });
 });

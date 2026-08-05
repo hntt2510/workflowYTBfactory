@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { safeAssetFilename } from "@lsf/media";
 import { NineRouterClient, NineRouterImageGenerationError } from "@lsf/providers";
 
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const MAX_IMAGE_PIXELS = 80_000_000;
+export const defaultImageGenerationTimeoutMs = 180_000;
 
 export class AssetAcquisitionError extends Error {
   constructor(
@@ -25,6 +26,18 @@ export interface AcquiredImageAsset {
   height: number;
 }
 
+export interface ImageReferenceInput {
+  relativeFilePath: string;
+  sha256?: string;
+  mimeType?: "image/png" | "image/jpeg" | "image/webp";
+}
+
+interface PreparedImageReference {
+  dataUri: string;
+  sha256: string;
+  mimeType: "image/png" | "image/jpeg" | "image/webp";
+}
+
 export interface AssetAcquisitionPlan {
   imagePrompts: Array<{
     shotId: string;
@@ -36,7 +49,7 @@ export interface AssetAcquisitionPlan {
 }
 
 export function planAssetAcquisition(input: {
-  shots: Array<{ id: string; visualMode: string; promptVersionId?: string; approvedAssetId?: string }>;
+  shots: Array<{ id: string; visualMode: string; promptVersionId?: string | undefined; approvedAssetId?: string | undefined }>;
   prompts: Array<{ shotId: string; promptVersionId: string; positivePrompt: string; aspectRatio: "16:9" | "9:16" }>;
   priorAssets: AcquiredImageAsset[];
 }): AssetAcquisitionPlan {
@@ -67,8 +80,9 @@ export function planAssetAcquisition(input: {
   if (imagePrompts.length === 0 && preservedAssets.length === 0) throw new AssetAcquisitionError("route_unavailable", "No supported visual route is available for Asset Acquisition.");
   return { imagePrompts, preservedAssets };
 }
+
 interface ImageClient {
-  createImage(input: { model: string; prompt: string; aspectRatio: "16:9" | "9:16"; idempotencyKey?: string }): Promise<Array<{ url?: string; b64Json?: string; dataUri?: string }>>;
+  createImage(input: { model: string; prompt: string; aspectRatio: "16:9" | "9:16"; idempotencyKey?: string; references?: PreparedImageReference[] }): Promise<Array<{ url?: string; b64Json?: string; dataUri?: string }>>;
 }
 
 export async function acquireImageAsset(input: {
@@ -86,12 +100,23 @@ export async function acquireImageAsset(input: {
   providerTimeoutMs?: number;
   fetchImpl?: typeof fetch;
   createClient?: (config: { baseUrl: string; apiKey: string }) => ImageClient;
+  referenceImages?: ImageReferenceInput[];
 }): Promise<AcquiredImageAsset> {
   if (!input.imageCapabilityVerified) throw new AssetAcquisitionError("capability_not_verified", "A verified image-model certification is required before Asset Acquisition can run.");
   if (!input.imageModel || !input.apiKey || !input.baseUrl) throw new AssetAcquisitionError("credential_missing", "The selected image model or credential is unavailable.");
   let result: { url?: string; b64Json?: string; dataUri?: string };
   try {
-    const results = await (input.createClient?.({ baseUrl: input.baseUrl, apiKey: input.apiKey }) ?? new NineRouterClient({ baseUrl: input.baseUrl, apiKey: input.apiKey, timeoutMs: input.providerTimeoutMs ?? 60_000 })).createImage({ model: input.imageModel, prompt: input.positivePrompt, aspectRatio: input.aspectRatio, idempotencyKey: input.idempotencyKey });
+    const references = await prepareImageReferences(input.workspaceRoot, input.referenceImages);
+    const prompt = references.length
+      ? `${input.positivePrompt} Attached reference images define the same teacher identity; preserve the face, hair, wardrobe palette, body proportions, and teaching role. Change only the requested view, gesture, action, and scene composition.`
+      : input.positivePrompt;
+    const request = { model: input.imageModel, prompt, aspectRatio: input.aspectRatio, idempotencyKey: input.idempotencyKey, ...(references.length ? { references } : {}) };
+    const client = input.createClient?.({ baseUrl: input.baseUrl, apiKey: input.apiKey });
+    const results = client
+      ? await client.createImage(request)
+      : references.length
+        ? await createReferenceImage({ ...request, references }, input.baseUrl, input.apiKey, input.providerTimeoutMs ?? defaultImageGenerationTimeoutMs, input.fetchImpl)
+        : await new NineRouterClient({ baseUrl: input.baseUrl, apiKey: input.apiKey, timeoutMs: input.providerTimeoutMs ?? defaultImageGenerationTimeoutMs }).createImage(request);
     if (results.length !== 1) throw new AssetAcquisitionError("invalid_response", "Image generation must return exactly one image per shot.");
     result = results[0]!;
   } catch (error) {
@@ -108,6 +133,103 @@ export async function acquireImageAsset(input: {
     if (error.code !== "EEXIST") throw error;
   });
   return { shotId: input.shotId, promptVersionId: input.promptVersionId, relativeFilePath, sha256: createHash("sha256").update(downloaded.bytes).digest("hex"), byteLength: downloaded.bytes.length, ...inspected };
+}
+
+async function prepareImageReferences(workspaceRoot: string, references: ImageReferenceInput[] | undefined): Promise<PreparedImageReference[]> {
+  if (!references?.length) return [];
+  if (references.length > 2) throw new AssetAcquisitionError("unsafe_asset", "At most two character references may be attached to one image request.");
+  const workspace = resolve(workspaceRoot);
+  const prepared: PreparedImageReference[] = [];
+  for (const reference of references) {
+    const absolutePath = resolve(workspace, reference.relativeFilePath);
+    const relativePath = relative(workspace, absolutePath);
+    if (!relativePath || relativePath.startsWith("..")) throw new AssetAcquisitionError("unsafe_asset", "Character reference must stay inside the workspace.");
+    let bytes: Buffer;
+    try {
+      bytes = await readFile(absolutePath);
+    } catch {
+      throw new AssetAcquisitionError("unsafe_asset", "A character reference is missing from the workspace.");
+    }
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    if (reference.sha256 && reference.sha256 !== sha256) throw new AssetAcquisitionError("unsafe_asset", "A character reference changed after approval.");
+    const inspected = inspectImage(bytes, reference.mimeType);
+    prepared.push({ dataUri: `data:${inspected.mimeType};base64,${bytes.toString("base64")}`, sha256, mimeType: inspected.mimeType });
+  }
+  return prepared;
+}
+
+async function createReferenceImage(
+  input: { model: string; prompt: string; aspectRatio: "16:9" | "9:16"; idempotencyKey?: string; references: PreparedImageReference[] },
+  baseUrl: string,
+  apiKey: string,
+  timeoutMs: number,
+  fetchImpl: typeof fetch = fetch
+): Promise<Array<{ url?: string; b64Json?: string; dataUri?: string }>> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const model = resolveReferenceImageModel(input.model);
+  try {
+    let response: Response;
+    try {
+      response = await fetchImpl(`${baseUrl.replace(/\/$/, "")}/responses`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", ...(input.idempotencyKey ? { "Idempotency-Key": input.idempotencyKey } : {}) },
+        body: JSON.stringify({
+          model,
+          input: [{ role: "user", content: [...input.references.map((reference) => ({ type: "input_image", image_url: reference.dataUri })), { type: "input_text", text: input.prompt }] }],
+          tools: [{ type: "image_generation", size: input.aspectRatio === "9:16" ? "1024x1792" : "1792x1024" }],
+          tool_choice: { type: "image_generation" },
+          stream: false
+        }),
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw new AssetAcquisitionError("provider_failed", "Image provider request failed: timeout.");
+      throw new AssetAcquisitionError("provider_failed", "Image provider request failed.");
+    }
+    if (!response.ok) throw new AssetAcquisitionError("provider_failed", "Image provider request failed.");
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw new AssetAcquisitionError("provider_failed", "Image provider request failed: timeout.");
+      throw new AssetAcquisitionError("invalid_response", "Image provider returned an invalid response.");
+    }
+    const results = parseReferenceImageResults(payload);
+    if (!results.length) throw new AssetAcquisitionError("invalid_response", "Image provider returned no image.");
+    return results;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function resolveReferenceImageModel(model: string): string {
+  return /^(?:cx\/)?gpt-5\.(?:3|4|5)-image$/i.test(model.trim()) ? "cx/gpt-5.6-luna" : model;
+}
+
+function parseReferenceImageResults(payload: unknown): Array<{ url?: string; b64Json?: string; dataUri?: string }> {
+  const results: Array<{ url?: string; b64Json?: string; dataUri?: string }> = [];
+  const seen = new Set<string>();
+  const add = (value: unknown) => {
+    if (typeof value !== "string" || !value || seen.has(value)) return;
+    if (value.startsWith("data:image/")) { seen.add(value); results.push({ dataUri: value }); return; }
+    if (/^https?:\/\//i.test(value)) { seen.add(value); results.push({ url: value }); return; }
+    if (/^[A-Za-z0-9+/]+={0,2}$/.test(value)) { seen.add(value); results.push({ b64Json: value }); }
+  };
+  const visit = (value: unknown, depth: number) => {
+    if (depth > 5 || !value || typeof value !== "object") return;
+    if (Array.isArray(value)) { for (const item of value) visit(item, depth + 1); return; }
+    const record = value as Record<string, unknown>;
+    add(record.b64_json);
+    add(record.b64Json);
+    add(record.dataUri);
+    if (record.type === "image_generation_call" || record.type === "output_image") add(record.result);
+    const imageUrl = record.image_url;
+    if (imageUrl && typeof imageUrl === "object") add((imageUrl as Record<string, unknown>).url);
+    for (const key of ["data", "output", "choices", "message", "content", "images"]) visit(record[key], depth + 1);
+  };
+  visit(payload, 0);
+  return results;
 }
 
 export async function importLocalImageAsset(input: {
