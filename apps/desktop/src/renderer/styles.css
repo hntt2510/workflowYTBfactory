@@ -875,6 +875,15 @@ small {
 .storyboard-row > div:first-child { display: grid; gap: 3px; min-width: 0; }
 .storyboard-row span, .storyboard-meta { color: var(--text-muted); font-size: 12px; }
 .storyboard-row select { min-height: 32px; max-width: 190px; }
+.storyboard-frame-card { display: grid; gap: 11px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); padding: 12px; }
+.storyboard-frame-thumb { display: grid; min-height: 116px; place-items: center; border-radius: 8px; background: var(--surface-1); color: var(--text-muted); font-size: 12px; }
+.storyboard-frame-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.storyboard-frame-header > div { display: grid; gap: 3px; min-width: 0; }
+.storyboard-frame-header span { color: var(--text-muted); font-size: 12px; }
+.storyboard-frame-details { display: grid; gap: 8px; margin: 0; }
+.storyboard-frame-details div { display: grid; gap: 2px; }
+.storyboard-frame-details dt { color: var(--text-muted); font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; }
+.storyboard-frame-details dd { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
 .prompt-studio-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 .prompt-card { display: grid; gap: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); padding: 15px; }
 .prompt-card-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }

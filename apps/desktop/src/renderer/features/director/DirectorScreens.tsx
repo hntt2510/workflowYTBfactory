@@ -21,6 +21,8 @@ import { AssetIntakePanel } from "../assets/AssetIntakePanel";
 import { StageStatusHeader, canRetryStage } from "../../components/workflow";
 import type { RouteId } from "../../navigation";
 
+type StoryboardFrameSpec = NonNullable<PromptPreparationArtifact["payloadJson"]["scenePrompts"]>[number]["frameManifest"][number];
+
 export function ScenesScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; setRoute: (route: RouteId) => void; textCertification: TextModelCertificationResponse }) {
   const [artifacts, setArtifacts] = useState<ScenePlanArtifact[]>([]); const [running, setRunning] = useState(false); const [message, setMessage] = useState("");
   const eligibility = resolveStageEligibilities(props.project, { textVerified: props.textCertification.status === "verified" }).find((stage) => stage.stageId === "scene-plan")!;
@@ -75,8 +77,17 @@ function summarizeState(state: Record<string, unknown> | undefined, fallback: st
 
 export function ShotsScreen(props: { project: FactoryProject; setSelectedProject: (project: FactoryProject | null) => void; textCertification: TextModelCertificationResponse }) {
   const [view, setView] = useState<"board" | "table" | "timeline">("board"); const [artifacts, setArtifacts] = useState<ShotPlanArtifact[]>([]); const [running, setRunning] = useState(false); const [message, setMessage] = useState("");
+  const [frameSpecs, setFrameSpecs] = useState<StoryboardFrameSpec[]>([]);
   const eligibility = resolveStageEligibilities(props.project, { textVerified: props.textCertification.status === "verified" }).find((stage) => stage.stageId === "shot-plan")!;
-  const refresh = () => factoryClient.listShotPlanArtifacts({ projectId: props.project.id }).then(setArtifacts);
+  const refresh = async () => {
+    const [nextArtifacts, promptArtifacts] = await Promise.all([
+      factoryClient.listShotPlanArtifacts({ projectId: props.project.id }),
+      factoryClient.listPromptPreparationArtifacts({ projectId: props.project.id })
+    ]);
+    setArtifacts(nextArtifacts);
+    const latestPrompt = promptArtifacts.find((artifact) => artifact.status === "needs_review" || artifact.status === "approved") ?? promptArtifacts.at(-1);
+    setFrameSpecs(latestPrompt?.payloadJson.scenePrompts?.flatMap((scenePrompt) => scenePrompt.frameManifest) ?? []);
+  };
   useEffect(() => { void refresh().catch(() => setArtifacts([])); }, [props.project.id]);
   async function perform(action: () => Promise<FactoryProject>, success: string) { setRunning(true); try { props.setSelectedProject(await action()); await refresh(); setMessage(success); } catch (error) { setMessage(safeRendererError(error)); } finally { setRunning(false); } }
   return (
@@ -92,18 +103,9 @@ export function ShotsScreen(props: { project: FactoryProject; setSelectedProject
       <SectionCard title="Shot Plan review">{artifacts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{creatorStatusLabel(artifact.status)}</StatusBadge>{artifact.payloadJson.shots.map((shot) => <p key={shot.id}>{shot.purpose}: {shot.startFrame} + {shot.durationFrames} frames</p>)}{artifact.status === "needs_review" ? <div className="button-row">{eligibility.approvable ? <button className="button compact" type="button" onClick={() => void perform(() => factoryClient.approveShotPlan({ projectId: props.project.id }), "Shot Plan approved.")} disabled={running}>Approve Shot Plan</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Shot Plan cannot be approved yet."}>Approve Shot Plan</DisabledAction>}<button className="button danger compact" type="button" onClick={() => void perform(() => factoryClient.rejectShotPlan({ projectId: props.project.id }), "Shot Plan rejected.")} disabled={running}>Reject Shot Plan</button></div> : null}</div>)}{message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}</SectionCard>
       {view === "board" ? (
         <div className="shot-board">
-          {props.project.shots.map((shot) => (
-            <article className="shot-card" key={shot.id}>
-              <div className="shot-thumb">No asset</div>
-              <div>
-                <strong>{shot.id}</strong>
-                <span>{shot.sceneId}</span>
-              </div>
-              <small>{formatTimecode(shot.startFrame, shot.fps)} / {formatTimecode(shot.durationFrames, shot.fps)} ({shot.durationFrames} frames)</small>
-              <p>{shot.purpose}</p>
-              <StatusBadge tone="warning">{shot.visualMode}</StatusBadge>
-            </article>
-          ))}
+          {[...props.project.shots]
+            .sort((left, right) => left.startFrame - right.startFrame || left.order - right.order)
+            .map((shot, index) => <StoryboardFrameCard key={shot.id} shot={shot} frameNumber={index + 1} frameSpec={frameSpecs.find((frame) => frame.shotId === shot.id)} />)}
         </div>
       ) : (
         <DataTable label="Shots">
@@ -125,6 +127,59 @@ export function ShotsScreen(props: { project: FactoryProject; setSelectedProject
       )}
     </>
   );
+}
+
+function StoryboardFrameCard(props: { shot: FactoryProject["shots"][number]; frameNumber: number; frameSpec: StoryboardFrameSpec | undefined }) {
+  const shot = props.shot;
+  const frameSpec = props.frameSpec;
+  const expression = stateValue(shot.startState, ["expression", "facialExpression", "emotion"])
+    ?? stateValue(shot.endState, ["expression", "facialExpression", "emotion"])
+    ?? "Not specified";
+  const continuityRefs = frameSpec?.continuityRefs ?? shot.continuityRefs;
+  const continuity = continuityRefs.length ? continuityRefs.join(", ") : "New reference";
+  const role = frameSpec?.role ?? storyboardRole(shot);
+  const displayNumber = frameSpec?.displayNumber ?? String(props.frameNumber).padStart(3, "0");
+  return (
+    <article className="storyboard-frame-card">
+      <div className="storyboard-frame-thumb" aria-label={`Frame ${displayNumber} asset placeholder`}>
+        {shot.approvedAssetId ? "Asset assigned" : "Awaiting upload"}
+      </div>
+      <div className="storyboard-frame-header">
+        <div>
+          <strong>{displayNumber} · {shot.id}</strong>
+          <span>{shot.sceneId} · {role}</span>
+        </div>
+        <StatusBadge tone={shot.approvedAssetId ? "success" : "warning"}>{shot.approvedAssetId ? "Asset ready" : "Needs asset"}</StatusBadge>
+      </div>
+      <dl className="storyboard-frame-details">
+        <div><dt>Purpose</dt><dd>{frameSpec?.purpose ?? shot.purpose}</dd></div>
+        <div><dt>Composition</dt><dd>{shot.framing} · {shot.cameraAngle}</dd></div>
+        <div><dt>Character action</dt><dd>{shot.subjectAction || "Not specified"}</dd></div>
+        <div><dt>Facial expression</dt><dd>{expression}</dd></div>
+        <div><dt>Continuity source</dt><dd>{continuity}</dd></div>
+        <div><dt>Motion intent</dt><dd>{shot.motion ? motionLabel(shot.motion.effect) : shot.cameraMovement || "None"}</dd></div>
+        <div><dt>Narration / time range</dt><dd>{formatTimecode(shot.startFrame, shot.fps)} - {formatTimecode(shot.startFrame + shot.durationFrames, shot.fps)} · {(shot.durationFrames / shot.fps).toFixed(1)}s</dd></div>
+        <div><dt>Transition relation</dt><dd>{continuityRefs.length ? "Continues from referenced frame" : "Scene entry"}</dd></div>
+        {frameSpec?.expectedFilename ? <div><dt>Expected filename</dt><dd>{frameSpec.expectedFilename}</dd></div> : null}
+      </dl>
+    </article>
+  );
+}
+
+function stateValue(state: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = state[key];
+    if (typeof value === "string" && value.trim()) return value;
+  }
+  return undefined;
+}
+
+function storyboardRole(shot: FactoryProject["shots"][number]): string {
+  if (shot.visualMode === "reuse") return "REUSE";
+  if (shot.visualMode === "diagram" || shot.visualMode === "text_card") return "GRAPHIC";
+  if (shot.visualMode === "document") return "INSERT";
+  if (shot.order === 0) return "BASE";
+  return "ACTION_KEYFRAME";
 }
 
 export function VisualsScreen(props: { project: FactoryProject; textCertification: TextModelCertificationResponse; imageCertification: ImageModelCertificationResponse; setSelectedProject: (project: FactoryProject | null) => void; setImageCertification: (certification: ImageModelCertificationResponse) => void; startSemiAutomatic: (chain: SemiAutomaticChain, project: FactoryProject) => Promise<void> }) {
