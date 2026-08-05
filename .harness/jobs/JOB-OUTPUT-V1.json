@@ -1,0 +1,44 @@
+{
+  "jobId": "JOB-OUTPUT-V1",
+  "type": "short",
+  "title": "VOX final preview with local subtitles",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Make the final preview a truthful primary checkpoint by rendering approved Vietnamese subtitle cues locally, serving the real MP4 safely to the renderer, and exposing explicit review actions before export.",
+  "businessContext": "The output backend already persists FFmpeg preview artifacts, but the simplified UI only shows stage status and the preview command does not burn the approved local subtitle cues into the video.",
+  "allowedPaths": [
+    "apps/desktop/src/main/main.ts",
+    "apps/desktop/src/main/previewRenderService.ts",
+    "apps/desktop/src/main/previewRenderService.test.ts",
+    "apps/desktop/src/main/productionOrchestrator.ts",
+    "apps/desktop/src/preload/preload.cjs",
+    "apps/desktop/src/renderer/App.tsx",
+    "apps/desktop/src/renderer/services/factoryClient.ts",
+    "apps/desktop/src/renderer/types.ts",
+    "packages/domain/src/ipcSchemas.ts",
+    "packages/domain/test/ipcSchemas.test.ts",
+    "packages/media/src/ffmpegPreview.ts",
+    "packages/media/test/ffmpegPreview.test.ts",
+    ".harness/jobs/JOB-OUTPUT-V1.json",
+    ".harness/state.json",
+    ".harness/locks/JOB-OUTPUT-V1.lock"
+  ],
+  "forbiddenPaths": ["packages/db/**", "packages/providers/**", "packages/domain/src/workflowRegistry.ts"],
+  "dependencies": ["approved timeline assembly", "approved preview render IPC"],
+  "acceptanceCriteria": [
+    "Preview rendering consumes approved subtitle cues and produces a real MP4 with local Unicode-compatible subtitle rendering when FFmpeg supports the subtitles filter.",
+    "The renderer can request a safe preview URL derived only from a persisted reviewable or approved preview artifact under workspaceRoot.",
+    "Final Preview displays the real video metadata and exposes Approve Final Video, Render Again, Return to Scene Review, and voice/subtitle follow-up actions.",
+    "Re-rendering invalidates only preview and downstream export artifacts and never fabricates approval.",
+    "Focused media/schema/orchestrator checks, typecheck, and diff check pass."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run packages/media/test/ffmpegPreview.test.ts packages/domain/test/ipcSchemas.test.ts apps/desktop/src/main/previewRenderService.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["The installed FFmpeg lacks a usable subtitles filter or safe local font path."]
+}

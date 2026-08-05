@@ -68,6 +68,9 @@ importers:
       '@lsf/generation-queue':
         specifier: workspace:*
         version: link:../../packages/generation-queue
+      '@lsf/media':
+        specifier: workspace:*
+        version: link:../../packages/media
       '@lsf/providers':
         specifier: workspace:*
         version: link:../../packages/providers

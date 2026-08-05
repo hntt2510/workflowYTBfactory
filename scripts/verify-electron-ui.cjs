@@ -40,7 +40,8 @@ function startElectron(workspaceRoot, reportPath, mode) {
       VITE_DEV_SERVER_URL: baseUrl,
       NODE_OPTIONS: "--import tsx",
       WORKSPACE_ROOT: workspaceRoot,
-      LSF_DEV_MEMORY_KEYCHAIN: "1",
+      // Keep isolated tests credential-free unless the caller explicitly opts into the configured OS keychain.
+      LSF_DEV_MEMORY_KEYCHAIN: process.env.LSF_UI_USE_CONFIGURED_KEYCHAIN === "1" ? "" : "1",
       LSF_E2E_UI_REPORT_PATH: reportPath,
       LSF_E2E_UI_MODE: mode
     },
@@ -56,14 +57,36 @@ function startElectron(workspaceRoot, reportPath, mode) {
   return child;
 }
 
+async function createWorkspace() {
+  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "lsf-electron-ui-"));
+  const seedRoot = process.env.LSF_UI_SEED_WORKSPACE;
+  if (!seedRoot) return workspaceRoot;
+
+  const resolvedSeedRoot = path.resolve(seedRoot);
+  if (process.env.LSF_UI_USE_SEED_WORKSPACE === "1") return resolvedSeedRoot;
+  for (const suffix of ["", "-wal", "-shm"]) {
+    const source = path.join(resolvedSeedRoot, `long-short-factory.sqlite${suffix}`);
+    const target = path.join(workspaceRoot, `long-short-factory.sqlite${suffix}`);
+    try {
+      await fs.copyFile(source, target);
+    } catch (error) {
+      if (suffix === "") throw new Error(`Could not seed Electron UI workspace from ${resolvedSeedRoot}: ${error.message}`);
+    }
+  }
+  return workspaceRoot;
+}
+
 async function runElectronMode(workspaceRoot, mode) {
   const reportPath = path.join(workspaceRoot, `ui-${mode}.json`);
   const electron = startElectron(workspaceRoot, reportPath, mode);
   const exitCode = await new Promise((resolve) => {
+    const timeoutMs = mode === "vox-simple-flow"
+      ? Number(process.env.LSF_UI_TIMEOUT_MS || 900000)
+      : 45000;
     const timeout = setTimeout(() => {
       electron.kill();
       resolve("timeout");
-    }, 45000);
+    }, timeoutMs);
     electron.on("exit", (code) => {
       clearTimeout(timeout);
       resolve(code);
@@ -76,19 +99,20 @@ async function runElectronMode(workspaceRoot, mode) {
     throw new Error(`Electron UI verification produced no report in ${mode}. Exit: ${exitCode}. Output: ${electron.output}`);
   }
   if (exitCode !== 0 || !report.ok) {
-    throw new Error(`Electron UI verification failed in ${mode}: ${report.error || `exit ${exitCode}`}. Output: ${electron.output}`);
+    throw new Error(`Electron UI verification failed in ${mode}: ${report.error || `exit ${exitCode}`}. Evidence: ${JSON.stringify(report)}. Output: ${electron.output}`);
   }
   return report;
 }
 
 async function main() {
-  const workspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "lsf-electron-ui-"));
+  const workspaceRoot = await createWorkspace();
   const vite = startVite();
   try {
     await waitForHttp(baseUrl);
-    const createReport = await runElectronMode(workspaceRoot, "create");
-    const verifyReport = await runElectronMode(workspaceRoot, "verify");
-    console.log(JSON.stringify({ ok: true, workspaceRoot, createReport, verifyReport }, null, 2));
+    const modes = (process.env.LSF_UI_MODES || "workflow-contract,reference-restart,reference-invalidation,vox-simple-flow,verify").split(",").map((mode) => mode.trim()).filter(Boolean);
+    const reports = {};
+    for (const mode of modes) reports[mode] = await runElectronMode(workspaceRoot, mode);
+    console.log(JSON.stringify({ ok: true, workspaceRoot, reports }, null, 2));
   } finally {
     vite.kill();
   }

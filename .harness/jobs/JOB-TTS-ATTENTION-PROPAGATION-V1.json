@@ -1,0 +1,47 @@
+{
+  "jobId": "JOB-TTS-ATTENTION-PROPAGATION-V1",
+  "type": "short",
+  "title": "Surface interrupted TTS as project attention",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Propagate an interrupted persisted TTS job into the project-level Voice Generation needs_attention state while keeping the existing explicit failed-segment retry lifecycle valid.",
+  "businessContext": "V1 maps internal failures to a clear top-level action. After restart, the TTS job is failed and retryable, but the project can still report Voice Generation as running until the user retries a segment.",
+  "allowedPaths": [
+    "apps/desktop/src/main/main.ts",
+    "packages/db/src/ttsJobStore.ts",
+    "packages/db/test/persistence.test.ts",
+    ".harness/jobs/JOB-TTS-ATTENTION-PROPAGATION-V1.json",
+    ".harness/handoffs/JOB-TTS-ATTENTION-PROPAGATION-V1.md",
+    ".harness/state.json",
+    ".harness/locks/JOB-TTS-ATTENTION-PROPAGATION-V1.lock"
+  ],
+  "forbiddenPaths": [
+    "apps/desktop/src/renderer/**",
+    "apps/desktop/src/preload/**",
+    "packages/providers/**",
+    "packages/domain/**",
+    "python/**"
+  ],
+  "dependencies": [
+    "TTS restart recovery job state",
+    "existing voice-generation StageRun and segment retry IPC"
+  ],
+  "acceptanceCriteria": [
+    "A recovered interrupted TTS job marks its project Voice Generation stage needs_attention with a safe reason and an explicit Voice retry action.",
+    "Startup still makes no provider-backed TTS call and does not fabricate a completed stage or artifact.",
+    "Retrying a failed segment explicitly restores the Voice Generation stage to running before the provider call so successful completion can transition it to needs_review.",
+    "Focused persistence checks, typecheck, and diff checks pass."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run packages/db/test/persistence.test.ts apps/desktop/src/main/ttsJobService.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": [
+    "The existing StageRun cannot remain safely retryable while the project exposes needs_attention.",
+    "Making retry explicit requires a new provider or persistence mechanism."
+  ]
+}

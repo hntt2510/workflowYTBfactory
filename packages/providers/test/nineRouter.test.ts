@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NineRouterClient, NineRouterModelListError, redactSecrets } from "../src";
+import { NineRouterClient, NineRouterModelListError, NineRouterTextResponseError, redactSecrets } from "../src";
 
 describe("NineRouterClient", () => {
   it("parses common image result shapes", () => {
@@ -23,6 +23,38 @@ describe("NineRouterClient", () => {
     const fetchImpl = async () => new Response(JSON.stringify({ data: [{ id: "model-a", owned_by: "x" }, { id: "" }, { other: "ignored" }, { id: "model-b" }] }));
     const client = new NineRouterClient({ baseUrl: "http://localhost/v1", apiKey: "sk-secret", fetchImpl });
     await expect(client.listModels()).resolves.toEqual([{ id: "model-a" }, { id: "model-b" }]);
+  });
+
+  it("discovers image models at the dedicated 9Router endpoint", async () => {
+    const calls: Array<RequestInfo | URL> = [];
+    const client = new NineRouterClient({ baseUrl: "http://localhost/v1", fetchImpl: async (url) => { calls.push(url); return new Response(JSON.stringify({ data: [{ id: "flux/dev" }] })); } });
+    await expect(client.listImageModels()).resolves.toEqual([{ id: "flux/dev" }]);
+    expect(String(calls[0])).toBe("http://localhost/v1/models/image");
+  });
+
+  it("discovers web-search models at the dedicated endpoint", async () => {
+    const calls: string[] = [];
+    const client = new NineRouterClient({ baseUrl: "http://localhost/v1", fetchImpl: async (url) => { calls.push(String(url)); return new Response(JSON.stringify({ data: [{ id: "search-combo", kind: "webSearch" }, { id: "" }] })); } });
+    await expect(client.listWebSearchModels()).resolves.toEqual([{ id: "search-combo", kind: "webSearch" }]);
+    expect(calls).toEqual(["http://localhost/v1/models/web"]);
+  });
+
+  it("sends web-search requests and preserves provider citations", async () => {
+    let request: { url?: string; body?: unknown } = {};
+    const client = new NineRouterClient({
+      baseUrl: "http://localhost/v1",
+      apiKey: "sk-secret",
+      fetchImpl: async (url, init) => {
+        request = { url: String(url), body: JSON.parse(String(init?.body)) };
+        return new Response(JSON.stringify({ provider: "tavily", query: "life insurance", results: [{ title: "Source", url: "https://example.com/source", snippet: "Excerpt", citation: { provider: "tavily", retrieved_at: "2026-08-02T00:00:00Z" } }] }));
+      }
+    });
+    await expect(client.searchWeb({ model: "tavily", query: "life insurance", maxResults: 3 })).resolves.toEqual({
+      provider: "tavily",
+      query: "life insurance",
+      results: [{ title: "Source", url: "https://example.com/source", snippet: "Excerpt", citation: { provider: "tavily", retrievedAt: "2026-08-02T00:00:00Z" } }]
+    });
+    expect(request).toEqual({ url: "http://localhost/v1/search", body: { model: "tavily", query: "life insurance", max_results: 3 } });
   });
 
   it.each([
@@ -63,5 +95,118 @@ describe("NineRouterClient", () => {
     const client = new NineRouterClient({ baseUrl: "http://localhost/v1", apiKey: "sk-secret", fetchImpl, timeoutMs: 1 });
     await expect(client.listModels()).rejects.toBeInstanceOf(NineRouterModelListError);
     await expect(client.listModels()).rejects.toMatchObject({ status: "timeout" });
+  });
+
+  it("creates /responses text requests with internal authorization", async () => {
+    const calls: Array<{ url: RequestInfo | URL; init?: RequestInit }> = [];
+    const fetchImpl = async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url, ...(init ? { init } : {}) });
+      return new Response(JSON.stringify({ output_text: "MODEL_OK", model: "returned-model" }));
+    };
+    const client = new NineRouterClient({ baseUrl: "http://localhost/v1", apiKey: "sk-secret", fetchImpl });
+    const result = await client.createResponseText({ model: "model-a", input: "Reply exactly: MODEL_OK" });
+    expect(String(calls[0]?.url)).toBe("http://localhost/v1/responses");
+    expect(calls[0]?.init?.method).toBe("POST");
+    expect(calls[0]?.init?.headers).toMatchObject({
+      Authorization: "Bearer sk-secret",
+      "Content-Type": "application/json"
+    });
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ model: "model-a", input: "Reply exactly: MODEL_OK" });
+    expect(result).toEqual({ text: "MODEL_OK", returnedModelId: "returned-model" });
+    expect(JSON.stringify(result)).not.toContain("sk-secret");
+  });
+
+  it("extracts text from common /responses shapes", async () => {
+    const payloads = [
+      { output_text: "MODEL_OK" },
+      { output: [{ content: [{ text: "MODEL" }, { output_text: "_OK" }] }] },
+      { choices: [{ message: { content: "MODEL_OK" } }] }
+    ];
+    for (const payload of payloads) {
+      const client = new NineRouterClient({ baseUrl: "http://localhost/v1", fetchImpl: async () => new Response(JSON.stringify(payload)) });
+      await expect(client.createResponseText({ model: "model-a", input: "x" })).resolves.toMatchObject({ text: "MODEL_OK" });
+    }
+  });
+
+  it("sends a stable idempotency key for retry-safe text requests", async () => {
+    let receivedHeaders: HeadersInit | undefined;
+    const client = new NineRouterClient({
+      baseUrl: "http://localhost/v1",
+      fetchImpl: async (_url, init) => {
+        receivedHeaders = init?.headers;
+        return new Response(JSON.stringify({ output_text: "MODEL_OK" }));
+      }
+    });
+    await client.createResponseText({ model: "model-a", input: "x", idempotencyKey: "chunk-fingerprint" });
+    expect(receivedHeaders).toMatchObject({ "Idempotency-Key": "chunk-fingerprint" });
+  });
+
+  it("creates OpenAI-compatible chat completion requests", async () => {
+    const calls: Array<{ url: RequestInfo | URL; init?: RequestInit }> = [];
+    const client = new NineRouterClient({ baseUrl: "http://localhost/v1", apiKey: "sk-secret", fetchImpl: async (url, init) => { calls.push({ url, ...(init ? { init } : {}) }); return new Response(JSON.stringify({ model: "chat-model", choices: [{ message: { content: "IDEA_OK" } }] })); } });
+    await expect(client.createChatCompletionText({ model: "model-a", prompt: "Give an idea" })).resolves.toEqual({ text: "IDEA_OK", returnedModelId: "chat-model" });
+    expect(String(calls[0]?.url)).toBe("http://localhost/v1/chat/completions");
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ model: "model-a", messages: [{ role: "user", content: "Give an idea" }], stream: false });
+  });
+
+  it("maps unsupported /responses shapes to invalid_response_shape", async () => {
+    const client = new NineRouterClient({ baseUrl: "http://localhost/v1", fetchImpl: async () => new Response(JSON.stringify({ data: [] })) });
+    await expect(client.createResponseText({ model: "model-a", input: "x" })).rejects.toMatchObject({ status: "invalid_response_shape" });
+  });
+
+  it.each([
+    [401, "unauthorized"],
+    [403, "unauthorized"],
+    [404, "endpoint_not_found"],
+    [429, "rate_limited"],
+    [500, "server_error"]
+  ] as const)("maps /responses HTTP %s to %s", async (httpStatus, status) => {
+    const fetchImpl = async () => new Response("{}", { status: httpStatus });
+    const client = new NineRouterClient({ baseUrl: "http://localhost/v1", apiKey: "sk-secret", fetchImpl });
+    await expect(client.createResponseText({ model: "model-a", input: "x" })).rejects.toMatchObject({ status });
+  });
+
+  it("maps /responses network and timeout failures", async () => {
+    const networkClient = new NineRouterClient({
+      baseUrl: "http://localhost/v1",
+      fetchImpl: async () => {
+        throw new Error("connect ECONNREFUSED");
+      }
+    });
+    await expect(networkClient.createResponseText({ model: "model-a", input: "x" })).rejects.toMatchObject({ status: "network_error" });
+
+    const timeoutClient = new NineRouterClient({
+      baseUrl: "http://localhost/v1",
+      timeoutMs: 1,
+      fetchImpl: (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const error = new Error("aborted");
+            error.name = "AbortError";
+            reject(error);
+          });
+        })
+    });
+    await expect(timeoutClient.createResponseText({ model: "model-a", input: "x" })).rejects.toBeInstanceOf(NineRouterTextResponseError);
+    await expect(timeoutClient.createResponseText({ model: "model-a", input: "x" })).rejects.toMatchObject({ status: "timeout" });
+  });
+
+  it("keeps the timeout active while reading the response body", async () => {
+    const client = new NineRouterClient({
+      baseUrl: "http://localhost/v1",
+      timeoutMs: 1,
+      fetchImpl: async (_url, init) => ({
+        ok: true,
+        status: 200,
+        json: () => new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            const error = new Error("aborted");
+            error.name = "AbortError";
+            reject(error);
+          });
+        })
+      } as Response)
+    });
+    await expect(client.createResponseText({ model: "model-a", input: "x" })).rejects.toMatchObject({ status: "timeout" });
   });
 });

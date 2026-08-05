@@ -1,0 +1,51 @@
+{
+  "jobId": "JOB-SCENE-REVIEW-CONTROLS-V1",
+  "type": "short",
+  "title": "Complete the primary Scene Review checkpoint",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Expose the complete Scene Review checkpoint through trusted main-process revisions, safe media previews, and truthful renderer-side automatic handoff.",
+  "businessContext": "The current primary Scene Review only approves assets and retries scenes; V1 also requires prompt, direction, scene type, replacement, removal, preview, and voice-status controls without raw IPC errors.",
+  "allowedPaths": [
+    "apps/desktop/src/main/main.ts",
+    "apps/desktop/src/main/packagingExportService.ts",
+    "apps/desktop/src/main/packagingExportService.test.ts",
+    "apps/desktop/src/preload/preload.cjs",
+    "apps/desktop/src/renderer/App.tsx",
+    "apps/desktop/src/renderer/services/factoryClient.ts",
+    "apps/desktop/src/renderer/semiAutomaticWorkflow.ts",
+    "apps/desktop/src/renderer/semiAutomaticWorkflow.test.ts",
+    "apps/desktop/src/renderer/types.ts",
+    "packages/domain/src/ipcSchemas.ts",
+    "packages/domain/test/ipcSchemas.test.ts",
+    "docs/simple-video/IMPLEMENTATION_REPORT.md",
+    "docs/simple-video/DEFERRED.md",
+    ".harness/jobs/JOB-SCENE-REVIEW-CONTROLS-V1.json",
+    ".harness/state.json",
+    ".harness/locks/JOB-SCENE-REVIEW-CONTROLS-V1.lock",
+    ".harness/handoffs/JOB-SCENE-REVIEW-CONTROLS-V1.md"
+  ],
+  "forbiddenPaths": [
+    "packages/db/**",
+    "packages/providers/**",
+    "packages/domain/src/workflowRegistry.ts"
+  ],
+  "dependencies": ["approved selective scene retry", "approved truthful final preview"],
+  "acceptanceCriteria": [
+    "Primary Scene Review shows real safe scene asset previews, narration, duration, scene type, prompt, voice segment status, and asset status.",
+    "Primary Scene Review exposes approve, regenerate, prompt edit, direction edit, scene type change, replacement upload, and remove actions.",
+    "Scene edits persist immutable stage artifacts and invalidate only the edited scene's media plus affected timing, preview, and export outputs.",
+    "Renderer-side Semi-automatic execution never submits the CapCut confirmation string automatically.",
+    "Packaging export copies the approved preview MP4 into an explicit workspace-relative final export and keeps the manifest reviewable.",
+    "Required V1 documentation is present and records reused services, runtime evidence, blockers, and deferred work."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run packages/domain/test/ipcSchemas.test.ts apps/desktop/src/renderer/semiAutomaticWorkflow.test.ts apps/desktop/src/main/packagingExportService.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["Selective scene revision cannot be persisted with the existing artifact store."]
+}

@@ -1,0 +1,40 @@
+{
+  "jobId": "JOB-VOX-FINAL-PREVIEW-CHECKPOINT-V1",
+  "type": "short",
+  "title": "Preserve the VOX final preview checkpoint",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Keep voice, subtitle, and timeline stages automatic while leaving the real preview render at the required needs_review final-preview checkpoint.",
+  "businessContext": "The resumed VOX runtime now produces voice, subtitles, timeline, and a real preview, but the production orchestrator auto-approves preview-render. The simplified UI therefore cannot present or approve the required Final Preview checkpoint and cannot continue to packaging through the intended user action.",
+  "allowedPaths": [
+    "apps/desktop/src/main/productionOrchestrator.ts",
+    "apps/desktop/src/main/productionOrchestrator.test.ts",
+    ".harness/jobs/JOB-VOX-FINAL-PREVIEW-CHECKPOINT-V1.json",
+    ".harness/handoffs/JOB-VOX-FINAL-PREVIEW-CHECKPOINT-V1.md",
+    ".harness/locks/JOB-VOX-FINAL-PREVIEW-CHECKPOINT-V1.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": [
+    "apps/desktop/src/renderer/**",
+    "apps/desktop/src/preload/**",
+    "apps/desktop/src/main/main.ts",
+    "packages/db/**",
+    "packages/providers/**"
+  ],
+  "dependencies": ["JOB-VOX-SCENE-APPROVAL-CSP-V1"],
+  "acceptanceCriteria": [
+    "Voice Generation, Subtitle Preparation, and Timeline Assembly remain automatically approved when valid.",
+    "Preview Render remains needs_review after automatic rendering and no approve-preview handler is invoked by the orchestrator.",
+    "The existing Final Preview approval path can continue to QA and Packaging Export after explicit user approval.",
+    "Focused orchestrator tests, typecheck, and diff checks pass without claiming final export evidence."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run apps/desktop/src/main/productionOrchestrator.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["Preserving the checkpoint requires changing the preview IPC contract outside the orchestrator boundary."]
+}

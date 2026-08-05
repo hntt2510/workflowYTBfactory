@@ -1,0 +1,52 @@
+{
+  "jobId": "JOB-VOX-OPTIONAL-CAPCUT-EXPORT-V1",
+  "type": "short",
+  "title": "Keep CapCut optional for final MP4 export",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Align the V1 final-output path so an approved final preview can produce a final MP4 and manifest without requiring an optional CapCut draft.",
+  "businessContext": "The pasted VOX Simple Flow V1 contract makes CapCut draft creation optional, while the current registry, packaging verifier inputs, and orchestrator block packaging until CapCut review is approved.",
+  "allowedPaths": [
+    "packages/domain/src/workflowRegistry.ts",
+    "packages/domain/src/productionStatus.ts",
+    "apps/desktop/src/main/productionOrchestrator.ts",
+    "apps/desktop/src/main/productionOrchestrator.test.ts",
+    "apps/desktop/src/main/optionalCapcutExport.test.ts",
+    "apps/desktop/src/main/packagingExportService.ts",
+    "apps/desktop/src/main/packagingExportService.test.ts",
+    "apps/desktop/src/main/main.ts",
+    ".harness/jobs/JOB-VOX-OPTIONAL-CAPCUT-EXPORT-V1.json",
+    ".harness/handoffs/JOB-VOX-OPTIONAL-CAPCUT-EXPORT-V1.md",
+    ".harness/state.json",
+    ".harness/locks/JOB-VOX-OPTIONAL-CAPCUT-EXPORT-V1.lock"
+  ],
+  "forbiddenPaths": [
+    "apps/desktop/src/renderer/**",
+    "apps/desktop/src/preload/**",
+    "packages/providers/**",
+    "python/**"
+  ],
+  "dependencies": [
+    "approved final preview path",
+    "existing optional CapCut draft IPC"
+  ],
+  "acceptanceCriteria": [
+    "Packaging Export is eligible after approved QA, preview, timeline, voice, subtitles, assets, and script artifacts without an approved CapCut Draft.",
+    "Final-preview approval can run packaging directly and does not invoke or require CapCut.",
+    "CapCut Draft remains available as an optional explicit Export action and still invalidates a package when an existing package depends on changed upstream output.",
+    "Existing manifest path, hash, and final MP4 validation remain enforced.",
+    "Focused domain/orchestrator/packaging checks, typecheck, and diff checks pass."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run apps/desktop/src/main/optionalCapcutExport.test.ts packages/domain/test/workflowRegistry.test.ts packages/domain/test/workflowEligibility.test.ts apps/desktop/src/main/packagingExportService.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": [
+    "Making CapCut optional would weaken an accepted security or export validation invariant.",
+    "Packaging cannot validate a real preview MP4 without introducing a new media or persistence mechanism."
+  ]
+}

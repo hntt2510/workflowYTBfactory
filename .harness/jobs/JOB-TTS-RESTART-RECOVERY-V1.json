@@ -1,0 +1,49 @@
+{
+  "jobId": "JOB-TTS-RESTART-RECOVERY-V1",
+  "type": "short",
+  "title": "Make TTS restart recovery explicit",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Recover interrupted persistent TTS work as a safe failed state, preserve per-segment retryability, and prevent Electron startup from automatically invoking provider-backed TTS jobs.",
+  "businessContext": "V1 requires restart recovery to preserve production progress without silently resuming paid or provider-backed work. The existing startup path converts running TTS jobs to queued and immediately runs every queued job.",
+  "allowedPaths": [
+    "apps/desktop/src/main/main.ts",
+    "apps/desktop/src/main/ttsJobService.ts",
+    "apps/desktop/src/main/ttsJobService.test.ts",
+    "packages/db/src/ttsJobStore.ts",
+    "packages/db/test/persistence.test.ts",
+    ".harness/jobs/JOB-TTS-RESTART-RECOVERY-V1.json",
+    ".harness/handoffs/JOB-TTS-RESTART-RECOVERY-V1.md",
+    ".harness/state.json",
+    ".harness/locks/JOB-TTS-RESTART-RECOVERY-V1.lock"
+  ],
+  "forbiddenPaths": [
+    "apps/desktop/src/renderer/**",
+    "apps/desktop/src/preload/**",
+    "packages/providers/**",
+    "packages/domain/**",
+    "python/**"
+  ],
+  "dependencies": [
+    "persistent TTS job store",
+    "existing per-segment TTS retry IPC and Voice screen action"
+  ],
+  "acceptanceCriteria": [
+    "A running TTS job recovered after restart is marked failed with a safe interruption error, and its running segments are marked failed without deleting successful or queued segment progress.",
+    "Electron startup does not automatically call a provider-backed TTS job for recovered or queued work.",
+    "The existing explicit failed-segment retry path remains usable after recovery and does not regenerate successful segments.",
+    "Focused TTS persistence/service checks, typecheck, and diff checks pass."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run packages/db/test/persistence.test.ts apps/desktop/src/main/ttsJobService.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": [
+    "Explicit retry cannot safely resume only the interrupted segment without changing the existing IPC contract.",
+    "Recovery requires a database migration or a new provider/idempotency mechanism."
+  ]
+}

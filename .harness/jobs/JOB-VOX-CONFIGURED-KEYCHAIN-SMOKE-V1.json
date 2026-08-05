@@ -1,0 +1,47 @@
+{
+  "jobId": "JOB-VOX-CONFIGURED-KEYCHAIN-SMOKE-V1",
+  "type": "short",
+  "title": "Run VOX smoke with configured local providers",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Allow the isolated VOX Electron smoke to use the existing configured OS keychain only when explicitly requested, so the runtime can prove the real provider-backed checkpoint without weakening the safe default test setup.",
+  "businessContext": "The current VOX smoke always enables an empty in-memory keychain, which deterministically stops Idea Lab before testing the configured 9Router and downstream media path. V1 requires reuse of existing configured providers and truthful runtime evidence.",
+  "allowedPaths": [
+    "scripts/verify-electron-ui.cjs",
+    "apps/desktop/src/main/main.ts",
+    "docs/simple-video/IMPLEMENTATION_REPORT.md",
+    ".harness/jobs/JOB-VOX-CONFIGURED-KEYCHAIN-SMOKE-V1.json",
+    ".harness/handoffs/JOB-VOX-CONFIGURED-KEYCHAIN-SMOKE-V1.md",
+    ".harness/locks/JOB-VOX-CONFIGURED-KEYCHAIN-SMOKE-V1.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": [
+    "packages/db/**",
+    "packages/providers/**",
+    "python/**",
+    "apps/desktop/src/renderer/**"
+  ],
+  "dependencies": [
+    "existing VOX simple-flow smoke mode",
+    "existing configured provider credentials and certifications",
+    "existing voice, image, FFmpeg, and packaging services"
+  ],
+  "acceptanceCriteria": [
+    "The smoke launcher keeps the empty in-memory keychain as its safe default and uses the configured OS keychain only when LSF_UI_USE_CONFIGURED_KEYCHAIN=1 is explicitly set.",
+    "The configured-keychain smoke runs the existing vox-simple-flow mode and records provider availability, production checkpoints, and final MP4 verification truthfully.",
+    "No credential, token, or secret is written to the report or logs by this change.",
+    "Targeted smoke, typecheck, and diff checks pass, or the report records a truthful configured-runtime blocker."
+  ],
+  "verificationCommands": [
+    "$env:LSF_UI_USE_CONFIGURED_KEYCHAIN='1'; $env:LSF_UI_MODES='vox-simple-flow'; node scripts/verify-electron-ui.cjs",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": [
+    "The configured OS keychain cannot be safely read without exposing or changing credentials.",
+    "The configured provider path is unavailable and the remaining blocker requires a user-owned external configuration change."
+  ]
+}

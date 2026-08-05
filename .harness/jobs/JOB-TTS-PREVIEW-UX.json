@@ -1,0 +1,18 @@
+{
+  "jobId": "JOB-TTS-PREVIEW-UX",
+  "type": "short",
+  "title": "TTS preview playback UX cleanup",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Keep the integrated TTS preview player available while removing development-only test controls from the production settings flow.",
+  "businessContext": "Editors need one clear path to generate and play a voice preview without confusing diagnostic controls.",
+  "allowedPaths": ["apps/desktop/src/renderer/App.tsx", ".harness/jobs/JOB-TTS-PREVIEW-UX.json", ".harness/state.json", ".harness/locks/JOB-TTS-PREVIEW-UX.lock"],
+  "forbiddenPaths": ["apps/desktop/src/main/**", "apps/desktop/src/preload/**", "packages/**", "python/**"],
+  "dependencies": ["TTS preview IPC is implemented"],
+  "acceptanceCriteria": ["Settings retains one integrated TTS preview action and its audio player.", "Diagnostics no longer presents development TTS, CapCut, 9Router, or stock test controls.", "Renderer typecheck and focused UI test pass."],
+  "verificationCommands": ["corepack pnpm typecheck", "corepack pnpm exec vitest run apps/desktop/src/renderer/navigation.test.ts", "git diff --check"],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["Removing diagnostics would remove a required production workflow action."]
+}

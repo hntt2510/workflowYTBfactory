@@ -13,6 +13,7 @@
     "@lsf/db": "workspace:*",
     "@lsf/domain": "workspace:*",
     "@lsf/generation-queue": "workspace:*",
+    "@lsf/media": "workspace:*",
     "@lsf/providers": "workspace:*",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",

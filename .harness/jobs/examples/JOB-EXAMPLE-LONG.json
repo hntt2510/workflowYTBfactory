@@ -1,0 +1,18 @@
+{
+  "jobId": "JOB-EXAMPLE-LONG",
+  "type": "long",
+  "title": "Example multi-step job",
+  "status": "planned",
+  "targetBranch": "main",
+  "assignedRole": "builder",
+  "description": "Replace this example with a bounded, independently reviewable job.",
+  "businessContext": "Example only; split long work into smaller dependent jobs where practical.",
+  "allowedPaths": ["packages/example/src/**", "packages/example/test/**", "docs/example/**"],
+  "forbiddenPaths": [".harness/schemas/**", "docs/product/acceptance-criteria.md"],
+  "dependencies": ["JOB-PREREQUISITE"],
+  "acceptanceCriteria": ["All required behavior is specified before status becomes ready.", "Independent reviewer and QA evidence are recorded."],
+  "verificationCommands": ["pnpm test:unit", "pnpm typecheck"],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["The job cannot remain within its allowed paths.", "A dependency is not merged or has unknown behavior."]
+}

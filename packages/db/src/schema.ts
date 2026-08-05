@@ -29,6 +29,8 @@ const tableNames = [
   "asset_sources",
   "generation_jobs",
   "job_attempts",
+  "tts_jobs",
+  "tts_job_segments",
   "voice_segments",
   "timeline_tracks",
   "timeline_items",
@@ -231,6 +233,129 @@ export const migrations = [
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       );`
+    ]
+  },
+  {
+    id: "002_text_model_certification",
+    statements: [
+      `ALTER TABLE provider_credentials ADD COLUMN credential_version_ref TEXT;`,
+      `CREATE TABLE IF NOT EXISTS text_model_certifications (
+        id TEXT PRIMARY KEY,
+        provider_id TEXT NOT NULL,
+        configured_model_id TEXT NOT NULL,
+        base_url_fingerprint TEXT NOT NULL,
+        credential_version_ref TEXT,
+        endpoint_strategy TEXT NOT NULL,
+        implementation_version TEXT NOT NULL,
+        overall_status TEXT NOT NULL,
+        tested_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_text_model_certifications_current
+        ON text_model_certifications (provider_id, configured_model_id, base_url_fingerprint, credential_version_ref, endpoint_strategy, implementation_version, tested_at);`
+    ]
+  },
+  {
+    id: "003_master_workflow_contract",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS workflow_stage_runs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        stage_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        runner_id TEXT NOT NULL,
+        runner_version TEXT NOT NULL,
+        provider_id TEXT,
+        configured_model_id TEXT,
+        returned_model_id TEXT,
+        prompt_template_id TEXT,
+        prompt_version TEXT,
+        input_artifact_ids_json TEXT NOT NULL DEFAULT '[]',
+        input_fingerprint TEXT NOT NULL,
+        output_artifact_ids_json TEXT NOT NULL DEFAULT '[]',
+        safe_error_category TEXT,
+        safe_error_message TEXT,
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        started_at TEXT,
+        finished_at TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_workflow_stage_runs_project_stage
+        ON workflow_stage_runs (project_id, stage_id, status, created_at);`,
+      `CREATE TABLE IF NOT EXISTS workflow_artifacts (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        stage_id TEXT NOT NULL,
+        stage_run_id TEXT,
+        type TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        payload_json TEXT,
+        relative_file_path TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+        FOREIGN KEY (stage_run_id) REFERENCES workflow_stage_runs(id) ON DELETE SET NULL
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_project_stage
+        ON workflow_artifacts (project_id, stage_id, type, status, version);`
+    ]
+  },
+  {
+    id: "004_image_model_certification",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS image_model_certifications (
+        id TEXT PRIMARY KEY,
+        provider_id TEXT NOT NULL,
+        configured_model_id TEXT NOT NULL,
+        base_url_fingerprint TEXT NOT NULL,
+        credential_version_ref TEXT,
+        endpoint_strategy TEXT NOT NULL,
+        implementation_version TEXT NOT NULL,
+        overall_status TEXT NOT NULL,
+        tested_at TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_image_model_certifications_current
+       ON image_model_certifications (provider_id, configured_model_id, base_url_fingerprint, credential_version_ref, endpoint_strategy, implementation_version, tested_at);`
+    ]
+  },
+  {
+    id: "005_generation_job_idempotency",
+    statements: [
+      `ALTER TABLE generation_jobs ADD COLUMN idempotency_key TEXT;`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_generation_jobs_idempotency_key ON generation_jobs (idempotency_key);`
+    ]
+  },
+  {
+    id: "006_tts_jobs",
+    statements: [
+      `CREATE TABLE IF NOT EXISTS tts_jobs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT,
+        state TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+      );`,
+      `CREATE TABLE IF NOT EXISTS tts_job_segments (
+        id TEXT PRIMARY KEY,
+        job_id TEXT NOT NULL,
+        segment_order INTEGER NOT NULL,
+        state TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (job_id) REFERENCES tts_jobs(id) ON DELETE CASCADE
+      );`,
+      `CREATE INDEX IF NOT EXISTS idx_tts_job_segments_job ON tts_job_segments (job_id, segment_order);`
     ]
   }
 ] as const;

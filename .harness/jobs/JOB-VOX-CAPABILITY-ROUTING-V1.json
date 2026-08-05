@@ -1,0 +1,40 @@
+{
+  "jobId": "JOB-VOX-CAPABILITY-ROUTING-V1",
+  "type": "short",
+  "title": "Route VOX shots through the supported image pipeline",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Keep the simplified VOX Documentary flow on the existing validated image-asset pipeline instead of selecting unsupported stock-video or document acquisition routes.",
+  "businessContext": "Asset Acquisition and downstream timeline persistence currently support validated image assets only. The legacy visual router can select stock_video, document, and diagram routes that have no compatible automatic adapter, preventing the VOX flow from reaching Scene Review.",
+  "allowedPaths": [
+    "packages/domain/src/visualRouter.ts",
+    "packages/domain/test/visualRouter.test.ts",
+    "apps/desktop/src/main/main.ts",
+    ".harness/jobs/JOB-VOX-CAPABILITY-ROUTING-V1.json",
+    ".harness/handoffs/JOB-VOX-CAPABILITY-ROUTING-V1.md",
+    ".harness/locks/JOB-VOX-CAPABILITY-ROUTING-V1.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": [
+    "packages/db/**",
+    "packages/providers/**",
+    "apps/desktop/src/renderer/**",
+    "apps/desktop/src/preload/**"
+  ],
+  "dependencies": ["JOB-ROUTE-AWARE-ASSET-ACQUISITION-V1", "JOB-VOX-ASSET-PREFLIGHT-ATTENTION-V1"],
+  "acceptanceCriteria": [
+    "VOX Documentary routing preserves approved local assets and routes new shots to the existing ai_image path.",
+    "Legacy visual routing keeps its existing stock-video, document, diagram, and ai-image decisions when no VOX policy is requested.",
+    "The simplified VOX route no longer creates an automatic Asset Acquisition request for an unsupported media type.",
+    "Focused visual-router checks, typecheck, and diff checks pass."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run packages/domain/test/visualRouter.test.ts apps/desktop/src/main/assetAcquisitionService.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["Making VOX routing work would require adding a video asset schema, new persistence, or a new provider adapter."]
+}

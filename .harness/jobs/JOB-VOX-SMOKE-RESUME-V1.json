@@ -1,0 +1,40 @@
+{
+  "jobId": "JOB-VOX-SMOKE-RESUME-V1",
+  "type": "short",
+  "title": "Resume a partial VOX smoke safely",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Allow the exact VOX Electron smoke to resume an explicitly supplied seeded project after a bounded provider timeout, reusing persisted succeeded generation jobs without creating a duplicate project.",
+  "businessContext": "The certified VOX smoke persisted four successful image jobs before the bounded verifier timed out during the fifth image request. The existing Asset Acquisition idempotency records can safely resume that project, but the current verifier always creates a new project and cannot exercise the persisted retry path.",
+  "allowedPaths": [
+    "apps/desktop/src/main/main.ts",
+    "scripts/verify-electron-ui.cjs",
+    ".harness/jobs/JOB-VOX-SMOKE-RESUME-V1.json",
+    ".harness/handoffs/JOB-VOX-SMOKE-RESUME-V1.md",
+    ".harness/locks/JOB-VOX-SMOKE-RESUME-V1.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": [
+    "packages/db/**",
+    "packages/providers/**",
+    "apps/desktop/src/renderer/**",
+    "apps/desktop/src/preload/**"
+  ],
+  "dependencies": ["JOB-VOX-CAPABILITY-ROUTING-V1", "existing certified VOX seed workspace"],
+  "acceptanceCriteria": [
+    "Fresh VOX smoke behavior remains unchanged when resume mode is not explicitly enabled.",
+    "Explicit resume mode opens the existing topic project, preserves its persisted configuration, and does not create a duplicate project.",
+    "Resume mode retries the persisted production chain and allows Asset Acquisition to reuse succeeded idempotency records.",
+    "No stage approval, provider certification, scene media, or export evidence is fabricated by the resume path.",
+    "Focused typecheck, diff checks, and the resumed configured-keychain smoke provide executable evidence."
+  ],
+  "verificationCommands": [
+    "$env:LSF_UI_USE_CONFIGURED_KEYCHAIN='1'; $env:LSF_UI_SEED_WORKSPACE='...'; $env:LSF_UI_USE_SEED_WORKSPACE='1'; $env:LSF_UI_RESUME_PROJECT='1'; $env:LSF_UI_MODES='vox-simple-flow'; node scripts/verify-electron-ui.cjs",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["Resuming the partial project would require bypassing an interrupted-run or provider certification safety gate."]
+}

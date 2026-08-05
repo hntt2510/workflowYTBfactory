@@ -4,6 +4,8 @@ export type RouteId =
   | "new-project"
   | "project-overview"
   | "channel-profiles"
+  | "reference-intake"
+  | "competitor-dna"
   | "idea-lab"
   | "research-claims"
   | "script"
@@ -39,6 +41,8 @@ export const workspaceRoutes: NavItem[] = [
 
 export const projectRoutes: NavItem[] = [
   { id: "project-overview", label: "Project Overview", requiresProject: true },
+  { id: "reference-intake", label: "Reference Intake", requiresProject: true },
+  { id: "competitor-dna", label: "Competitor DNA", requiresProject: true },
   { id: "idea-lab", label: "Idea Lab", requiresProject: true },
   { id: "research-claims", label: "Research & Claims", requiresProject: true },
   { id: "script", label: "Script", requiresProject: true },
@@ -56,4 +60,3 @@ export const allRoutes = [...workspaceRoutes, { id: "new-project", label: "New P
 export function routeLabel(route: RouteId): string {
   return allRoutes.find((item) => item.id === route)?.label ?? "Overview";
 }
-

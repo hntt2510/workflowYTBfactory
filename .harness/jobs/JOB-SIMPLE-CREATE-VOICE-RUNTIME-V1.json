@@ -1,0 +1,35 @@
+{
+  "jobId": "JOB-SIMPLE-CREATE-VOICE-RUNTIME-V1",
+  "type": "short",
+  "title": "Bind Simple Create voice selection and runtime smoke",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Make the simplified Create voice picker use the currently configured existing TTS path and update the Electron smoke to exercise the current Create flow.",
+  "businessContext": "V1 requires users to choose an available existing voice without silently switching providers, and the runtime smoke must verify the simplified shell rather than the removed New Project wizard.",
+  "allowedPaths": [
+    "apps/desktop/src/main/main.ts",
+    "apps/desktop/src/renderer/App.tsx",
+    ".harness/jobs/JOB-SIMPLE-CREATE-VOICE-RUNTIME-V1.json",
+    ".harness/state.json",
+    ".harness/locks/JOB-SIMPLE-CREATE-VOICE-RUNTIME-V1.lock",
+    ".harness/handoffs/JOB-SIMPLE-CREATE-VOICE-RUNTIME-V1.md"
+  ],
+  "forbiddenPaths": ["packages/db/**", "packages/providers/**", "packages/domain/src/workflowRegistry.ts"],
+  "dependencies": ["simplified Create screen", "existing TTS provider catalog", "Electron UI verification harness"],
+  "acceptanceCriteria": [
+    "Simple Create only offers enabled, non-experimental voices from the currently configured TTS path and stores the provider voice identifier consumed by that path.",
+    "Voice Generation prefers the project-selected existing voice and does not silently replace it with another provider or voice.",
+    "The Electron UI smoke creates the documented VOX topic project through Create Video Project and verifies the simplified workspace navigation without using New Project.",
+    "Focused verification, typecheck, and diff checks pass."
+  ],
+  "verificationCommands": [
+    "corepack pnpm typecheck",
+    "corepack pnpm exec vitest run apps/desktop/src/renderer/navigation.test.ts",
+    "$env:LSF_UI_MODES='create'; node scripts/verify-electron-ui.cjs",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["The configured TTS path cannot expose a trusted available voice catalog."]
+}

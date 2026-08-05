@@ -1,0 +1,42 @@
+{
+  "jobId": "JOB-PREVIEW-IPC",
+  "type": "short",
+  "title": "Persisted explicit Preview Render IPC lifecycle",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Wire approved timeline media into a safe FFmpeg preview render that is explicitly run, persisted, reviewable, and approvable.",
+  "businessContext": "Editors need a truthful preview before QA without exposing arbitrary filesystem or process access to the renderer.",
+  "allowedPaths": [
+    "apps/desktop/src/main/main.ts",
+    "apps/desktop/src/main/previewRenderService.ts",
+    "apps/desktop/src/main/previewRenderService.test.ts",
+    "apps/desktop/src/preload/preload.cjs",
+    "apps/desktop/src/renderer/App.tsx",
+    "apps/desktop/src/renderer/services/factoryClient.ts",
+    "apps/desktop/src/renderer/types.ts",
+    "packages/domain/src/ipcSchemas.ts",
+    "packages/domain/test/ipcSchemas.test.ts",
+    "docs/overnight/PROGRESS_LEDGER.md",
+    ".harness/jobs/JOB-PREVIEW-IPC.json",
+    ".harness/state.json",
+    ".harness/locks/JOB-PREVIEW-IPC.lock"
+  ],
+  "forbiddenPaths": ["packages/db/**", "packages/media/**", "packages/providers/**"],
+  "dependencies": ["approved timeline-assembly", "approved asset-review", "approved voice-generation"],
+  "acceptanceCriteria": [
+    "The renderer can explicitly run, list, approve, and reject preview renders through typed preload IPC only.",
+    "Preview input files are derived only from approved artifacts and resolved under workspaceRoot.",
+    "Each render persists a StageRun and needs-review artifact; failures persist safe categories without false success.",
+    "The renderer has visible eligibility, run, history, review, and approval controls.",
+    "Focused schema/service checks and typecheck pass."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run apps/desktop/src/main/previewRenderService.test.ts packages/domain/test/ipcSchemas.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["A required preview input contract cannot be resolved without consuming unapproved artifacts.", "The change requires an unsafe renderer filesystem or process capability."]
+}

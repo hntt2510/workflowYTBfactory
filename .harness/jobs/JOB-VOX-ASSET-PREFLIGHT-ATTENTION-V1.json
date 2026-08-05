@@ -1,0 +1,38 @@
+{
+  "jobId": "JOB-VOX-ASSET-PREFLIGHT-ATTENTION-V1",
+  "type": "short",
+  "title": "Persist Asset Acquisition preflight failures",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Ensure Asset Acquisition certification and credential preflight failures persist as actionable failed stage runs instead of leaving the downstream production checkpoint waiting forever.",
+  "businessContext": "The VOX runtime can reject before creating an Asset Acquisition StageRun, leaving the project at not_started while the simplified smoke waits for Scene Review. The user-facing production state must expose a safe retryable failure.",
+  "allowedPaths": [
+    "apps/desktop/src/main/main.ts",
+    "apps/desktop/src/main/productionOrchestrator.test.ts",
+    ".harness/jobs/JOB-VOX-ASSET-PREFLIGHT-ATTENTION-V1.json",
+    ".harness/handoffs/JOB-VOX-ASSET-PREFLIGHT-ATTENTION-V1.md",
+    ".harness/locks/JOB-VOX-ASSET-PREFLIGHT-ATTENTION-V1.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": [
+    "packages/db/**",
+    "packages/providers/**",
+    "apps/desktop/src/renderer/**"
+  ],
+  "dependencies": ["dacbffc6", "seeded VOX runtime evidence"],
+  "acceptanceCriteria": [
+    "Asset Acquisition preflight failures persist the stage as failed with a safe reason and a retry route before the IPC call rejects.",
+    "A preflight failure creates a failed StageRun without exposing credentials or raw provider exceptions.",
+    "Successful Asset Acquisition behavior and provider-backed media validation remain unchanged.",
+    "Focused orchestrator checks, typecheck, and diff check pass."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run apps/desktop/src/main/productionOrchestrator.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["Persisting the failure would require weakening provider certification or credential safety gates."]
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Harness Review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["jobId", "reviewer", "commitSha", "decision", "reviewedAt", "findings"],
+  "properties": {
+    "jobId": { "type": "string", "pattern": "^JOB-[A-Z0-9]+(?:-[A-Z0-9]+)*$" },
+    "reviewer": { "const": "reviewer" },
+    "commitSha": { "type": "string", "minLength": 7 },
+    "decision": { "enum": ["approve", "reject"] },
+    "reviewedAt": { "type": "string", "format": "date-time" },
+    "findings": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["severity", "path", "evidence"], "properties": { "severity": { "enum": ["critical", "high", "medium", "low"] }, "path": { "type": "string" }, "evidence": { "type": "string" } } } }
+  }
+}

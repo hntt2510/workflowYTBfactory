@@ -1,0 +1,44 @@
+{
+  "jobId": "JOB-VOX-TOPIC-APPROVAL-RUNTIME-V1",
+  "type": "short",
+  "title": "Allow Topic Mode Idea Lab approval in the real runtime",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Make the persisted Topic Mode Idea Lab review run approvable when no competitor references are included, while preserving stale-input protection for reference-driven stages, and keep the VOX UI smoke driver aligned with the simplified Production checkpoint.",
+  "businessContext": "The exact seeded VOX runtime now reaches Idea Lab with enabled approval controls, but approval fails because the generic review guard treats the intentionally empty Topic Mode input artifact list as stale. The smoke driver also needs to follow Production's Open next step action before asserting Idea Lab content.",
+  "allowedPaths": [
+    "packages/db/src/workflowRunStore.ts",
+    "packages/db/test/persistence.test.ts",
+    "apps/desktop/src/main/main.ts",
+    "apps/desktop/src/main/productionOrchestrator.test.ts",
+    "apps/desktop/src/main/workflowArtifactSelection.ts",
+    "apps/desktop/src/main/workflowArtifactSelection.test.ts",
+    "packages/domain/src/ipcSchemas.ts",
+    "packages/domain/test/ipcSchemas.test.ts",
+    ".harness/jobs/JOB-VOX-TOPIC-APPROVAL-RUNTIME-V1.json",
+    ".harness/handoffs/JOB-VOX-TOPIC-APPROVAL-RUNTIME-V1.md",
+    ".harness/locks/JOB-VOX-TOPIC-APPROVAL-RUNTIME-V1.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": [
+    "packages/providers/**",
+    "apps/desktop/src/renderer/**"
+  ],
+  "dependencies": ["656ccaaf", "seeded VOX Idea Lab runtime evidence"],
+  "acceptanceCriteria": [
+    "A Topic Mode project with no included competitor references can approve its reviewable Idea Lab artifact without an Opportunity Map input artifact.",
+    "Reference-driven stages still reject review runs whose required input artifacts are missing or stale.",
+    "The VOX UI smoke driver follows Open next step from the simplified Production screen and still fails closed without a verified final MP4.",
+    "Focused persistence/orchestration checks, typecheck, and diff check pass."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run packages/db/test/persistence.test.ts apps/desktop/src/main/productionOrchestrator.test.ts",
+    "corepack pnpm exec vitest run packages/domain/test/ipcSchemas.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["The fix would weaken stale-artifact validation for Reference Mode or require a new persistence system."]
+}
