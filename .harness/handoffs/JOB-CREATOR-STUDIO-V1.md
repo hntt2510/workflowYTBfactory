@@ -20,6 +20,8 @@
 - `1e07197b` enriches the Director Shot Board with authoritative prompt-manifest frame numbers/roles and frame-level purpose, composition, action, expression, continuity, motion, timing, transition, filename, and asset-state details.
 - `84f05913` moves provider credentials, model discovery/configuration, and certification panels into `features/settings/ProvidersScreen.tsx`; the route keeps the existing typed preload client and callback contracts.
 - `df36297b` extracts Reference Intake, Competitor DNA, Idea Lab, and Script screens plus their Story-only helpers into `features/story/StoryScreens.tsx`; route dispatch and preload callback contracts remain unchanged.
+- `19e2d979` extracts project creation into `features/projects/CreateScreens.tsx` and production, scene review, and advanced pipeline screens into `features/production/ProductionScreens.tsx`; the proven-unreferenced OmniVoice renderer block is removed.
+- `7320785c` removes trailing whitespace from the extracted creation module.
 
 ## Verification evidence
 
@@ -40,6 +42,9 @@
 - `corepack pnpm typecheck` after `df36297b` — pass.
 - `corepack pnpm exec vitest run apps/desktop/src/renderer` after `df36297b` — pass, 4 files / 23 tests.
 - `git diff --check` after `df36297b` — pass.
+- `corepack pnpm typecheck` after `19e2d979` — pass.
+- `corepack pnpm exec vitest run apps/desktop/src/renderer` after `19e2d979` — pass, 4 files / 23 tests.
+- `git diff --check` after `19e2d979` — pass.
 - `corepack pnpm --filter @lsf/desktop build` — pass.
 - `LSF_UI_MODES=semi-automatic-resume node scripts/verify-electron-ui.cjs` — pass.
 - `LSF_UI_MODES=workflow-contract,reference-restart,reference-invalidation node scripts/verify-electron-ui.cjs` — pass.
@@ -49,6 +54,6 @@
 ## Remaining risks
 
 - `corepack pnpm lint` is blocked only by the unrelated dirty `.tmp-main-flow-runtime/cdp-call.mjs:1` unused `projectId`; it was intentionally not modified.
-- `apps/desktop/src/renderer/App.tsx` still contains project-creation, production, and voice-settings screen logic; route-level modularity remains a review item against the architecture acceptance criterion.
+- `apps/desktop/src/renderer/App.tsx` is now limited to app state, orchestration, and route dispatch; the five-phase UI and broader acceptance criteria still require independent runtime review and QA.
 - Full unit/build/Electron/screenshot verification was not rerun after the later renderer-only commits; the targeted checks above are current, while the broader results predate those commits.
 - Reviewer and independent QA evidence are pending; this handoff does not self-approve the builder commit.

@@ -6,7 +6,7 @@ New character-first projects currently move through project setup, story/review 
 
 ## Architectural bottlenecks
 
-- `apps/desktop/src/renderer/App.tsx` contains app state, route dispatch, data fetching, mutations, and the remaining project-creation, production, and voice-settings screen logic in a 1,352-line module; Story route screens now live in `apps/desktop/src/renderer/features/story/StoryScreens.tsx`.
+- `apps/desktop/src/renderer/App.tsx` now contains bootstrap state, app orchestration, and route dispatch in a 385-line module; project creation, Story, production/scene review, and voice screens are feature-owned modules.
 - `AppShell` and `styles.css` provide a dark foundation, but permanent navigation and copy still expose technical routes/statuses instead of a creator journey.
 - Manual asset intake exists and preserves scene assets, but the normal path still shares eligibility and orchestration assumptions with automatic image acquisition.
 - Prompt preparation already compiles scene-level GG Lab prompts and numeric frame manifests, but the creator-facing flow needs a single scene prompt surface and explicit upload gate.
