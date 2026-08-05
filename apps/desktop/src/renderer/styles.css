@@ -882,6 +882,7 @@ small {
 .upload-dropzone small { color: var(--warning); }
 .asset-intake-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-top: 16px; }
 .asset-slot { display: grid; gap: 9px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); padding: 10px; }
+.asset-slot-missing { border-color: rgba(232, 168, 74, 0.65); }
 .asset-slot > div:not(.asset-slot-preview) { display: grid; gap: 2px; }
 .asset-slot span { color: var(--text-muted); font-size: 11px; }
 .asset-slot-preview { width: 100%; aspect-ratio: 9 / 16; object-fit: cover; border-radius: 7px; background: var(--surface-1); }

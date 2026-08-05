@@ -20,3 +20,16 @@
 
 - The worktree contains unrelated pre-existing dirty changes and no commit was created to avoid bundling them into this job.
 - Reviewer should inspect the bounded job paths and decide whether to commit the complete job change set in an isolated review step.
+
+## Repository Audit
+
+- Current flow: character-first projects route through Character Preparation, Visual Routing, Asset Concepts, Prompt Preparation, manual Asset Intake/Review, then voice, subtitles, timeline, preview, QA, and export; legacy projects retain provider-based visual stages.
+- Bottlenecks: the renderer still concentrates workflow screens in `App.tsx`; manual intake previously rendered only imported items, rejected duplicate hashes, and replaced the whole review set when a later upload was made.
+- Migration risks: stage-level invalidation is global rather than scene-granular; old artifacts may lack character composition metadata; CapCut bridge changes remain outside this job.
+- Implementation phases: domain and workflow contracts, character/prompt continuity, manual asset intake, media/audio rendering, renderer polish, targeted verification, and independent review/QA.
+
+## Latest Incremental Update
+
+- Manual Asset Intake now preserves prior approved items when replacing one frame, accepts duplicate hashes as review warnings, records aspect-ratio and resolution warnings, and stales downstream build stages when intake changes.
+- Asset Intake now renders every required storyboard slot, supports per-slot upload/replace, shows missing/orphan/warning states, and keeps reassignment/removal controls for imported items.
+- Targeted verification after this update: `corepack pnpm typecheck`, `git diff --check`, and 6 Vitest files / 66 tests passed.

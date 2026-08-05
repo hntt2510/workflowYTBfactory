@@ -2258,7 +2258,13 @@ ipcMain.handle("approve-character-version", (_event, input: unknown) => {
   const profile = projectRepository.loadChannelProfile(request.profileId);
   const version = profile?.characterVersions?.find((candidate) => candidate.id === request.versionId);
   if (!profile || !version) throw new Error("Character version was not found.");
-  if (version.references.length < 4 || version.references.some((reference) => !reference.relativeFilePath || !existsSync(resolveWorkspaceArtifactPath(reference.relativeFilePath)))) throw new Error("Every character reference must be generated before approval.");
+  if (version.references.length < 4 || version.references.some((reference) => (
+    !["needs_review", "approved"].includes(reference.status)
+    || !reference.relativeFilePath
+    || !reference.sha256
+    || !reference.mimeType
+    || !existsSync(resolveWorkspaceArtifactPath(reference.relativeFilePath))
+  ))) throw new Error("Every character reference must include validated image metadata before approval.");
   const now = new Date().toISOString();
   const nextProfile: ChannelProfile = {
     ...profile,
@@ -4090,6 +4096,7 @@ ipcMain.handle("list-asset-review-artifacts", (_event, input: unknown) => { cons
     const inputArtifactIds = [current.acquisitionArtifactId];
     const selected = current.assets.find((item) => item.asset.sha256 === request.assetSha256);
     if (!selected) throw new Error("Asset is not present in the review artifact.");
+    const touchedShotIds = new Set([selected.assignedShotId, selected.asset.shotId, request.shotId].filter((value): value is string => Boolean(value)));
     if (request.action === "assign") {
       if (!request.shotId || !project.shots.some((shot) => shot.id === request.shotId)) throw new Error("The target storyboard frame was not found.");
       if (selected.reviewStatus !== "approved") throw new Error("Approve an asset before assigning it.");
@@ -4105,6 +4112,14 @@ ipcMain.handle("list-asset-review-artifacts", (_event, input: unknown) => { cons
       return { ...item, assignedShotId: undefined };
     });
     const output = assetReviewOutputSchema.parse({ ...current, assets });
+    const nextProject = markDownstreamStagesStale({
+      ...project,
+      shots: project.shots.map((shot) => {
+        if (!touchedShotIds.has(shot.id)) return shot;
+        const { approvedAssetId: _approvedAssetId, ...withoutApprovedAsset } = shot;
+        return withoutApprovedAsset;
+      })
+    }, "asset-review");
     const fingerprint = canonicalSha256({ stageId: "asset-review", sourceArtifactId: source.id, assetSha256: request.assetSha256, action: request.action, ...(request.shotId ? { shotId: request.shotId } : {}) });
     const runId = `stage-run-${randomUUID()}`;
     const artifactId = `artifact-${randomUUID()}`;
@@ -4112,6 +4127,7 @@ ipcMain.handle("list-asset-review-artifacts", (_event, input: unknown) => { cons
     db.exec("BEGIN IMMEDIATE;");
     try {
       workflowRunStore.rejectReviewRun(source.stageRunId, { withinTransaction: true });
+      saveProjectWithWorkflowInvalidation(nextProject, { withinTransaction: true });
       workflowRunStore.createRun({ id: runId, projectId: request.projectId, stageId: "asset-review", status: "running", runnerId: "asset-review-user-action", runnerVersion: "asset-review-v1", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now });
       workflowRunStore.finishRun({ id: runId, projectId: request.projectId, stageId: "asset-review", status: "needs_review", runnerId: "asset-review-user-action", runnerVersion: "asset-review-v1", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId: request.projectId, stageId: "asset-review", stageRunId: runId, type: "asset-review", version: workflowRunStore.listArtifacts(request.projectId, "asset-review").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true });
       db.exec("COMMIT;");
@@ -4119,9 +4135,35 @@ ipcMain.handle("list-asset-review-artifacts", (_event, input: unknown) => { cons
       db.exec("ROLLBACK;");
       throw error;
     }
-    return factoryProjectResponseSchema.parse(project);
+    return factoryProjectResponseSchema.parse(nextProject);
   });
-ipcMain.handle("approve-asset-review", (_event, input: unknown) => { const { projectId } = assetReviewRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "asset-review").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Asset Review exists."); const output = assetReviewOutputSchema.parse(artifact.payloadJson); if (output.assets.some((item) => item.reviewStatus !== "approved" || !item.assignedShotId)) throw new Error("Approve and explicitly assign every generated asset before completing Asset Review."); const shotIds = new Set(project.shots.map((shot) => shot.id)); if (output.assets.some((item) => !shotIds.has(item.assignedShotId!))) throw new Error("Assigned asset shot does not exist in the current project."); const assignments = new Map(output.assets.map((item) => [item.assignedShotId!, `asset-${item.asset.sha256}`])); const approved = transitionProjectStage(markDownstreamStagesStale({ ...project, shots: project.shots.map((shot) => assignments.has(shot.id) ? { ...shot, approvedAssetId: assignments.get(shot.id)! } : shot) }, "asset-review"), "asset-review", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
+ipcMain.handle("approve-asset-review", (_event, input: unknown) => {
+  const { projectId } = assetReviewRequestSchema.parse(input);
+  const project = projectRepository.loadProject(projectId);
+  if (!project) throw new Error(`Project not found: ${projectId}`);
+  const artifact = workflowRunStore.listArtifacts(projectId, "asset-review").find((item) => item.status === "needs_review");
+  if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Asset Review exists.");
+  const output = assetReviewOutputSchema.parse(artifact.payloadJson);
+  if (output.assets.some((item) => item.reviewStatus !== "approved" || !item.assignedShotId)) throw new Error("Approve and explicitly assign every generated asset before completing Asset Review.");
+  const shotIds = new Set(project.shots.map((shot) => shot.id));
+  if (output.assets.some((item) => !shotIds.has(item.assignedShotId!))) throw new Error("Assigned asset shot does not exist in the current project.");
+  const assignedShotIds = output.assets.map((item) => item.assignedShotId!);
+  if (new Set(assignedShotIds).size !== assignedShotIds.length) throw new Error("Only one asset may be assigned to each storyboard frame.");
+  const missingShotIds = [...requiredAssetShotIds(project)].filter((shotId) => !assignedShotIds.includes(shotId));
+  if (missingShotIds.length) throw new Error(`Asset Review is missing required storyboard frames: ${missingShotIds.join(", ")}.`);
+  const assignments = new Map(output.assets.map((item) => [item.assignedShotId!, `asset-${item.asset.sha256}`]));
+  const approved = transitionProjectStage(markDownstreamStagesStale({ ...project, shots: project.shots.map((shot) => assignments.has(shot.id) ? { ...shot, approvedAssetId: assignments.get(shot.id) } : shot) }, "asset-review"), "asset-review", "approved");
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true });
+    workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true });
+    db.exec("COMMIT;");
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+  return factoryProjectResponseSchema.parse(approved);
+});
 ipcMain.handle("reject-asset-review", (_event, input: unknown) => { const { projectId } = assetReviewRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "asset-review").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId) throw new Error("No reviewable Asset Review exists."); const rejected = transitionProjectStage(project, "asset-review", "rejected"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(rejected, { withinTransaction: true }); workflowRunStore.rejectReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(rejected); });
 
 function moveManualStageToNeedsReview(project: FactoryProject, stageId: string): FactoryProject {
@@ -4144,13 +4186,29 @@ function moveManualStageToApproved(project: FactoryProject, stageId: string): Fa
   return transitionProjectStage(moveManualStageToNeedsReview(project, stageId), stageId, "approved");
 }
 
+function requiredAssetShotIds(project: FactoryProject): Set<string> {
+  return new Set(project.shots.filter((shot) => shot.visualMode !== "reuse").map((shot) => shot.id));
+}
+
+function manualAssetWarnings(project: FactoryProject, asset: AcquiredImageAsset, duplicateHash: boolean): string[] {
+  const expectedAspectRatio = project.setup.aspectRatio ?? (project.format === "short" ? "9:16" : "16:9");
+  const targetRatio = expectedAspectRatio === "16:9" ? 16 / 9 : expectedAspectRatio === "1:1" ? 1 : 9 / 16;
+  const actualRatio = asset.width / asset.height;
+  const warnings: string[] = [];
+  if (Math.abs(actualRatio - targetRatio) / targetRatio > 0.12) warnings.push(`Aspect ratio differs from the project canvas (${expectedAspectRatio}).`);
+  if (Math.min(asset.width, asset.height) < 512) warnings.push("Resolution is below the recommended 512px minimum on the short side.");
+  if (duplicateHash) warnings.push("Duplicate image hash detected; this frame reuses an image already in the intake.");
+  return warnings;
+}
+
 ipcMain.handle("select-manual-asset-upload", async (_event, input: unknown) => {
   const request = manualAssetUploadRequestSchema.parse(input);
   const project = projectRepository.loadProject(request.projectId);
   if (!project) throw new Error(`Project not found: ${request.projectId}`);
+  const reviewArtifacts = workflowRunStore.listArtifacts(request.projectId, "asset-review");
   const reviewArtifact = request.artifactId
-    ? workflowRunStore.listArtifacts(request.projectId, "asset-review").find((item) => item.id === request.artifactId && item.status === "needs_review")
-    : workflowRunStore.listArtifacts(request.projectId, "asset-review").find((item) => item.status === "needs_review");
+    ? reviewArtifacts.find((item) => item.id === request.artifactId && (item.status === "needs_review" || item.status === "approved"))
+    : reviewArtifacts.find((item) => item.status === "needs_review") ?? reviewArtifacts.find((item) => item.status === "approved");
   if (request.artifactId && (!reviewArtifact?.stageRunId || !reviewArtifact.payloadJson)) throw new Error("Manual upload must start from a reviewable Asset Intake.");
   if (request.shotId && !project.shots.some((shot) => shot.id === request.shotId)) throw new Error("The selected storyboard frame was not found.");
   let sourcePaths = request.sourcePaths;
@@ -4163,7 +4221,7 @@ ipcMain.handle("select-manual-asset-upload", async (_event, input: unknown) => {
   const currentItems = reviewArtifact?.payloadJson ? assetReviewOutputSchema.parse(reviewArtifact.payloadJson).assets : [];
   const occupied = new Set(currentItems.filter((item) => item.reviewStatus !== "rejected").map((item) => item.assignedShotId ?? item.asset.shotId));
   if (request.shotId) occupied.delete(request.shotId);
-  const targetShots = project.shots.filter((shot) => !["reuse", "document", "text_card"].includes(shot.visualMode));
+  const targetShots = project.shots.filter((shot) => shot.visualMode !== "reuse");
   const imported: AcquiredImageAsset[] = [];
   const seenHashes = new Set(currentItems.map((item) => item.asset.sha256));
   for (let index = 0; index < sourcePaths.length; index += 1) {
@@ -4175,13 +4233,24 @@ ipcMain.handle("select-manual-asset-upload", async (_event, input: unknown) => {
       : numericShot ?? targetShots.find((candidate) => !occupied.has(candidate.id) && !imported.some((asset) => asset.shotId === candidate.id));
     if (!shot) throw new Error(`Could not map ${basename(sourcePath)} to an empty storyboard frame. Assign it manually from Asset Intake.`);
     const asset = await importLocalImageAsset({ projectId: request.projectId, shotId: shot.id, workspaceRoot, sourcePath });
-    if (seenHashes.has(asset.sha256)) throw new Error(`Duplicate image detected for ${shot.id}. Choose a different file or replace the existing frame.`);
+    const warnings = manualAssetWarnings(project, asset, seenHashes.has(asset.sha256));
     seenHashes.add(asset.sha256);
     occupied.add(shot.id);
-    imported.push(asset);
+    imported.push({ ...asset, ...(warnings.length ? { warnings } : {}) } as AcquiredImageAsset);
   }
 
-  const mergedAssets = [...currentItems.filter((item) => !imported.some((asset) => asset.shotId === (item.assignedShotId ?? item.asset.shotId))), ...imported.map((asset) => ({ asset, reviewStatus: "needs_review" as const, assignedShotId: asset.shotId }))];
+  const mergedAssets = [
+    ...currentItems.filter((item) => !imported.some((asset) => asset.shotId === (item.assignedShotId ?? item.asset.shotId))),
+    ...imported.map((asset) => {
+      const { warnings, ...assetData } = asset as AcquiredImageAsset & { warnings?: string[] };
+      return {
+        asset: assetData,
+        reviewStatus: "needs_review" as const,
+        assignedShotId: asset.shotId,
+        ...(warnings?.length ? { warnings } : {})
+      };
+    })
+  ];
   const acquisitionArtifactId = `artifact-${randomUUID()}`;
   const acquisitionOutput = assetAcquisitionOutputSchema.parse({ assets: mergedAssets.map((item) => item.asset) });
   const reviewOutput = assetReviewOutputSchema.parse({ acquisitionArtifactId, assets: mergedAssets });
@@ -4189,10 +4258,14 @@ ipcMain.handle("select-manual-asset-upload", async (_event, input: unknown) => {
   const acquisitionRunId = `stage-run-${randomUUID()}`;
   const reviewRunId = `stage-run-${randomUUID()}`;
   const reviewArtifactId = `artifact-${randomUUID()}`;
-  const inputArtifactIds = workflowRunStore.listArtifacts(request.projectId, "prompt-preparation").filter((item) => item.status === "approved").slice(-1).map((item) => item.id);
+  const inputArtifactIds = Array.from(new Set([
+    ...workflowRunStore.listArtifacts(request.projectId, "prompt-preparation").filter((item) => item.status === "approved").slice(-1).map((item) => item.id),
+    ...(reviewArtifact?.payloadJson ? [assetReviewOutputSchema.parse(reviewArtifact.payloadJson).acquisitionArtifactId] : [])
+  ]));
   const fingerprint = canonicalSha256({ stageId: "manual-asset-intake", projectId: request.projectId, assetSha256s: imported.map((asset) => asset.sha256), shotIds: imported.map((asset) => asset.shotId) });
   let nextProject = moveManualStageToApproved(project, "asset-acquisition");
   nextProject = moveManualStageToNeedsReview(nextProject, "asset-review");
+  nextProject = markDownstreamStagesStale(nextProject, "asset-review");
   db.exec("BEGIN IMMEDIATE;");
   try {
     if (reviewArtifact?.stageRunId) workflowRunStore.rejectReviewRun(reviewArtifact.stageRunId, { withinTransaction: true });

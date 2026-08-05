@@ -2786,9 +2786,12 @@ function VisualsScreen(props: { project: FactoryProject; textCertification: Text
   const latestPrompt = promptArtifacts.find((artifact) => artifact.status === "needs_review" || artifact.status === "approved") ?? promptArtifacts.at(-1);
   const latestReview = assetReviewArtifacts.find((artifact) => artifact.status === "needs_review") ?? assetReviewArtifacts.find((artifact) => artifact.status === "approved") ?? assetReviewArtifacts.at(-1);
   const reviewItems = latestReview?.payloadJson.assets ?? [];
-  const requiredShots = props.project.shots.filter((shot) => !["reuse", "document", "text_card"].includes(shot.visualMode));
+  const requiredShots = props.project.shots.filter((shot) => shot.visualMode !== "reuse");
+  const itemForShot = (shotId: string) => reviewItems.find((item) => item.reviewStatus !== "rejected" && (item.assignedShotId === shotId || (!item.assignedShotId && item.asset.shotId === shotId)));
   const mappedShotIds = new Set(reviewItems.filter((item) => item.reviewStatus === "approved" && item.assignedShotId).map((item) => item.assignedShotId));
   const missingCount = requiredShots.filter((shot) => !mappedShotIds.has(shot.id)).length;
+  const warningCount = reviewItems.filter((item) => item.warnings?.length).length;
+  const orphanCount = reviewItems.filter((item) => !props.project.shots.some((shot) => shot.id === (item.assignedShotId ?? item.asset.shotId))).length;
   const assetConceptsReady = conceptArtifacts.some((artifact) => artifact.status === "approved");
   const refresh = async () => {
     const [routing, concepts, prompts, assets, reviews] = await Promise.all([
@@ -2824,6 +2827,20 @@ function VisualsScreen(props: { project: FactoryProject; textCertification: Text
     }
     await perform(() => factoryClient.selectManualAssetUpload({ projectId: props.project.id, sourcePaths }), "Đã import ảnh. Tiếp tục approve từng frame.");
   }
+  async function uploadShot(shotId: string): Promise<void> {
+    if (running || !latestPrompt || latestPrompt.status !== "approved") {
+      setMessage("Approve Scene Prompt before uploading storyboard frames.");
+      return;
+    }
+    await perform(
+      () => factoryClient.selectManualAssetUpload({
+        projectId: props.project.id,
+        shotId,
+        ...(latestReview?.status === "needs_review" ? { artifactId: latestReview.id } : {})
+      }),
+      "Frame imported. Continue with review and mapping."
+    );
+  }
   return <>
     <PageHeader title={characterFirst ? "Director & Assets" : "Visual Sources"} description={characterFirst ? "Chốt storyboard, copy prompt theo cảnh, rồi tải ảnh bạn đã tạo từ GG Lab lên." : "Route approved shots to visual modes before preparing prompts or acquiring assets."} actions={canRetryStage(eligibility) ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runVisualRouting({ projectId: props.project.id }), eligibility.status === "failed" || eligibility.status === "needs_attention" ? "Visual Routing retry is ready for review." : "Visual Routing is ready for review.")} disabled={running}>{eligibility.status === "failed" || eligibility.status === "needs_attention" ? "Retry Visual Routing" : "Run Visual Routing"}</button> : <DisabledAction reason={eligibility.blockingReasons[0]?.message ?? "Visual Routing is not runnable."}>Run Visual Routing</DisabledAction>} />
     <StageStatusHeader stageName="Visual Routing" stageNumber={16} eligibility={eligibility} dependencies={["Approved Shot Plan"]} purpose="Assign one visual strategy and one motion intent to every storyboard frame. This stage never creates an image." />
@@ -2846,10 +2863,28 @@ function VisualsScreen(props: { project: FactoryProject; textCertification: Text
       <SectionCard title="Asset Intake" description="Tạo ảnh thủ công trong GG Lab, sau đó kéo thả hoặc chọn nhiều file tại đây. File 001, 002... sẽ tự map theo thứ tự storyboard.">
         <div className="intake-summary"><div><strong>{missingCount}</strong><span>frame còn thiếu</span></div><div><strong>{requiredShots.length - missingCount}</strong><span>frame đã map/duyệt</span></div><div><strong>{requiredShots.length}</strong><span>frame cần có</span></div></div>
         <div className="upload-dropzone" onDragOver={(event) => event.preventDefault()} onDrop={(event) => void importDroppedFiles(event)}><p><strong>Upload nhiều ảnh một lần</strong></p><p>PNG, JPG hoặc WebP · tự kiểm tra MIME, kích thước, hash và mapping.</p><button className="button primary" type="button" disabled={running || !latestPrompt || latestPrompt.status !== "approved"} onClick={() => void perform(() => factoryClient.selectManualAssetUpload({ projectId: props.project.id }), "Đã import ảnh. Tiếp tục approve từng frame.")}>Tải ảnh GG Lab lên</button>{!latestPrompt || latestPrompt.status !== "approved" ? <small>Approve Scene Prompt trước khi upload.</small> : <small>Kéo thả nhiều ảnh vào vùng này để tự map theo storyboard.</small>}</div>
+        <div className="asset-intake-grid">
+          {requiredShots.map((shot) => {
+            const item = itemForShot(shot.id);
+            return (
+              <article className={`asset-slot ${item ? "" : "asset-slot-missing"}`} key={`slot-${shot.id}`}>
+                {item && latestReview ? <AssetPreviewImage projectId={props.project.id} artifactId={latestReview.id} assetSha256={item.asset.sha256} /> : <div className="asset-slot-preview asset-slot-placeholder">Missing</div>}
+                <div>
+                  <strong>{shot.id}</strong>
+                  <span>{item ? `${item.asset.width}x${item.asset.height} · ${item.reviewStatus === "approved" ? "Approved" : "Needs review"}` : "Missing storyboard frame"}</span>
+                  {item?.warnings?.map((warning) => <small className="attention-copy" key={warning}>{warning}</small>)}
+                </div>
+                <button className="button compact" type="button" disabled={running || !latestPrompt || latestPrompt.status !== "approved"} onClick={() => void uploadShot(shot.id)}>{item ? "Upload / replace" : "Upload frame"}</button>
+              </article>
+            );
+          })}
+        </div>
+        {warningCount > 0 ? <p className="attention-copy">{warningCount} image warning(s) need review before Build.</p> : null}
+        {orphanCount > 0 ? <p className="attention-copy">{orphanCount} imported file(s) do not match a storyboard frame.</p> : null}
         {latestReview ? (
           <div className="asset-intake-grid">
             {reviewItems.map((item) => (
-              <article className="asset-slot" key={item.asset.sha256}>
+              <article className="asset-slot" key={`${item.asset.sha256}-${item.assignedShotId ?? item.asset.shotId}`}>
                 <AssetPreviewImage projectId={props.project.id} artifactId={latestReview.id} assetSha256={item.asset.sha256} />
                 <div>
                   <strong>{item.assignedShotId ?? item.asset.shotId}</strong>
@@ -2859,7 +2894,7 @@ function VisualsScreen(props: { project: FactoryProject; textCertification: Text
                   <>
                     <div className="button-row">
                       <button className="button compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: latestReview.id, assetSha256: item.asset.sha256, action: "approve" }), "Frame đã được duyệt.")}>Approve</button>
-                      <button className="button danger compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: latestReview.id, assetSha256: item.asset.sha256, action: "reject" }), "Frame cần thay thế.")}>Replace</button>
+                      <button className="button danger compact" type="button" disabled={running} onClick={() => void perform(() => factoryClient.reviseAssetReview({ projectId: props.project.id, artifactId: latestReview.id, assetSha256: item.asset.sha256, action: "reject" }), "Frame removed; upload a replacement when ready.")}>Remove / replace</button>
                     </div>
                     {item.reviewStatus === "approved" ? (
                       <select
