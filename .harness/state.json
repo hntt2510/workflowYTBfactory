@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-05T21:22:00.000+07:00",
+  "updatedAt": "2026-08-05T21:33:09.797+07:00",
   "activeJobs": ["JOB-CREATOR-STUDIO-V1"],
-  "notes": "JOB-CHARACTER-FIRST-VISUALS-V1 is review_required after builder commit 5fe6666f. JOB-CREATOR-STUDIO-V1 is review_required after builder commits c57fd723, f21c4b42, a05494d2, b0316261, b8a0c97d, bfb17bfa, 1e07197b, and 84f05913; targeted typecheck and renderer verification pass, while reviewer and QA evidence remain pending. Prior review-required VOX jobs and unrelated dirty changes are preserved."
+  "notes": "JOB-CHARACTER-FIRST-VISUALS-V1 is review_required after builder commit 5fe6666f. JOB-CREATOR-STUDIO-V1 is review_required after builder commits c57fd723, f21c4b42, a05494d2, b0316261, b8a0c97d, bfb17bfa, 1e07197b, 84f05913, and df36297b; targeted typecheck and renderer verification pass, while reviewer and QA evidence remain pending. Prior review-required VOX jobs and unrelated dirty changes are preserved."
 }

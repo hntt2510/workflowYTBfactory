@@ -19,6 +19,7 @@
 - The semi-automatic Electron fixture explicitly uses the legacy visual path and recreates reference validation before exercising the persisted retry state.
 - `1e07197b` enriches the Director Shot Board with authoritative prompt-manifest frame numbers/roles and frame-level purpose, composition, action, expression, continuity, motion, timing, transition, filename, and asset-state details.
 - `84f05913` moves provider credentials, model discovery/configuration, and certification panels into `features/settings/ProvidersScreen.tsx`; the route keeps the existing typed preload client and callback contracts.
+- `df36297b` extracts Reference Intake, Competitor DNA, Idea Lab, and Script screens plus their Story-only helpers into `features/story/StoryScreens.tsx`; route dispatch and preload callback contracts remain unchanged.
 
 ## Verification evidence
 
@@ -36,6 +37,9 @@
 - `corepack pnpm typecheck` after `84f05913` — pass.
 - `corepack pnpm exec vitest run apps/desktop/src/renderer` after `84f05913` — pass, 4 files / 23 tests.
 - `git diff --check` after `84f05913` — pass.
+- `corepack pnpm typecheck` after `df36297b` — pass.
+- `corepack pnpm exec vitest run apps/desktop/src/renderer` after `df36297b` — pass, 4 files / 23 tests.
+- `git diff --check` after `df36297b` — pass.
 - `corepack pnpm --filter @lsf/desktop build` — pass.
 - `LSF_UI_MODES=semi-automatic-resume node scripts/verify-electron-ui.cjs` — pass.
 - `LSF_UI_MODES=workflow-contract,reference-restart,reference-invalidation node scripts/verify-electron-ui.cjs` — pass.
@@ -45,6 +49,6 @@
 ## Remaining risks
 
 - `corepack pnpm lint` is blocked only by the unrelated dirty `.tmp-main-flow-runtime/cdp-call.mjs:1` unused `projectId`; it was intentionally not modified.
-- `apps/desktop/src/renderer/App.tsx` is reduced by the provider extraction but still contains the remaining story, project-creation, production, and voice-settings screen logic; route-level modularity remains a review item against the architecture acceptance criterion.
+- `apps/desktop/src/renderer/App.tsx` still contains project-creation, production, and voice-settings screen logic; route-level modularity remains a review item against the architecture acceptance criterion.
 - Full unit/build/Electron/screenshot verification was not rerun after the later renderer-only commits; the targeted checks above are current, while the broader results predate those commits.
 - Reviewer and independent QA evidence are pending; this handoff does not self-approve the builder commit.
