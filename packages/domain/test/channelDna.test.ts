@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { channelDnaSchema, createDefaultChannelDna, getChannelStylePreset, normalizeChannelDna, recommendChannelDirection, resolveChannelDna } from "../src";
+import { channelDnaSchema, createDefaultChannelDna, createFixtureProject, getChannelStylePreset, normalizeChannelDna, recommendChannelDirection, recommendChannelIdeas, resolveChannelDna } from "../src";
 
 describe("Channel DNA", () => {
   it("exposes the eight approved style presets", () => {
@@ -27,5 +27,17 @@ describe("Channel DNA", () => {
   it("normalizes an old or partially edited profile into a schema-valid snapshot", () => {
     const dna = normalizeChannelDna({ visualStyle: { styleId: "minimal-infographic" }, characters: [{ id: "teacher", name: "Teacher", role: "primary", priority: "primary" }] });
     expect(channelDnaSchema.parse(dna).visualStyle.styleId).toBe("minimal-infographic");
+  });
+
+  it("creates distinct idea cards and keeps project style overrides in the snapshot", () => {
+    const editorial = recommendChannelIdeas({ topic: "cash flow", styleId: "editorial-explainer", format: "short" });
+    const cute = recommendChannelIdeas({ topic: "cash flow", styleId: "cute-daily-life-cartoon", format: "short" });
+    expect(editorial[0]?.title).not.toBe(cute[0]?.title);
+    expect(editorial[0]?.estimatedImageCount).toBeGreaterThan(0);
+
+    const project = createFixtureProject({ topic: "cash flow", format: "short", targetLanguage: "Vietnamese", selectedProfileId: "insurance-made-simple", projectStyleId: "motion-collage" });
+    expect(project.setup.channelStyleId).toBe("motion-collage");
+    expect(project.setup.channelOverrides?.visualStyle?.styleId).toBe("motion-collage");
+    expect(project.setup.channelDnaSnapshot?.visualStyle.styleId).toBe("motion-collage");
   });
 });

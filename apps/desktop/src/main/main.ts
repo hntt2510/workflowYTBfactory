@@ -187,6 +187,8 @@ import {
   replaceCompetitorReferenceRequestSchema,
   providerIdRequestSchema,
   routeChannelProfile,
+  createDefaultChannelDna,
+  getChannelStylePreset,
   getWorkflowStageDefinition,
   getDownstreamWorkflowStageIds,
   getWorkflowStageImpactIds,
@@ -205,6 +207,9 @@ import {
   channelRouteInputSchema,
   channelProfilesResponseSchema,
   channelProfileResponseSchema,
+  createChannelProfileRequestSchema,
+  updateChannelProfileRequestSchema,
+  deleteChannelProfileRequestSchema,
   saveChannelDnaRequestSchema,
   characterPackRequestSchema,
   characterVersionSchema,
@@ -2317,6 +2322,7 @@ ipcMain.handle("fixture-project", (_event, input: unknown) => {
     ...(request.workflowMode ? { workflowMode: request.workflowMode } : {}),
     ...(request.visualWorkflow ? { visualWorkflow: request.visualWorkflow } : {}),
     ...(request.characterVersionId ? { characterVersionId: request.characterVersionId } : {}),
+    ...(request.projectStyleId ? { projectStyleId: request.projectStyleId } : {}),
     inputMode: request.inputMode === "topic" && competitorReference ? "reference" : request.inputMode,
     ...(request.aspectRatio ? { aspectRatio: request.aspectRatio } : {}),
     visualStyle: request.visualStyle,
@@ -2514,6 +2520,91 @@ ipcMain.handle("get-reference-change-impact", () => referenceChangeImpactRespons
   stageNames: [...getWorkflowStageImpactIds("reference-validation")]
     .map((stageId) => getWorkflowStageDefinition(stageId)?.name ?? stageId)
 }));
+
+ipcMain.handle("create-channel-profile", (_event, input: unknown) => {
+  const request = createChannelProfileRequestSchema.parse(input);
+  const preset = getChannelStylePreset(request.styleId);
+  const dna = createDefaultChannelDna({ name: request.name, audience: request.targetAudience, language: request.language, tone: request.tone, styleId: request.styleId });
+  const channelDna = normalizeChannelDna({
+    ...dna,
+    identity: { ...dna.identity, mainTopic: request.mainKeyword },
+    contentDirection: {
+      ...dna.contentDirection,
+      primary: request.primaryContentType,
+      secondary: request.secondaryContentTypes,
+      contentTypes: [request.primaryContentType, ...request.secondaryContentTypes]
+    }
+  }, dna);
+  const profile: ChannelProfile = {
+    ...seedChannelProfiles[0]!,
+    id: `channel-${randomUUID()}`,
+    name: request.name,
+    mainKeyword: request.mainKeyword,
+    secondaryKeywords: [],
+    niche: request.niche,
+    contentType: request.primaryContentType,
+    targetAudience: request.targetAudience,
+    language: request.language,
+    tone: request.tone,
+    visualStyle: preset.name,
+    imageStyleModel: { name: preset.name, description: preset.description },
+    channelDna,
+    characterVersions: []
+  };
+  projectRepository.saveChannelProfile(profile);
+  return channelProfileResponseSchema.parse(profile);
+});
+
+ipcMain.handle("update-channel-profile", (_event, input: unknown) => {
+  const request = updateChannelProfileRequestSchema.parse(input);
+  const profile = projectRepository.loadChannelProfile(request.profileId);
+  if (!profile) throw new Error("Channel profile not found.");
+  const currentDna = normalizeChannelDna(profile.channelDna ?? createDefaultChannelDna({ name: profile.name }));
+  const styleId = request.styleId ?? currentDna.visualStyle.styleId;
+  const preset = getChannelStylePreset(styleId);
+  const channelDna = normalizeChannelDna({
+    ...currentDna,
+    identity: {
+      ...currentDna.identity,
+      ...(request.mainKeyword ? { mainTopic: request.mainKeyword } : {}),
+      ...(request.targetAudience ? { audience: request.targetAudience } : {}),
+      ...(request.language ? { language: request.language } : {}),
+      ...(request.tone ? { tone: request.tone } : {})
+    },
+    contentDirection: {
+      ...currentDna.contentDirection,
+      ...(request.primaryContentType ? { primary: request.primaryContentType } : {}),
+      ...(request.secondaryContentTypes ? { secondary: request.secondaryContentTypes, contentTypes: [request.primaryContentType ?? currentDna.contentDirection.primary, ...request.secondaryContentTypes] } : {})
+    },
+    visualStyle: request.styleId
+      ? { ...currentDna.visualStyle, styleId, name: preset.name, description: preset.description, sceneGrammar: [...preset.sceneGrammar], motionGrammar: [...preset.motionGrammar], palette: [...preset.defaultPalette], productionProfile: preset.productionProfile }
+      : currentDna.visualStyle,
+    updatedAt: new Date().toISOString()
+  }, currentDna);
+  const nextProfile: ChannelProfile = {
+    ...profile,
+    ...(request.name ? { name: request.name } : {}),
+    ...(request.mainKeyword ? { mainKeyword: request.mainKeyword } : {}),
+    ...(request.niche ? { niche: request.niche } : {}),
+    ...(request.targetAudience ? { targetAudience: request.targetAudience } : {}),
+    ...(request.language ? { language: request.language } : {}),
+    ...(request.tone ? { tone: request.tone } : {}),
+    ...(request.primaryContentType ? { contentType: request.primaryContentType } : {}),
+    ...(request.styleId ? { visualStyle: preset.name, imageStyleModel: { name: preset.name, description: preset.description } } : {}),
+    channelDna
+  };
+  projectRepository.saveChannelProfile(nextProfile);
+  return channelProfileResponseSchema.parse(nextProfile);
+});
+
+ipcMain.handle("delete-channel-profile", (_event, input: unknown) => {
+  const request = deleteChannelProfileRequestSchema.parse(input);
+  const profile = projectRepository.loadChannelProfile(request.profileId);
+  if (!profile) throw new Error("Channel profile not found.");
+  if (seedChannelProfiles.some((candidate) => candidate.id === profile.id)) throw new Error("Built-in channel profiles cannot be deleted.");
+  projectRepository.deleteChannelProfile(profile.id);
+  return okResponseSchema.parse({ ok: true });
+});
 
 ipcMain.handle("list-channel-profiles", () => channelProfilesResponseSchema.parse(projectRepository.listChannelProfiles()));
 
@@ -3847,7 +3938,7 @@ ipcMain.handle("reject-claim-map", (_event, input: unknown) => { const { project
 
 ipcMain.handle("run-outline", async (_event, input: unknown) => {
   const { projectId } = outlineRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); if (!project.approvedIdeaId) throw new Error("Outline requires an approved idea.");
-  const ideaArtifact = currentApprovedArtifacts(project, "idea-lab").find((artifact) => artifact.payloadJson); const profile = seedChannelProfiles.find((item) => item.id === project.profileId); if (!ideaArtifact?.payloadJson || !profile) throw new Error("Outline requires an approved idea and channel profile.");
+  const ideaArtifact = currentApprovedArtifacts(project, "idea-lab").find((artifact) => artifact.payloadJson); const loadedProfile = projectRepository.loadChannelProfile(project.profileId); const profile = loadedProfile ? { ...loadedProfile, ...(project.setup.channelDnaSnapshot ? { channelDna: project.setup.channelDnaSnapshot } : {}) } : undefined; if (!ideaArtifact?.payloadJson || !profile) throw new Error("Outline requires an approved idea and channel profile.");
   const idea = ideaLabOutputSchema.parse(ideaArtifact.payloadJson).candidates.find((candidate) => candidate.id === project.approvedIdeaId); const claims: Array<{ id: string; state: string; approvalState: string }> = []; if (!idea) throw new Error("Outline requires an approved idea.");
   const projectLanguage = project.setup.language || project.targetLanguage;
   const fingerprint = canonicalSha256({ stageId: "outline", ideaArtifactId: ideaArtifact.id, profileId: profile.id, duration: project.setup.targetDuration, language: projectLanguage }); const existing = workflowRunStore.findLatestByInput(projectId, "outline", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project);

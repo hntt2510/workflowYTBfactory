@@ -31,6 +31,9 @@ import {
   reviseAssetReviewRequestSchema
   , channelDnaSchema
   , saveChannelDnaRequestSchema
+  , createChannelProfileRequestSchema
+  , updateChannelProfileRequestSchema
+  , deleteChannelProfileRequestSchema
   , voiceGenerationOutputSchema
   , subtitlePreparationOutputSchema
   , timelineAssemblyOutputSchema
@@ -87,6 +90,9 @@ describe("ipc schemas", () => {
     expect(channelDnaSchema.parse(dna).version).toBe(1);
     expect(saveChannelDnaRequestSchema.parse({ profileId: "channel-1", channelDna: dna }).profileId).toBe("channel-1");
     expect(createProjectRequestSchema.parse({ topic: "Money", channelId: "none" }).channelId).toBe("none");
+    expect(createChannelProfileRequestSchema.parse({ name: "Money Lab", mainKeyword: "cash flow", niche: "finance for beginners", targetAudience: "New viewers", language: "Vietnamese", tone: "Clear", styleId: "minimal-infographic", primaryContentType: "explainer" }).secondaryContentTypes).toEqual([]);
+    expect(updateChannelProfileRequestSchema.parse({ profileId: "channel-1", styleId: "motion-collage" }).styleId).toBe("motion-collage");
+    expect(deleteChannelProfileRequestSchema.parse({ profileId: "channel-1" }).profileId).toBe("channel-1");
   });
   it("accepts valid project and route payloads", () => {
     const parsed = createProjectRequestSchema.parse({

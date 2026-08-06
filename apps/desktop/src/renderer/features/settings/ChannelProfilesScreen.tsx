@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import type { ChannelDna, ChannelProfile, CharacterReferenceView } from "@lsf/domain";
+import type { ChannelContentType, ChannelDna, ChannelProfile, ChannelStyleId, CharacterReferenceView } from "@lsf/domain";
 import { channelStylePresets, characterVersionIsApproved, createDefaultChannelDna, normalizeChannelDna, recommendChannelDirection } from "@lsf/domain";
 import { DataTable, DisabledAction, FormField, PageHeader, SectionCard, StatusBadge, TagList } from "../../components/ui";
 import { factoryClient } from "../../services/factoryClient";
 import { creatorStatusLabel } from "../../creatorStudioCopy";
 import { safeRendererError } from "../../utils";
+
+const channelContentTypes: ChannelContentType[] = ["explainer", "documentary", "story", "daily-life", "comedy", "mystery", "listicle", "news-recap", "tutorial", "character-adventure", "emotional-story"];
 
 export function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRefresh: () => Promise<void> }) {
   const [selectedId, setSelectedId] = useState(props.profiles[0]?.id ?? "");
@@ -23,10 +25,64 @@ export function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRef
   const [dnaMessage, setDnaMessage] = useState("");
   const [characterDraft, setCharacterDraft] = useState({ name: "", role: "", priority: "supporting" as const });
   const [assetDraft, setAssetDraft] = useState({ name: "", kind: "prop" as ChannelDna["assets"][number]["kind"], description: "", tags: "" });
+  const [profileDraft, setProfileDraft] = useState({ name: "", mainKeyword: "", niche: "", targetAudience: "", language: "English", tone: "Clear, practical, curious", styleId: "editorial-explainer" as ChannelStyleId, primaryContentType: "explainer" as ChannelContentType, secondaryContentTypes: [] as ChannelContentType[] });
+  const [createDraft, setCreateDraft] = useState({ name: "", mainKeyword: "", niche: "", targetAudience: "", language: "English", tone: "Clear, practical, curious", styleId: "editorial-explainer" as ChannelStyleId, primaryContentType: "explainer" as ChannelContentType, secondaryContentTypes: [] as ChannelContentType[] });
 
   useEffect(() => {
     setChannelDna(normalizeChannelDna(selected?.channelDna ?? createDefaultChannelDna(selected ? { name: selected.name } : {})));
-  }, [selectedId, selected?.id]);
+    if (selected) {
+      const dna = normalizeChannelDna(selected.channelDna ?? createDefaultChannelDna({ name: selected.name }));
+      setProfileDraft({ name: selected.name, mainKeyword: selected.mainKeyword, niche: selected.niche, targetAudience: selected.targetAudience, language: selected.language, tone: selected.tone, styleId: dna.visualStyle.styleId, primaryContentType: dna.contentDirection.primary, secondaryContentTypes: dna.contentDirection.secondary });
+    }
+  }, [selectedId, selected?.id, selected?.channelDna?.updatedAt]);
+
+  async function createChannel(): Promise<void> {
+    if (!createDraft.name.trim() || !createDraft.mainKeyword.trim() || !createDraft.niche.trim() || !createDraft.targetAudience.trim()) {
+      setMessage("Fill in the channel name, topic, niche, audience, and style first.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const profile = await factoryClient.createChannelProfile({ ...createDraft, secondaryContentTypes: [...createDraft.secondaryContentTypes] });
+      setSelectedId(profile.id);
+      setCreateDraft({ name: "", mainKeyword: "", niche: "", targetAudience: "", language: "English", tone: "Clear, practical, curious", styleId: "editorial-explainer", primaryContentType: "explainer", secondaryContentTypes: [] });
+      await props.onRefresh();
+      setMessage("Channel created. Continue with DNA and character setup.");
+    } catch (error) {
+      setMessage(`Channel create failed: ${safeRendererError(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateChannel(): Promise<void> {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await factoryClient.updateChannelProfile({ profileId: selected.id, ...profileDraft, secondaryContentTypes: [...profileDraft.secondaryContentTypes] });
+      await props.onRefresh();
+      setMessage("Channel setup saved.");
+    } catch (error) {
+      setMessage(`Channel update failed: ${safeRendererError(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteChannel(): Promise<void> {
+    if (!selected || !window.confirm(`Delete channel '${selected.name}'?`)) return;
+    setBusy(true);
+    try {
+      await factoryClient.deleteChannelProfile({ profileId: selected.id });
+      await props.onRefresh();
+      setSelectedId(props.profiles.find((profile) => profile.id !== selected.id)?.id ?? "");
+      setMessage("Channel deleted.");
+    } catch (error) {
+      setMessage(`Channel delete failed: ${safeRendererError(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function generateCharacterPack(): Promise<void> {
     if (!selected) return;
@@ -155,6 +211,21 @@ export function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRef
           </>
         }
       />
+      <SectionCard title="Channel Setup" description="Create a reusable channel identity, content direction, and visual style before creating projects.">
+        <div className="form-grid">
+          <FormField label="New channel name" htmlFor="new-channel-name"><input id="new-channel-name" value={createDraft.name} onChange={(event) => setCreateDraft((current) => ({ ...current, name: event.target.value }))} placeholder="Example: Money Explained" /></FormField>
+          <FormField label="Main topic" htmlFor="new-channel-topic"><input id="new-channel-topic" value={createDraft.mainKeyword} onChange={(event) => setCreateDraft((current) => ({ ...current, mainKeyword: event.target.value }))} placeholder="Example: personal finance" /></FormField>
+          <FormField label="Niche" htmlFor="new-channel-niche"><input id="new-channel-niche" value={createDraft.niche} onChange={(event) => setCreateDraft((current) => ({ ...current, niche: event.target.value }))} placeholder="Example: cash flow for beginners" /></FormField>
+          <FormField label="Target audience" htmlFor="new-channel-audience"><textarea id="new-channel-audience" value={createDraft.targetAudience} onChange={(event) => setCreateDraft((current) => ({ ...current, targetAudience: event.target.value }))} /></FormField>
+          <FormField label="Language" htmlFor="new-channel-language"><input id="new-channel-language" value={createDraft.language} onChange={(event) => setCreateDraft((current) => ({ ...current, language: event.target.value }))} /></FormField>
+          <FormField label="Tone" htmlFor="new-channel-tone"><input id="new-channel-tone" value={createDraft.tone} onChange={(event) => setCreateDraft((current) => ({ ...current, tone: event.target.value }))} /></FormField>
+          <FormField label="Primary content lane" htmlFor="new-channel-primary"><select id="new-channel-primary" value={createDraft.primaryContentType} onChange={(event) => setCreateDraft((current) => ({ ...current, primaryContentType: event.target.value as ChannelContentType }))}>{channelContentTypes.map((contentType) => <option key={contentType} value={contentType}>{contentType}</option>)}</select></FormField>
+        </div>
+        <div className="profile-grid">
+          {channelStylePresets.map((preset) => <button className={`profile-card ${createDraft.styleId === preset.id ? "active" : ""}`} type="button" key={preset.id} onClick={() => setCreateDraft((current) => ({ ...current, styleId: preset.id }))}><strong>{preset.name}</strong><span>{preset.description}</span><small>{preset.sceneGrammar.join(" -> ")}</small></button>)}
+        </div>
+        <button className="button primary" type="button" disabled={busy} onClick={() => void createChannel()}>Create channel</button>
+      </SectionCard>
       <div className="split-grid">
         <SectionCard title="Các hồ sơ">
           <DataTable label="Hồ sơ kênh">
@@ -182,6 +253,19 @@ export function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRef
         </SectionCard>
         {selected ? (
           <SectionCard title="Thiết lập nhân vật kênh" description="Tạo prompt cục bộ, tạo ảnh trong GG Lab, tải từng góc nhìn rồi duyệt cả bộ.">
+            <SectionCard title="Edit channel setup" description="These fields are the channel master. Project style changes stay local to the project.">
+              <div className="form-grid">
+                <FormField label="Channel name" htmlFor="edit-channel-name"><input id="edit-channel-name" value={profileDraft.name} onChange={(event) => setProfileDraft((current) => ({ ...current, name: event.target.value }))} /></FormField>
+                <FormField label="Main topic" htmlFor="edit-channel-topic"><input id="edit-channel-topic" value={profileDraft.mainKeyword} onChange={(event) => setProfileDraft((current) => ({ ...current, mainKeyword: event.target.value }))} /></FormField>
+                <FormField label="Niche" htmlFor="edit-channel-niche"><input id="edit-channel-niche" value={profileDraft.niche} onChange={(event) => setProfileDraft((current) => ({ ...current, niche: event.target.value }))} /></FormField>
+                <FormField label="Audience" htmlFor="edit-channel-audience"><textarea id="edit-channel-audience" value={profileDraft.targetAudience} onChange={(event) => setProfileDraft((current) => ({ ...current, targetAudience: event.target.value }))} /></FormField>
+                <FormField label="Language" htmlFor="edit-channel-language"><input id="edit-channel-language" value={profileDraft.language} onChange={(event) => setProfileDraft((current) => ({ ...current, language: event.target.value }))} /></FormField>
+                <FormField label="Tone" htmlFor="edit-channel-tone"><input id="edit-channel-tone" value={profileDraft.tone} onChange={(event) => setProfileDraft((current) => ({ ...current, tone: event.target.value }))} /></FormField>
+                <FormField label="Primary content lane" htmlFor="edit-channel-primary"><select id="edit-channel-primary" value={profileDraft.primaryContentType} onChange={(event) => setProfileDraft((current) => ({ ...current, primaryContentType: event.target.value as ChannelContentType }))}>{channelContentTypes.map((contentType) => <option key={contentType} value={contentType}>{contentType}</option>)}</select></FormField>
+              </div>
+              <div className="profile-grid">{channelStylePresets.map((preset) => <button className={`profile-card ${profileDraft.styleId === preset.id ? "active" : ""}`} type="button" key={preset.id} onClick={() => setProfileDraft((current) => ({ ...current, styleId: preset.id }))}><strong>{preset.name}</strong><span>{preset.description}</span></button>)}</div>
+              <div className="button-row"><button className="button primary compact" type="button" disabled={busy} onClick={() => void updateChannel()}>Save channel setup</button><button className="button secondary compact" type="button" disabled={busy} onClick={() => void deleteChannel()}>Delete channel</button></div>
+            </SectionCard>
             <div className="tabs-static">
               {["Tổng quan", "Khán giả", "Nội dung", "Giọng điệu", "Hình ảnh", "Giọng đọc", "Hashtag", "Điều cần tránh", "Tín hiệu định tuyến"].map((tab) => <span key={tab}>{tab}</span>)}
             </div>

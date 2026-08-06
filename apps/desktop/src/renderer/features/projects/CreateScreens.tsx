@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { ChannelProfile, ChannelRouteDecision } from "@lsf/domain";
-import { characterVersionIsApproved, resolveApprovedCharacterVersion } from "@lsf/domain";
+import type { ChannelProfile, ChannelRouteDecision, ChannelStyleId } from "@lsf/domain";
+import { channelStylePresets, characterVersionIsApproved, createDefaultChannelDna, recommendChannelIdeas, resolveApprovedCharacterVersion } from "@lsf/domain";
 import { factoryClient } from "../../services/factoryClient";
 import type { RouteId } from "../../navigation";
 import { FormField, PageHeader, SectionCard, StatusBadge, TagList } from "../../components/ui";
@@ -86,6 +86,7 @@ export function SimpleCreateScreen(props: {
     targetLanguage: string;
     selectedProfileId?: string;
     channelId?: string | "none";
+    projectStyleId?: ChannelStyleId;
     characterVersionId?: string;
     targetDuration?: string;
     projectName?: string;
@@ -268,6 +269,7 @@ export function NewProjectWizard(props: {
     targetLanguage: string;
     selectedProfileId?: string;
     channelId?: string | "none";
+    projectStyleId?: ChannelStyleId;
     targetDuration?: string;
     projectName?: string;
     workflowMode?: "guided" | "semi_automatic" | "full_automatic";
@@ -294,16 +296,29 @@ export function NewProjectWizard(props: {
   const [message, setMessage] = useState("");
   const [selectedProfileId, setSelectedProfileId] = useState<string>("");
   const [selectedCharacterVersionId, setSelectedCharacterVersionId] = useState<string | undefined>(undefined);
+  const [projectStyleId, setProjectStyleId] = useState<ChannelStyleId | undefined>(undefined);
   const [decision, setDecision] = useState<ChannelRouteDecision | null>(null);
   const [saving, setSaving] = useState(false);
   const routedProfile = props.profiles.find((profile) => profile.id === (selectedProfileId || decision?.selectedProfileId));
   const characterVersions = (routedProfile?.characterVersions ?? []).filter(characterVersionIsApproved);
   const selectedCharacterVersion = characterVersions.find((version) => version.id === selectedCharacterVersionId) ?? characterVersions.find((version) => version.id === routedProfile?.activeCharacterVersionId);
+  const selectedChannelDna = routedProfile?.channelDna ?? createDefaultChannelDna({
+    ...(routedProfile?.name ? { name: routedProfile.name } : {}),
+    ...(routedProfile?.targetAudience ? { audience: routedProfile.targetAudience } : {}),
+    ...(routedProfile?.language ? { language: routedProfile.language } : {}),
+    ...(routedProfile?.tone ? { tone: routedProfile.tone } : {})
+  });
+  const effectiveProjectStyleId = projectStyleId ?? selectedChannelDna.visualStyle.styleId;
+  const ideaRecommendations = recommendChannelIdeas({ topic, styleId: effectiveProjectStyleId, channelDna: selectedChannelDna, format });
   const targetLanguage = languageChoice === "Custom" ? customLanguage.trim() : languageChoice;
   const effectiveTargetDuration = targetDuration.trim() || defaultTargetDuration(format);
   // Provider capability gates belong to individual production stages, not project creation.
   const setupReady = Boolean(targetLanguage.trim());
   const missingSetupMessage = setupReady ? "" : "Choose a target language before creating the project.";
+
+  useEffect(() => {
+    if (routedProfile) setProjectStyleId((current) => current ?? selectedChannelDna.visualStyle.styleId);
+  }, [routedProfile?.id]);
 
   async function routeTopic() {
     setMessage("");
@@ -349,6 +364,7 @@ export function NewProjectWizard(props: {
         ...(competitorReference ? { competitorReference } : {}),
         ...(routedProfileId ? { selectedProfileId: routedProfileId } : {}),
         ...(noChannel ? { channelId: "none" as const } : {}),
+        ...(effectiveProjectStyleId ? { projectStyleId: effectiveProjectStyleId } : {}),
         ...(workflowMode === "semi_automatic" ? { visualWorkflow: "character_first" as const } : { visualWorkflow: "legacy" as const }),
         ...(selectedCharacterVersion?.id ? { characterVersionId: selectedCharacterVersion.id } : {})
       });
@@ -433,8 +449,12 @@ export function NewProjectWizard(props: {
                 </StatusBadge>
                 {decision ? <TagList items={decision.matchedSignals.length ? decision.matchedSignals : ["No signal matched"]} /> : null}
               </div>
+              <SectionCard title="Project visual style" description="This is a project snapshot override. It does not mutate the channel master.">
+                  <div className="profile-grid">{channelStylePresets.map((preset) => <button className={`profile-card ${effectiveProjectStyleId === preset.id ? "active" : ""}`} type="button" key={preset.id} onClick={() => setProjectStyleId(preset.id)}><strong>{preset.name}</strong><span>{preset.description}</span><small>{preset.sceneGrammar.join(" -> ")}</small></button>)}</div>
+                  <div className="profile-grid">{ideaRecommendations.slice(0, 3).map((idea) => <div className="profile-card" key={idea.id}><strong>{idea.title}</strong><span>{idea.whyItFits}</span><small>{idea.mainCharacterUsage}</small><small>{idea.visualTreatment} / {idea.estimatedSceneCount} scenes / {idea.estimatedImageCount} images / {idea.difficulty}</small><small>Hook: {idea.hook}</small></div>)}</div>
+              </SectionCard>
               <div className="profile-grid">
-                <button className={`profile-card ${selectedProfileId === "none" ? "active" : ""}`} type="button" onClick={() => setSelectedProfileId("none")}>
+                  <button className={`profile-card ${selectedProfileId === "none" ? "active" : ""}`} type="button" onClick={() => { setSelectedProfileId("none"); setProjectStyleId(undefined); }}>
                   <strong>Không dùng channel</strong>
                   <span>Dùng global defaults cho project này.</span>
                   <small>Không kế thừa Channel DNA</small>
@@ -444,7 +464,7 @@ export function NewProjectWizard(props: {
                     className={`profile-card ${selectedProfileId === profile.id || (!selectedProfileId && decision?.selectedProfileId === profile.id) ? "active" : ""}`}
                     key={profile.id}
                     type="button"
-                  onClick={() => setSelectedProfileId(profile.id)}
+                  onClick={() => { setSelectedProfileId(profile.id); setProjectStyleId(undefined); }}
                   >
                     <strong>{profile.name}</strong>
                     <span>{profile.niche}</span>

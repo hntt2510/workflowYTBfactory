@@ -159,6 +159,22 @@ describe("project persistence", () => {
     reopened.close();
   });
 
+  it("persists custom channel profiles through create, update, and delete operations", () => {
+    const { db, repo } = openTemp();
+    const template = repo.listChannelProfiles()[0]!;
+    const custom = { ...template, id: "channel-custom", name: "Custom Finance Lab", mainKeyword: "cash flow" };
+    repo.saveChannelProfile(custom);
+    expect(repo.loadChannelProfile(custom.id)?.name).toBe("Custom Finance Lab");
+
+    const updated = { ...custom, name: "Updated Finance Lab", channelDna: createDefaultChannelDna({ name: "Updated Finance Lab", styleId: "motion-collage" }) };
+    repo.saveChannelProfile(updated);
+    expect(repo.loadChannelProfile(custom.id)?.channelDna?.visualStyle.styleId).toBe("motion-collage");
+
+    repo.deleteChannelProfile(custom.id);
+    expect(repo.loadChannelProfile(custom.id)).toBeUndefined();
+    db.close();
+  });
+
   it("persists synthetic project markers and records guarded approval metadata", () => {
     const { db, repo } = openTemp();
     const project = createFixtureProject({ topic: "synthetic approval audit", format: "short", targetLanguage: "English", synthetic: true });

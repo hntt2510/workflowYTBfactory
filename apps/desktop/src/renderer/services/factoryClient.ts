@@ -162,6 +162,7 @@ function browserFixturePreviewUrl(index: number): string {
 
 function webFallback(): LongShortFactoryApi {
   let projects: FactoryProject[] = [];
+  let profiles: ChannelProfile[] = [...seedChannelProfiles];
   const screenshotFixture = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("creator-studio-fixture") === "asset-intake-complete"
     ? createBrowserAssetScreenshotFixture()
     : undefined;
@@ -175,7 +176,7 @@ function webFallback(): LongShortFactoryApi {
   return {
     async bootstrap(): Promise<BootstrapData> {
       return {
-        profiles: seedChannelProfiles,
+        profiles,
         workspaceRoot: "Browser preview only",
         databasePath: "Electron main process unavailable",
         projects: projects.map(toSummary),
@@ -183,9 +184,40 @@ function webFallback(): LongShortFactoryApi {
         runtime: browserRuntime
       };
     },
-    async listChannelProfiles() { return seedChannelProfiles; },
+    async listChannelProfiles() { return profiles; },
+    async createChannelProfile(input) {
+      const base = profiles[0]!;
+      const profile: ChannelProfile = {
+        ...base,
+        id: `browser-channel-${Date.now()}`,
+        name: input.name,
+        mainKeyword: input.mainKeyword,
+        niche: input.niche,
+        targetAudience: input.targetAudience,
+        language: input.language,
+        tone: input.tone,
+        visualStyle: input.styleId,
+        channelDna: {
+          ...base.channelDna!,
+          identity: { ...base.channelDna!.identity, mainTopic: input.mainKeyword, audience: input.targetAudience, language: input.language, tone: input.tone },
+          contentDirection: { ...base.channelDna!.contentDirection, primary: input.primaryContentType, secondary: input.secondaryContentTypes, contentTypes: [input.primaryContentType, ...input.secondaryContentTypes] },
+          visualStyle: { ...base.channelDna!.visualStyle, styleId: input.styleId }
+        },
+        characterVersions: []
+      };
+      profiles = [profile, ...profiles];
+      return profile;
+    },
+    async updateChannelProfile(input) {
+      const profile = profiles.find((candidate) => candidate.id === input.profileId);
+      if (!profile) throw new Error("Channel profile not found.");
+      const updated = { ...profile, ...(input.name ? { name: input.name } : {}), ...(input.mainKeyword ? { mainKeyword: input.mainKeyword } : {}), ...(input.niche ? { niche: input.niche } : {}), ...(input.targetAudience ? { targetAudience: input.targetAudience } : {}), ...(input.language ? { language: input.language } : {}), ...(input.tone ? { tone: input.tone } : {}) };
+      profiles = profiles.map((candidate) => candidate.id === updated.id ? updated : candidate);
+      return updated;
+    },
+    async deleteChannelProfile(input) { profiles = profiles.filter((profile) => profile.id !== input.profileId); return { ok: true }; },
     async saveChannelDna(input: { profileId: string; channelDna: ChannelDna }): Promise<ChannelProfile> {
-      const profile = seedChannelProfiles.find((candidate) => candidate.id === input.profileId);
+      const profile = profiles.find((candidate) => candidate.id === input.profileId);
       if (!profile) throw new Error("Channel profile not found.");
       return { ...profile, channelDna: input.channelDna };
     },
@@ -206,10 +238,10 @@ function webFallback(): LongShortFactoryApi {
     async renderProductionPreview(): Promise<FactoryProject> { throw new Error("Production orchestration requires Electron main process."); },
     async continueAfterFinalApproval(): Promise<FactoryProject> { throw new Error("Production orchestration requires Electron main process."); },
     async routeTopic(input): Promise<ChannelRouteDecision> {
-      return routeChannelProfile(seedChannelProfiles, input);
+      return routeChannelProfile(profiles, input);
     },
     async fixtureProject(input): Promise<FactoryProject> {
-      const project = createFixtureProject({ ...input, profiles: seedChannelProfiles });
+      const project = createFixtureProject({ ...input, profiles });
       projects = [project, ...projects.filter((item) => item.id !== project.id)];
       return project;
     },

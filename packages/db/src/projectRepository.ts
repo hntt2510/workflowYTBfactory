@@ -215,6 +215,10 @@ export class ProjectRepository {
     ).run(profile.id, profile.name, JSON.stringify(profile));
   }
 
+  deleteChannelProfile(profileId: string): void {
+    this.db.prepare("DELETE FROM channel_profiles WHERE id = ?").run(profileId);
+  }
+
   loadChannelProfile(profileId: string): ChannelProfile | undefined {
     return this.listChannelProfiles().find((profile) => profile.id === profileId);
   }

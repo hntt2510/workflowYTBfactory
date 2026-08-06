@@ -70,17 +70,39 @@ export const characterVersionSchema = z.object({
 export const channelProfileResponseSchema = z.object({ id: idSchema, name: z.string().min(1) }).passthrough();
 export const channelProfilesResponseSchema = z.array(channelProfileResponseSchema);
 const channelStyleIdSchema = z.enum(channelStyleIds);
+const channelContentTypeSchema = z.enum(["explainer", "documentary", "story", "daily-life", "comedy", "mystery", "listicle", "news-recap", "tutorial", "character-adventure", "emotional-story"]);
+const channelStyleProductionProfileSchema = z.object({
+  visualGrammar: z.array(z.string().max(500)).max(50),
+  storytellingGrammar: z.array(z.string().max(500)).max(50),
+  storyboardGrammar: z.array(z.string().max(300)).max(50),
+  promptGrammar: z.array(z.string().max(1000)).max(50),
+  frameDensity: z.object({ min: z.number().int().positive().max(120), max: z.number().int().positive().max(120), label: z.string().max(300) }).strict(),
+  referenceStrategy: z.array(z.string().max(1000)).max(50),
+  motionGrammar: z.array(z.string().max(500)).max(50),
+  audioTendency: z.array(z.string().max(500)).max(50),
+  recommendedContentTypes: z.array(channelContentTypeSchema).max(30),
+  unsuitableContentTypes: z.array(channelContentTypeSchema).max(30),
+  requiredAssets: z.array(z.string().max(500)).max(50)
+}).strict();
 const channelDnaSchema = z.object({
   version: z.literal(1),
   identity: z.object({
+    description: z.string().max(2000).optional(),
+    mainTopic: z.string().max(500).optional(),
+    secondaryTopics: z.array(z.string().max(500)).max(50).optional(),
     channelPromise: z.string().max(2000),
     audience: z.string().max(2000),
     language: z.string().max(80),
     tone: z.string().max(1000),
     keywords: z.array(z.string().max(300)).max(50),
-    prohibitedTopics: z.array(z.string().max(500)).max(50)
+    prohibitedTopics: z.array(z.string().max(500)).max(50),
+    formats: z.array(z.enum(["long", "short"])).max(2).optional(),
+    goals: z.array(z.enum(["education", "entertainment", "storytelling", "documentary", "commercial", "character-branding"])).max(6).optional()
   }).strict(),
   contentDirection: z.object({
+    primary: channelContentTypeSchema.optional(),
+    secondary: z.array(channelContentTypeSchema).max(20).optional(),
+    contentTypes: z.array(channelContentTypeSchema).max(30).optional(),
     pillars: z.array(z.string().max(500)).max(30),
     defaultAngles: z.array(z.string().max(500)).max(30),
     hookPatterns: z.array(z.string().max(1000)).max(30),
@@ -94,13 +116,30 @@ const channelDnaSchema = z.object({
     palette: z.array(z.string().max(100)).max(30),
     sceneGrammar: z.array(z.string().max(300)).max(30),
     motionGrammar: z.array(z.string().max(300)).max(30),
-    assetGrammar: z.array(z.string().max(500)).max(30)
+    assetGrammar: z.array(z.string().max(500)).max(30),
+    productionProfile: channelStyleProductionProfileSchema.optional(),
+    customConfig: z.object({
+      referenceImagePaths: z.array(safePathSchema).max(20),
+      description: z.string().max(4000),
+      colors: z.array(z.string().max(100)).max(30),
+      lineArt: z.string().max(500),
+      texture: z.string().max(500),
+      lighting: z.string().max(500),
+      camera: z.string().max(500),
+      characterTreatment: z.string().max(1000),
+      backgroundTreatment: z.string().max(1000),
+      promptLocks: z.array(z.string().max(1000)).max(50)
+    }).strict().optional()
   }).strict(),
   characters: z.array(z.object({
     id: idSchema,
     name: z.string().min(1).max(200),
     role: z.string().min(1).max(500),
     priority: z.enum(["primary", "supporting"]),
+    species: z.string().max(300).optional(),
+    personality: z.string().max(1000).optional(),
+    relationship: z.string().max(1000).optional(),
+    usageRules: z.array(z.string().max(1000)).max(30).optional(),
     characterVersionId: idSchema.optional()
   }).strict()).max(30),
   assets: z.array(z.object({
@@ -109,6 +148,8 @@ const channelDnaSchema = z.object({
     kind: z.enum(["prop", "background", "diagram", "sound", "overlay"]),
     description: z.string().max(2000),
     tags: z.array(z.string().max(100)).max(30),
+    category: z.enum(["character", "background", "location", "prop", "foreground", "icon", "map", "texture", "logo", "font", "palette", "music", "ambient", "sfx", "reference-image"]).optional(),
+    approved: z.boolean().optional(),
     relativeFilePath: safePathSchema.optional()
   }).strict()).max(200),
   productionDefaults: z.object({
@@ -118,12 +159,32 @@ const channelDnaSchema = z.object({
     visualBeatSeconds: z.number().positive().max(30),
     maxAiImagesPerMinute: z.number().int().min(1).max(120),
     defaultMotion: z.enum(["none", "slide_up", "slide_down", "pan_left", "pan_right", "zoom_in", "zoom_out", "pop", "dissolve"]),
-    subtitlePreset: z.enum(["vox-clean", "minimal", "high-contrast"])
+    subtitlePreset: z.enum(["vox-clean", "minimal", "high-contrast"]),
+    frameDensity: z.object({ min: z.number().int().positive().max(120), max: z.number().int().positive().max(120) }).strict().optional(),
+    motionIntensity: z.enum(["subtle", "standard", "strong"]).optional(),
+    transitionStyle: z.string().max(300).optional(),
+    voiceId: z.string().max(300).optional(),
+    musicPath: safePathSchema.optional(),
+    ambientPath: safePathSchema.optional(),
+    sfxPath: safePathSchema.optional()
   }).strict(),
   updatedAt: z.string()
 }).strict();
 export { channelDnaSchema };
 export const saveChannelDnaRequestSchema = z.object({ profileId: idSchema, channelDna: channelDnaSchema }).strict();
+export const createChannelProfileRequestSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  mainKeyword: z.string().trim().min(1).max(300),
+  niche: z.string().trim().min(1).max(500),
+  targetAudience: z.string().trim().min(1).max(2000),
+  language: z.string().trim().min(1).max(80),
+  tone: z.string().trim().min(1).max(1000),
+  styleId: channelStyleIdSchema,
+  primaryContentType: channelContentTypeSchema,
+  secondaryContentTypes: z.array(channelContentTypeSchema).max(10).default([])
+}).strict();
+export const updateChannelProfileRequestSchema = createChannelProfileRequestSchema.partial().extend({ profileId: idSchema }).strict();
+export const deleteChannelProfileRequestSchema = z.object({ profileId: idSchema }).strict();
 export const characterPackRequestSchema = z.object({
   profileId: idSchema,
   name: z.string().trim().min(1).max(200),
@@ -172,6 +233,7 @@ export const createProjectRequestSchema = z.object({
   targetLanguage: z.string().min(1).max(80).default("English"),
   selectedProfileId: idSchema.optional(),
   channelId: z.union([idSchema, z.literal("none")]).optional(),
+  projectStyleId: channelStyleIdSchema.optional(),
   targetDuration: z.string().min(1).max(120).optional(),
   projectName: z.string().min(1).max(120).optional(),
   workflowMode: z.enum(["guided", "semi_automatic", "full_automatic"]).default("semi_automatic"),

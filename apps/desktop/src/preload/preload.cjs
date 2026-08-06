@@ -3,6 +3,9 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 contextBridge.exposeInMainWorld("longShortFactory", {
   bootstrap: () => ipcRenderer.invoke("bootstrap"),
   listChannelProfiles: () => ipcRenderer.invoke("list-channel-profiles"),
+  createChannelProfile: (input) => ipcRenderer.invoke("create-channel-profile", input),
+  updateChannelProfile: (input) => ipcRenderer.invoke("update-channel-profile", input),
+  deleteChannelProfile: (input) => ipcRenderer.invoke("delete-channel-profile", input),
   saveChannelDna: (input) => ipcRenderer.invoke("save-channel-dna", input),
   generateCharacterPack: (input) => ipcRenderer.invoke("generate-character-pack", input),
   retryCharacterReference: (input) => ipcRenderer.invoke("retry-character-reference", input),

@@ -38,6 +38,7 @@ export function createFixtureProject(input: {
   workflowMode?: WorkflowMode;
   visualWorkflow?: VisualWorkflowMode;
   characterVersionId?: string;
+  projectStyleId?: ChannelStyleId;
   inputMode?: "topic" | "existing_script" | "reference";
   aspectRatio?: "16:9" | "9:16" | "1:1";
   visualStyle?: "vox-documentary" | ChannelStyleId;
@@ -56,7 +57,14 @@ export function createFixtureProject(input: {
   const routeDecision = routeChannelProfile(profiles, input);
   const requestedChannelId = input.channelId === "none" ? undefined : input.channelId ?? input.selectedProfileId;
   const profile = profiles.find((item) => item.id === requestedChannelId) ?? profiles.find((item) => item.id === routeDecision.selectedProfileId) ?? profiles[0]!;
-  const channelDna = input.channelId === "none" ? globalChannelDna : resolveChannelDna(globalChannelDna, profile.channelDna);
+  const channelOverrides = input.projectStyleId
+    ? { visualStyle: { styleId: input.projectStyleId } }
+    : undefined;
+  const channelDna = resolveChannelDna(
+    input.channelId === "none" ? globalChannelDna : globalChannelDna,
+    input.channelId === "none" ? undefined : profile.channelDna,
+    channelOverrides
+  );
   const competitorReferences = input.competitorReference?.pastedTranscript.trim()
     ? (() => {
         const sourceUrl = input.competitorReference.sourceUrl?.trim();
@@ -97,11 +105,12 @@ export function createFixtureProject(input: {
       visualWorkflow: input.channelId === "none" ? "legacy" : input.visualWorkflow ?? (input.workflowMode === "guided" ? "legacy" : "character_first"),
       channelId: input.channelId === "none" ? null : profile.id,
       channelDnaSnapshot: channelDna,
+      ...(channelOverrides ? { channelOverrides } : {}),
       channelStyleId: channelDna.visualStyle.styleId,
       ...(boundCharacterVersionId ? { characterVersionId: boundCharacterVersionId } : {}),
       inputMode: input.inputMode ?? (input.competitorReference ? "reference" : "topic"),
       aspectRatio: input.aspectRatio ?? (input.format === "short" ? "9:16" : "16:9"),
-      visualStyle: input.visualStyle === "vox-documentary" && channelDna.visualStyle.styleId !== "editorial-explainer" ? channelDna.visualStyle.styleId : input.visualStyle ?? "vox-documentary",
+      visualStyle: input.visualStyle && input.visualStyle !== "vox-documentary" ? input.visualStyle : channelDna.visualStyle.styleId,
       ...(input.voiceId ? { voiceId: input.voiceId } : {}),
       outputResolution: input.outputResolution ?? "1080p",
       ...(input.sourceScript?.trim() ? { sourceScript: input.sourceScript.trim() } : {}),
