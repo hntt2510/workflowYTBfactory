@@ -149,6 +149,7 @@ export const creatorOverviewCopy = {
   watchFinal: "Xem video cuối",
   openExport: "Mở xuất video",
   continue: "Tiếp tục sản xuất",
+  retryAutomatic: "Thử lại quy trình tự động",
   running: "Đang xử lý...",
   complete: "Đã hoàn tất",
   status: "Trạng thái",

@@ -65,7 +65,7 @@ export function ProjectOverview(props: {
   const actionLabel = characterNeedsSetup
     ? "Thiết lập nhân vật kênh"
     : retryChain && !isRunning
-      ? "Thử lại quy trình"
+      ? creatorOverviewCopy.retryAutomatic
       : attention
         ? `Mở ${creatorStageLabel(attention.id)}`
         : checkpoint

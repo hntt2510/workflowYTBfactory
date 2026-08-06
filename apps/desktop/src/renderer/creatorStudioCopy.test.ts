@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { creatorBlockingMessage, creatorDependencyLabel, creatorNextAction, creatorPhaseDefinitions, creatorPhaseLabel, creatorStageLabel, creatorStagePurpose, workflowModeOptions } from "./creatorStudioCopy";
+import { creatorBlockingMessage, creatorDependencyLabel, creatorNextAction, creatorOverviewCopy, creatorPhaseDefinitions, creatorPhaseLabel, creatorStageLabel, creatorStagePurpose, workflowModeOptions } from "./creatorStudioCopy";
 
 describe("creator studio copy", () => {
   it("maps stage IDs and registry names to creator-facing labels", () => {
@@ -31,6 +31,7 @@ describe("creator studio copy", () => {
     expect(creatorNextAction("asset-review", "needs_review")).toContain("Duyệt");
     expect(creatorNextAction("script", "failed")).toContain("Thử lại");
     expect(creatorNextAction()).toContain("Xem video");
+    expect(creatorOverviewCopy.retryAutomatic).toContain("Thử lại quy trình");
   });
 
   it("keeps workflow headers and dependencies creator-facing", () => {
