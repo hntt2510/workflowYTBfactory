@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { channelStyleIds } from "./channelDna";
 
 const idSchema = z.string().min(1).max(160).regex(/^[A-Za-z0-9._:-]+$/);
 const modelIdSchema = z.string().min(1).max(300);
@@ -68,6 +69,61 @@ export const characterVersionSchema = z.object({
 }).strict();
 export const channelProfileResponseSchema = z.object({ id: idSchema, name: z.string().min(1) }).passthrough();
 export const channelProfilesResponseSchema = z.array(channelProfileResponseSchema);
+const channelStyleIdSchema = z.enum(channelStyleIds);
+const channelDnaSchema = z.object({
+  version: z.literal(1),
+  identity: z.object({
+    channelPromise: z.string().max(2000),
+    audience: z.string().max(2000),
+    language: z.string().max(80),
+    tone: z.string().max(1000),
+    keywords: z.array(z.string().max(300)).max(50),
+    prohibitedTopics: z.array(z.string().max(500)).max(50)
+  }).strict(),
+  contentDirection: z.object({
+    pillars: z.array(z.string().max(500)).max(30),
+    defaultAngles: z.array(z.string().max(500)).max(30),
+    hookPatterns: z.array(z.string().max(1000)).max(30),
+    payoffPatterns: z.array(z.string().max(1000)).max(30),
+    evidenceStyle: z.string().max(2000)
+  }).strict(),
+  visualStyle: z.object({
+    styleId: channelStyleIdSchema,
+    name: z.string().max(200),
+    description: z.string().max(2000),
+    palette: z.array(z.string().max(100)).max(30),
+    sceneGrammar: z.array(z.string().max(300)).max(30),
+    motionGrammar: z.array(z.string().max(300)).max(30),
+    assetGrammar: z.array(z.string().max(500)).max(30)
+  }).strict(),
+  characters: z.array(z.object({
+    id: idSchema,
+    name: z.string().min(1).max(200),
+    role: z.string().min(1).max(500),
+    priority: z.enum(["primary", "supporting"]),
+    characterVersionId: idSchema.optional()
+  }).strict()).max(30),
+  assets: z.array(z.object({
+    id: idSchema,
+    name: z.string().min(1).max(200),
+    kind: z.enum(["prop", "background", "diagram", "sound", "overlay"]),
+    description: z.string().max(2000),
+    tags: z.array(z.string().max(100)).max(30),
+    relativeFilePath: safePathSchema.optional()
+  }).strict()).max(200),
+  productionDefaults: z.object({
+    aspectRatio: z.enum(["16:9", "9:16", "1:1"]),
+    fps: z.number().int().min(1).max(120),
+    targetDuration: z.string().max(120),
+    visualBeatSeconds: z.number().positive().max(30),
+    maxAiImagesPerMinute: z.number().int().min(1).max(120),
+    defaultMotion: z.enum(["none", "slide_up", "slide_down", "pan_left", "pan_right", "zoom_in", "zoom_out", "pop", "dissolve"]),
+    subtitlePreset: z.enum(["vox-clean", "minimal", "high-contrast"])
+  }).strict(),
+  updatedAt: z.string()
+}).strict();
+export { channelDnaSchema };
+export const saveChannelDnaRequestSchema = z.object({ profileId: idSchema, channelDna: channelDnaSchema }).strict();
 export const characterPackRequestSchema = z.object({
   profileId: idSchema,
   name: z.string().trim().min(1).max(200),
@@ -115,6 +171,7 @@ export const createProjectRequestSchema = z.object({
   format: z.enum(["long", "short"]).default("long"),
   targetLanguage: z.string().min(1).max(80).default("English"),
   selectedProfileId: idSchema.optional(),
+  channelId: z.union([idSchema, z.literal("none")]).optional(),
   targetDuration: z.string().min(1).max(120).optional(),
   projectName: z.string().min(1).max(120).optional(),
   workflowMode: z.enum(["guided", "semi_automatic", "full_automatic"]).default("semi_automatic"),
@@ -122,7 +179,7 @@ export const createProjectRequestSchema = z.object({
   characterVersionId: idSchema.optional(),
   inputMode: z.enum(["topic", "existing_script", "reference"]).default("topic"),
   aspectRatio: z.enum(["16:9", "9:16", "1:1"]).optional(),
-  visualStyle: z.literal("vox-documentary").default("vox-documentary"),
+  visualStyle: z.union([z.literal("vox-documentary"), channelStyleIdSchema]).default("vox-documentary"),
   voiceId: z.string().max(300).optional(),
   outputResolution: z.enum(["1080p", "720p"]).default("1080p"),
   sourceScript: z.string().max(200000).optional(),

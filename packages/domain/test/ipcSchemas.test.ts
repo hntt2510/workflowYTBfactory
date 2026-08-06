@@ -29,6 +29,8 @@ import {
   visualRoutingOutputSchema,
   assetReviewOutputSchema,
   reviseAssetReviewRequestSchema
+  , channelDnaSchema
+  , saveChannelDnaRequestSchema
   , voiceGenerationOutputSchema
   , subtitlePreparationOutputSchema
   , timelineAssemblyOutputSchema
@@ -71,6 +73,21 @@ import {
 import { createFixtureProject } from "../src";
 
 describe("ipc schemas", () => {
+  it("validates Channel DNA updates and project channel choices", () => {
+    const dna = {
+      version: 1,
+      identity: { channelPromise: "Explain clearly", audience: "Beginners", language: "English", tone: "Warm", keywords: [], prohibitedTopics: [] },
+      contentDirection: { pillars: ["facts"], defaultAngles: ["cause and effect"], hookPatterns: ["Question"], payoffPatterns: ["Takeaway"], evidenceStyle: "Examples" },
+      visualStyle: { styleId: "editorial-explainer", name: "Editorial Explainer", description: "Clear", palette: ["ink"], sceneGrammar: ["claim"], motionGrammar: ["zoom_in"], assetGrammar: ["one idea"] },
+      characters: [],
+      assets: [],
+      productionDefaults: { aspectRatio: "9:16", fps: 30, targetDuration: "45-60 seconds", visualBeatSeconds: 3, maxAiImagesPerMinute: 20, defaultMotion: "zoom_in", subtitlePreset: "vox-clean" },
+      updatedAt: "2026-08-06T00:00:00.000Z"
+    } as const;
+    expect(channelDnaSchema.parse(dna).version).toBe(1);
+    expect(saveChannelDnaRequestSchema.parse({ profileId: "channel-1", channelDna: dna }).profileId).toBe("channel-1");
+    expect(createProjectRequestSchema.parse({ topic: "Money", channelId: "none" }).channelId).toBe("none");
+  });
   it("accepts valid project and route payloads", () => {
     const parsed = createProjectRequestSchema.parse({
       topic: "Bible topic",

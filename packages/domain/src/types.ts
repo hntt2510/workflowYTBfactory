@@ -1,5 +1,6 @@
 import type { AssetConcept } from "./assetConcepts";
 import type { CharacterVersion } from "./character";
+import type { ChannelDna, ChannelDnaOverrides, ChannelStyleId } from "./channelDna";
 import type { ShotMotionPlan } from "./motion";
 
 export type VideoFormat = "long" | "short";
@@ -45,10 +46,14 @@ export interface ProjectSetup {
   language: string;
   workflowMode: WorkflowMode;
   visualWorkflow?: VisualWorkflowMode;
+  channelId?: string | null;
+  channelDnaSnapshot?: ChannelDna;
+  channelOverrides?: ChannelDnaOverrides;
   characterVersionId?: string;
   inputMode?: ProductionInputMode;
   aspectRatio?: "16:9" | "9:16" | "1:1";
-  visualStyle?: "vox-documentary";
+  visualStyle?: "vox-documentary" | ChannelStyleId;
+  channelStyleId?: ChannelStyleId;
   voiceId?: string;
   musicPath?: string;
   ambientPath?: string;
@@ -116,6 +121,7 @@ export interface ChannelProfile {
   avoidList: string[];
   routerSignals: string[];
   safetyRules: string[];
+  channelDna?: ChannelDna;
   characterVersions?: CharacterVersion[];
   activeCharacterVersionId?: string;
 }

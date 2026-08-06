@@ -1,5 +1,5 @@
 import type { ProviderCredentialStore, TextCertificationStore } from "@lsf/db";
-import { promptPreparationOutputSchema, resolveCharacterCompositionLock, type AssetConcept, type CharacterVersion, type ShotMotionPlan } from "@lsf/domain";
+import { promptPreparationOutputSchema, resolveCharacterCompositionLock, type AssetConcept, type ChannelDna, type CharacterVersion, type ShotMotionPlan } from "@lsf/domain";
 import { NineRouterClient, NineRouterTextResponseError } from "@lsf/providers";
 import { loadNineRouterTextCertification } from "./nineRouterTextCertificationService";
 
@@ -10,10 +10,11 @@ interface TextClient { createResponseText(input: { model: string; input: string;
 
 type PromptShot = { id: string; sceneId?: string; purpose?: string; durationFrames?: number; visualMode: string; framing: string; cameraAngle: string; cameraMovement: string; subjectAction: string; continuityRefs: string[]; semanticBeat?: string | undefined; assetConceptIds?: string[] | undefined; motion?: ShotMotionPlan | undefined };
 
-export async function runPromptPreparation(input: { shots: PromptShot[]; aspectRatio: "16:9" | "9:16"; character?: CharacterVersion | undefined; assetConcepts?: AssetConcept[] | undefined; manualMode?: boolean; frameNumbersByShot?: ReadonlyMap<string, string>; credentialStore: ProviderCredentialStore; certificationStore: TextCertificationStore; createClient?: (config: { baseUrl: string; apiKey: string }) => TextClient }) {
+export async function runPromptPreparation(input: { shots: PromptShot[]; aspectRatio: "16:9" | "9:16"; character?: CharacterVersion | undefined; channelDna?: ChannelDna; assetConcepts?: AssetConcept[] | undefined; manualMode?: boolean; frameNumbersByShot?: ReadonlyMap<string, string>; credentialStore: ProviderCredentialStore; certificationStore: TextCertificationStore; createClient?: (config: { baseUrl: string; apiKey: string }) => TextClient }) {
+  const channelDna = input.channelDna ?? (input.character as (CharacterVersion & { channelDna?: ChannelDna }) | undefined)?.channelDna;
   const imageShots = input.shots.filter((shot) => ["ai_image", "ai_video", "stock_image", "stock_video", "manual_upload", "uploaded"].includes(shot.visualMode));
   if (input.manualMode) {
-    const prompts = imageShots.map((shot) => localPromptForShot(shot, input.aspectRatio, input.character, input.assetConcepts ?? []));
+    const prompts = imageShots.map((shot) => localPromptForShot(shot, input.aspectRatio, input.character, input.assetConcepts ?? [], channelDna));
     const output = promptPreparationOutputSchema.parse({
       prompts,
       scenePrompts: compileScenePromptPackages(input.shots, prompts, input.aspectRatio, input.character, input.assetConcepts ?? [], input.frameNumbersByShot)
@@ -30,7 +31,7 @@ export async function runPromptPreparation(input: { shots: PromptShot[]; aspectR
   const batches = Array.from({ length: Math.ceil(aiShots.length / promptPreparationBatchSize) }, (_, index) => aiShots.slice(index * promptPreparationBatchSize, (index + 1) * promptPreparationBatchSize));
   let responses: Array<{ text: string; returnedModelId?: string }>;
   try {
-    responses = await Promise.all(batches.map((batch) => client.createResponseText({ model: settings.textModel!, timeoutMs: promptPreparationTimeoutMs, input: buildPromptRequest(batch, input.aspectRatio, input.character, input.assetConcepts) })));
+    responses = await Promise.all(batches.map((batch) => client.createResponseText({ model: settings.textModel!, timeoutMs: promptPreparationTimeoutMs, input: buildPromptRequest(batch, input.aspectRatio, input.character, input.assetConcepts, channelDna) })));
   } catch (error) {
     throw new PromptPreparationError("provider_failed", error instanceof NineRouterTextResponseError ? `Prompt Preparation provider request failed: ${error.status}.` : "Prompt Preparation provider request failed.");
   }
@@ -42,7 +43,7 @@ export async function runPromptPreparation(input: { shots: PromptShot[]; aspectR
   for (const concept of input.assetConcepts ?? []) conceptsByShot.set(concept.shotId, [...(conceptsByShot.get(concept.shotId) ?? []), concept]);
   const finalPrompts = prompts.map((prompt) => {
       const shot = shotMap.get(prompt.shotId);
-      const contract = promptContractSuffix(input.character, conceptsByShot.get(prompt.shotId) ?? []);
+      const contract = promptContractSuffix(input.character, conceptsByShot.get(prompt.shotId) ?? [], channelDna);
       return {
         ...prompt,
         positivePrompt: appendPromptContract(prompt.positivePrompt, contract),
@@ -59,7 +60,7 @@ export async function runPromptPreparation(input: { shots: PromptShot[]; aspectR
   return { output, ...(returnedModelId ? { returnedModelId } : {}) };
 }
 
-function promptContractSuffix(character: CharacterVersion | undefined, concepts: AssetConcept[]): string {
+function promptContractSuffix(character: CharacterVersion | undefined, concepts: AssetConcept[], channelDna?: ChannelDna): string {
   const parts: string[] = [];
   if (character) {
     const composition = resolveCharacterCompositionLock(character);
@@ -68,6 +69,7 @@ function promptContractSuffix(character: CharacterVersion | undefined, concepts:
   if (concepts.length) {
     parts.push(`Approved asset mapping: ${concepts.map((concept) => `${concept.id} ${concept.kind} ${concept.role}: ${concept.description}`).join(" | ")}`);
   }
+  if (channelDna) parts.push(`Channel DNA: style ${channelDna.visualStyle.name}; scene grammar ${channelDna.visualStyle.sceneGrammar.join(" -> ")}; motion grammar ${channelDna.visualStyle.motionGrammar.join(", ")}; palette ${channelDna.visualStyle.palette.join(", ")}; content pillars ${channelDna.contentDirection.pillars.join(" | ")}.`);
   return parts.join(" ");
 }
 
@@ -82,24 +84,26 @@ function buildPromptRequest(
   shots: PromptShot[],
   aspectRatio: "16:9" | "9:16",
   character: CharacterVersion | undefined,
-  assetConcepts: AssetConcept[] | undefined
+  assetConcepts: AssetConcept[] | undefined,
+  channelDna?: ChannelDna
 ): string {
   const shotIds = new Set(shots.map((shot) => shot.id));
   const concepts = (assetConcepts ?? []).filter((concept) => shotIds.has(concept.shotId));
   const composition = character ? resolveCharacterCompositionLock(character) : undefined;
-  return `Prepare final image prompts only for approved AI-routed shots. Return strict JSON {"prompts":[...]}. Each prompt must use exactly {"shotId":string,"promptVersionId":string,"positivePrompt":string,"negativePrompt":string,"aspectRatio":"16:9"|"9:16","continuityConstraints":string[],"prohibitedElements":string[]}. Put character identity, subject, approved asset concept, action, semantic beat, framing, camera, lighting, mood, composition lock, and aspect ratio in positivePrompt; keep negativePrompt separate. Do not create assets or imitate copyrighted characters. Character lock: ${JSON.stringify(character ? { name: character.name, persona: character.persona, invariantTraits: character.invariantTraits, prohibitedChanges: character.prohibitedChanges, composition } : undefined)}. Asset concepts: ${JSON.stringify(concepts)}. Required aspect ratio: ${aspectRatio}. Shots: ${JSON.stringify(shots)}\n`;
+  return `Prepare final image prompts only for approved AI-routed shots. Return strict JSON {"prompts":[...]}. Each prompt must use exactly {"shotId":string,"promptVersionId":string,"positivePrompt":string,"negativePrompt":string,"aspectRatio":"16:9"|"9:16","continuityConstraints":string[],"prohibitedElements":string[]}. Put character identity, subject, approved asset concept, Channel DNA style grammar, action, semantic beat, framing, camera, lighting, mood, composition lock, and aspect ratio in positivePrompt; keep negativePrompt separate. Do not create assets or imitate copyrighted characters. Character lock: ${JSON.stringify(character ? { name: character.name, persona: character.persona, invariantTraits: character.invariantTraits, prohibitedChanges: character.prohibitedChanges, composition } : undefined)}. Channel DNA: ${JSON.stringify(channelDna)}. Asset concepts: ${JSON.stringify(concepts)}. Required aspect ratio: ${aspectRatio}. Shots: ${JSON.stringify(shots)}\n`;
 }
 
-function localPromptForShot(shot: PromptShot, aspectRatio: "16:9" | "9:16", character: CharacterVersion | undefined, assetConcepts: AssetConcept[]) {
+function localPromptForShot(shot: PromptShot, aspectRatio: "16:9" | "9:16", character: CharacterVersion | undefined, assetConcepts: AssetConcept[], channelDna?: ChannelDna) {
   const conceptText = assetConcepts.filter((concept) => concept.shotId === shot.id).map((concept) => `${concept.role}: ${concept.description}`).join("; ");
   const composition = character ? resolveCharacterCompositionLock(character) : undefined;
   const characterText = character ? `Use the locked teacher identity ${character.name}: ${character.persona.appearance}; preserve ${character.invariantTraits.join(", ")}.` : "Use the approved visual continuity bible.";
+  const styleText = channelDna ? `Channel DNA style: ${channelDna.visualStyle.name}. Scene grammar: ${channelDna.visualStyle.sceneGrammar.join(", ")}. Motion grammar: ${channelDna.visualStyle.motionGrammar.join(", ")}. Palette: ${channelDna.visualStyle.palette.join(", ")}.` : "Use the approved channel visual grammar.";
   const compositionText = composition ? `Composition lock: ${composition.aspectRatio} canvas; ${composition.subjectAnchor}; subject box x=${composition.subjectBox.x}, y=${composition.subjectBox.y}, width=${composition.subjectBox.width}, height=${composition.subjectBox.height}; ${composition.cameraDistance}; ${composition.headroom}; keep the safe zone x=${composition.safeZone.x}, y=${composition.safeZone.y}, width=${composition.safeZone.width}, height=${composition.safeZone.height} clear for diagrams and subtitles.` : "Keep the approved composition and safe zones unchanged.";
   const continuity = shot.continuityRefs.length ? `Continuity references: ${shot.continuityRefs.join(", ")}.` : "Keep continuity with the previous storyboard frame.";
   return {
     shotId: shot.id,
     promptVersionId: `prompt-${shot.id}-manual-v1`,
-    positivePrompt: `${compositionText} ${characterText} Create the approved storyboard frame for ${shot.purpose ?? shot.id}. ${shot.semanticBeat ?? "Follow the semantic beat exactly."} Subject action: ${shot.subjectAction}. Framing: ${shot.framing}; camera: ${shot.cameraAngle}; movement intent: ${shot.cameraMovement}. ${conceptText ? `Approved asset concept: ${conceptText}.` : "Use only the approved scene asset direction."} ${continuity} Output one clean ${aspectRatio} image with no text, logo, contact sheet, or watermark unless explicitly required by the storyboard.`,
+    positivePrompt: `${compositionText} ${styleText} ${characterText} Create the approved storyboard frame for ${shot.purpose ?? shot.id}. ${shot.semanticBeat ?? "Follow the semantic beat exactly."} Subject action: ${shot.subjectAction}. Framing: ${shot.framing}; camera: ${shot.cameraAngle}; movement intent: ${shot.cameraMovement}. ${conceptText ? `Approved asset concept: ${conceptText}.` : "Use only the approved scene asset direction."} ${continuity} Output one clean ${aspectRatio} image with no text, logo, contact sheet, or watermark unless explicitly required by the storyboard.`,
     negativePrompt: "No identity drift, wardrobe drift, extra limbs, inconsistent framing, invented props, contact sheet, logo, watermark, or unrelated text.",
     aspectRatio,
     continuityConstraints: [continuity, "Preserve approved character and environment continuity."],

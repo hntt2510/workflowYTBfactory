@@ -1,6 +1,6 @@
-import { useState } from "react";
-import type { ChannelProfile, CharacterReferenceView } from "@lsf/domain";
-import { characterVersionIsApproved } from "@lsf/domain";
+import { useEffect, useState } from "react";
+import type { ChannelDna, ChannelProfile, CharacterReferenceView } from "@lsf/domain";
+import { channelStylePresets, characterVersionIsApproved, createDefaultChannelDna, normalizeChannelDna, recommendChannelDirection } from "@lsf/domain";
 import { DataTable, DisabledAction, FormField, PageHeader, SectionCard, StatusBadge, TagList } from "../../components/ui";
 import { factoryClient } from "../../services/factoryClient";
 import { creatorStatusLabel } from "../../creatorStudioCopy";
@@ -18,6 +18,15 @@ export function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRef
   const [message, setMessage] = useState("");
   const [previewUrls, setPreviewUrls] = useState<Record<string, string>>({});
   const versions = selected?.characterVersions ?? [];
+  const [channelDna, setChannelDna] = useState<ChannelDna>(() => normalizeChannelDna(selected?.channelDna ?? createDefaultChannelDna(selected ? { name: selected.name } : {})));
+  const [dnaBusy, setDnaBusy] = useState(false);
+  const [dnaMessage, setDnaMessage] = useState("");
+  const [characterDraft, setCharacterDraft] = useState({ name: "", role: "", priority: "supporting" as const });
+  const [assetDraft, setAssetDraft] = useState({ name: "", kind: "prop" as ChannelDna["assets"][number]["kind"], description: "", tags: "" });
+
+  useEffect(() => {
+    setChannelDna(normalizeChannelDna(selected?.channelDna ?? createDefaultChannelDna(selected ? { name: selected.name } : {})));
+  }, [selectedId, selected?.id]);
 
   async function generateCharacterPack(): Promise<void> {
     if (!selected) return;
@@ -32,6 +41,37 @@ export function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRef
     } finally {
       setBusy(false);
     }
+  }
+
+  async function saveDna(): Promise<void> {
+    if (!selected) return;
+    setDnaBusy(true);
+    setDnaMessage("");
+    try {
+      const result = await factoryClient.saveChannelDna({ profileId: selected.id, channelDna: { ...channelDna, updatedAt: new Date().toISOString() } });
+      setChannelDna(normalizeChannelDna(result.channelDna));
+      await props.onRefresh();
+      setDnaMessage("Channel DNA đã được lưu.");
+    } catch (error) {
+      setDnaMessage(`Không thể lưu Channel DNA: ${safeRendererError(error)}`);
+    } finally {
+      setDnaBusy(false);
+    }
+  }
+
+  function addAsset(): void {
+    if (!assetDraft.name.trim() || !assetDraft.description.trim()) return;
+    setChannelDna((current) => ({
+      ...current,
+      assets: [...current.assets, { id: `asset-${Date.now()}`, name: assetDraft.name.trim(), kind: assetDraft.kind, description: assetDraft.description.trim(), tags: assetDraft.tags.split(",").map((tag) => tag.trim()).filter(Boolean) }]
+    }));
+    setAssetDraft({ name: "", kind: "prop", description: "", tags: "" });
+  }
+
+  function addCharacter(): void {
+    if (!characterDraft.name.trim() || !characterDraft.role.trim()) return;
+    setChannelDna((current) => ({ ...current, characters: [...current.characters, { id: `character-${Date.now()}`, name: characterDraft.name.trim(), role: characterDraft.role.trim(), priority: characterDraft.priority }] }));
+    setCharacterDraft({ name: "", role: "", priority: "supporting" });
   }
 
   async function preview(versionId: string, view: CharacterReferenceView): Promise<void> {
@@ -153,6 +193,35 @@ export function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRef
               <TagList items={selected.routerSignals} limit={10} />
               <TagList items={selected.coreHashtags.concat(selected.secondaryHashtags)} limit={8} />
             </div>
+            <SectionCard title="Channel DNA" description="Một nguồn sự thật cho nội dung, style, nhân vật, asset và mặc định dựng video.">
+              <div className="form-grid">
+                <FormField label="Visual style" htmlFor="channel-style"><select id="channel-style" value={channelDna.visualStyle.styleId} onChange={(event) => { const styleId = event.target.value as ChannelDna["visualStyle"]["styleId"]; const preset = channelStylePresets.find((item) => item.id === styleId)!; setChannelDna((current) => ({ ...current, visualStyle: { ...current.visualStyle, styleId, name: preset.name, description: preset.description, sceneGrammar: [...preset.sceneGrammar], motionGrammar: [...preset.motionGrammar], palette: [...preset.defaultPalette] }, contentDirection: { ...current.contentDirection, pillars: [...preset.defaultPillars], defaultAngles: [...preset.contentGrammar] } })); }} >{channelStylePresets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}</select></FormField>
+                <FormField label="Channel promise" htmlFor="channel-promise"><textarea id="channel-promise" value={channelDna.identity.channelPromise} onChange={(event) => setChannelDna((current) => ({ ...current, identity: { ...current.identity, channelPromise: event.target.value } }))} /></FormField>
+                <FormField label="Audience" htmlFor="channel-audience"><textarea id="channel-audience" value={channelDna.identity.audience} onChange={(event) => setChannelDna((current) => ({ ...current, identity: { ...current.identity, audience: event.target.value } }))} /></FormField>
+                <FormField label="Content pillars (one per line)" htmlFor="channel-pillars"><textarea id="channel-pillars" value={channelDna.contentDirection.pillars.join("\n")} onChange={(event) => setChannelDna((current) => ({ ...current, contentDirection: { ...current.contentDirection, pillars: event.target.value.split("\n").map((item) => item.trim()).filter(Boolean) } }))} /></FormField>
+                <FormField label="Default angles (one per line)" htmlFor="channel-angles"><textarea id="channel-angles" value={channelDna.contentDirection.defaultAngles.join("\n")} onChange={(event) => setChannelDna((current) => ({ ...current, contentDirection: { ...current.contentDirection, defaultAngles: event.target.value.split("\n").map((item) => item.trim()).filter(Boolean) } }))} /></FormField>
+                <FormField label="Default motion" htmlFor="channel-motion"><select id="channel-motion" value={channelDna.productionDefaults.defaultMotion} onChange={(event) => setChannelDna((current) => ({ ...current, productionDefaults: { ...current.productionDefaults, defaultMotion: event.target.value as ChannelDna["productionDefaults"]["defaultMotion"] } }))}><option value="zoom_in">Zoom in</option><option value="zoom_out">Zoom out</option><option value="slide_up">Slide up</option><option value="dissolve">Dissolve</option><option value="none">None</option></select></FormField>
+                <FormField label="Visual beat (seconds)" htmlFor="channel-beat"><input id="channel-beat" type="number" min="1" max="30" value={channelDna.productionDefaults.visualBeatSeconds} onChange={(event) => setChannelDna((current) => ({ ...current, productionDefaults: { ...current.productionDefaults, visualBeatSeconds: Number(event.target.value) || 3 } }))} /></FormField>
+              </div>
+              <div className="route-result"><strong>{recommendChannelDirection({ topic: selected.mainKeyword, styleId: channelDna.visualStyle.styleId, contentDirection: channelDna.contentDirection }).reason}</strong><TagList items={channelDna.visualStyle.sceneGrammar} /></div>
+              <div className="profile-grid">
+                {channelDna.characters.map((character) => <div className="profile-card" key={character.id}><strong>{character.name}</strong><span>{character.priority} · {character.role}</span></div>)}
+                {channelDna.assets.map((asset) => <div className="profile-card" key={asset.id}><strong>{asset.name}</strong><span>{asset.kind} · {asset.description}</span><small>{asset.tags.join(", ")}</small></div>)}
+              </div>
+              <div className="form-grid">
+                <FormField label="Character name" htmlFor="channel-character-name"><input id="channel-character-name" value={characterDraft.name} onChange={(event) => setCharacterDraft((current) => ({ ...current, name: event.target.value }))} /></FormField>
+                <FormField label="Character role" htmlFor="channel-character-role"><input id="channel-character-role" value={characterDraft.role} onChange={(event) => setCharacterDraft((current) => ({ ...current, role: event.target.value }))} /></FormField>
+                <FormField label="Character priority" htmlFor="channel-character-priority"><select id="channel-character-priority" value={characterDraft.priority} onChange={(event) => setCharacterDraft((current) => ({ ...current, priority: event.target.value as typeof current.priority }))}><option value="primary">Primary</option><option value="supporting">Supporting</option></select></FormField>
+              </div>
+              <div className="form-grid">
+                <FormField label="Asset name" htmlFor="channel-asset-name"><input id="channel-asset-name" value={assetDraft.name} onChange={(event) => setAssetDraft((current) => ({ ...current, name: event.target.value }))} /></FormField>
+                <FormField label="Asset kind" htmlFor="channel-asset-kind"><select id="channel-asset-kind" value={assetDraft.kind} onChange={(event) => setAssetDraft((current) => ({ ...current, kind: event.target.value as typeof current.kind }))}><option value="prop">Prop</option><option value="background">Background</option><option value="diagram">Diagram</option><option value="sound">Sound</option><option value="overlay">Overlay</option></select></FormField>
+                <FormField label="Asset description" htmlFor="channel-asset-description"><input id="channel-asset-description" value={assetDraft.description} onChange={(event) => setAssetDraft((current) => ({ ...current, description: event.target.value }))} /></FormField>
+                <FormField label="Tags (comma separated)" htmlFor="channel-asset-tags"><input id="channel-asset-tags" value={assetDraft.tags} onChange={(event) => setAssetDraft((current) => ({ ...current, tags: event.target.value }))} /></FormField>
+              </div>
+              <div className="button-row"><button className="button secondary compact" type="button" onClick={addCharacter}>Thêm character</button><button className="button secondary compact" type="button" onClick={addAsset}>Thêm asset vào library</button><button className="button primary compact" type="button" disabled={dnaBusy} onClick={() => void saveDna()}>{dnaBusy ? "Đang lưu..." : "Lưu Channel DNA"}</button></div>
+              {dnaMessage ? <p className={dnaMessage.includes("Không thể") ? "error-message" : "safe-message"}>{dnaMessage}</p> : null}
+            </SectionCard>
             <div className="form-grid">
               <FormField label="Tên nhân vật" htmlFor="character-name"><input id="character-name" value={characterName} onChange={(event) => setCharacterName(event.target.value)} /></FormField>
               <FormField label="Vai trò" htmlFor="character-role"><input id="character-role" value={persona.role} onChange={(event) => updatePersona("role", event.target.value)} /></FormField>

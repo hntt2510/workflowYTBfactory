@@ -7,6 +7,7 @@ export interface ProjectSummary {
   id: string;
   topic: string;
   profileId: string;
+  channelId?: string | null;
   format: string;
   projectName: string;
   targetLanguage: string;
@@ -170,6 +171,7 @@ export class ProjectRepository {
           id: item.id,
           topic: item.topic,
           profileId: item.profile_id,
+          ...(setup.channelId !== undefined ? { channelId: setup.channelId } : {}),
           format: item.format,
           projectName: setup.projectName,
           targetLanguage: setup.language,

@@ -12,6 +12,7 @@ export type RouteId =
   | "settings"
   | "diagnostics"
   | "dashboard"
+  | "channels"
   | "new-project"
   | "project-overview"
   | "channel-profiles"
@@ -38,9 +39,10 @@ export interface NavItem {
 
 export const workspaceRoutes: NavItem[] = [
   { id: "dashboard", label: "Home" },
-  { id: "projects", label: "Dự án" },
-  { id: "asset-library", label: "Thư viện asset" },
-  { id: "settings", label: "Cài đặt" }
+  { id: "projects", label: "Projects" },
+  { id: "channels", label: "Channels" },
+  { id: "asset-library", label: "Asset Library" },
+  { id: "settings", label: "Settings" }
 ];
 
 export const creatorWorkspaceRoutes: NavItem[] = [

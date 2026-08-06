@@ -6,6 +6,7 @@ describe("renderer navigation model", () => {
     expect(workspaceRoutes.map((route) => route.id)).toEqual([
       "dashboard",
       "projects",
+      "channels",
       "asset-library",
       "settings"
     ]);

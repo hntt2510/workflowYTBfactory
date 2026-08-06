@@ -49,6 +49,7 @@ export interface RouteScreenProps {
     format: "long" | "short";
     targetLanguage: string;
     selectedProfileId?: string;
+    channelId?: string | "none";
     targetDuration?: string;
     projectName?: string;
     workflowMode?: "guided" | "semi_automatic" | "full_automatic";
@@ -84,7 +85,7 @@ export function RouteScreen(props: RouteScreenProps) {
   if (props.route === "dashboard") return <Dashboard {...props} />;
   if (props.route === "projects") return <ProjectsScreen {...props} />;
   if (props.route === "create" || props.route === "new-project") return props.route === "create" ? <SimpleCreateScreen {...props} /> : <NewProjectWizard {...props} />;
-  if (props.route === "channel-profiles") return <ChannelProfilesScreen profiles={props.profiles} onRefresh={props.onRefresh} />;
+  if (props.route === "channels" || props.route === "channel-profiles") return <ChannelProfilesScreen profiles={props.profiles} onRefresh={props.onRefresh} />;
   if (props.route === "production-queue") return <QueueScreen queue={props.bootstrap.queue} selectedProject={props.selectedProject} onRunDemo={props.onRefresh} />;
   if (props.route === "asset-library") return <AssetLibraryScreen selectedProject={props.selectedProject} />;
   if (props.route === "providers") return <ProvidersScreen presence={props.providerPresence} stockPresence={props.stockPresence} settings={props.providerSettings} textCertification={props.textCertification} imageCertification={props.imageCertification} setTextCertification={props.setTextCertification} setImageCertification={props.setImageCertification} setPresence={props.setProviderPresence} setStockPresence={props.setStockPresence} setSettings={props.setProviderSettings} onRefresh={props.onRefresh} />;

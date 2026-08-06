@@ -20,6 +20,7 @@ export * from "./scriptEngine";
 export * from "./visualRouter";
 export * from "./timeline";
 export * from "./character";
+export * from "./channelDna";
 export * from "./assetConcepts";
 export * from "./motion";
 export * from "./ipcSchemas";

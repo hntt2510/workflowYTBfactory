@@ -85,6 +85,7 @@ export function SimpleCreateScreen(props: {
     format: "long" | "short";
     targetLanguage: string;
     selectedProfileId?: string;
+    channelId?: string | "none";
     characterVersionId?: string;
     targetDuration?: string;
     projectName?: string;
@@ -178,13 +179,13 @@ export function SimpleCreateScreen(props: {
         projectName: title.slice(0, 120),
         format,
         targetLanguage: language,
-        ...(profileId ? { selectedProfileId: profileId } : {}),
+        ...(profileId === "none" ? { channelId: "none" as const } : profileId ? { selectedProfileId: profileId } : {}),
         targetDuration: duration === "Custom" ? customDuration.trim() : duration,
         workflowMode: "semi_automatic",
         inputMode,
         aspectRatio,
         visualStyle: "vox-documentary",
-        ...(characterVersionId ? { characterVersionId } : {}),
+        ...(profileId !== "none" && characterVersionId ? { characterVersionId } : {}),
         ...(voiceId ? { voiceId: voiceId.startsWith("configured:") ? voiceId.slice("configured:".length) : voiceId } : {}),
         outputResolution: resolution,
         ...(inputMode === "existing_script" ? { sourceScript: script } : {}),
@@ -229,7 +230,7 @@ export function SimpleCreateScreen(props: {
             <details className="advanced-disclosure" open={showAdvanced} onToggle={(event) => setShowAdvanced(event.currentTarget.open)}>
               <summary>Tuỳ chọn nâng cao</summary>
               <div className="form-grid">
-                <FormField label="Hồ sơ kênh" htmlFor="simple-channel-profile"><select id="simple-channel-profile" value={profileId} onChange={(event) => setProfileId(event.target.value)}>{props.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></FormField>
+                <FormField label="Hồ sơ kênh" htmlFor="simple-channel-profile"><select id="simple-channel-profile" value={profileId} onChange={(event) => setProfileId(event.target.value)}><option value="none">Không dùng channel</option>{props.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></FormField>
                 <FormField label="Nhân vật kênh" htmlFor="simple-character-version"><select id="simple-character-version" value={characterVersionId} onChange={(event) => setCharacterVersionId(event.target.value)}><option value="">Chọn sau khi tạo</option>{approvedCharacterVersions.map((version) => <option key={version.id} value={version.id}>{version.name} v{version.version}</option>)}</select></FormField>
                 <FormField label="Giọng đọc" htmlFor="simple-voice"><select id="simple-voice" value={voiceId} onChange={(event) => setVoiceId(event.target.value)}><option value="">Chọn sau trong Build</option>{voiceOptions.map((voice) => <option key={voice.key} value={voice.key}>{voice.label}</option>)}</select></FormField>
                 <FormField label="Độ phân giải" htmlFor="simple-resolution"><select id="simple-resolution" value={resolution} onChange={(event) => setResolution(event.target.value as typeof resolution)}><option value="1080p">1080p</option><option value="720p">720p</option></select></FormField>
@@ -266,6 +267,7 @@ export function NewProjectWizard(props: {
     format: "long" | "short";
     targetLanguage: string;
     selectedProfileId?: string;
+    channelId?: string | "none";
     targetDuration?: string;
     projectName?: string;
     workflowMode?: "guided" | "semi_automatic" | "full_automatic";
@@ -335,7 +337,8 @@ export function NewProjectWizard(props: {
             ...(competitorNotes.trim() ? { notes: competitorNotes.trim() } : {})
           }
         : undefined;
-      const routedProfileId = selectedProfileId || decision?.selectedProfileId;
+      const noChannel = selectedProfileId === "none";
+      const routedProfileId = noChannel ? undefined : selectedProfileId || decision?.selectedProfileId;
       await props.onCreateProject({
         topic,
         projectName: projectName.trim() || topic,
@@ -345,6 +348,7 @@ export function NewProjectWizard(props: {
         workflowMode,
         ...(competitorReference ? { competitorReference } : {}),
         ...(routedProfileId ? { selectedProfileId: routedProfileId } : {}),
+        ...(noChannel ? { channelId: "none" as const } : {}),
         ...(workflowMode === "semi_automatic" ? { visualWorkflow: "character_first" as const } : { visualWorkflow: "legacy" as const }),
         ...(selectedCharacterVersion?.id ? { characterVersionId: selectedCharacterVersion.id } : {})
       });
@@ -430,6 +434,11 @@ export function NewProjectWizard(props: {
                 {decision ? <TagList items={decision.matchedSignals.length ? decision.matchedSignals : ["No signal matched"]} /> : null}
               </div>
               <div className="profile-grid">
+                <button className={`profile-card ${selectedProfileId === "none" ? "active" : ""}`} type="button" onClick={() => setSelectedProfileId("none")}>
+                  <strong>Không dùng channel</strong>
+                  <span>Dùng global defaults cho project này.</span>
+                  <small>Không kế thừa Channel DNA</small>
+                </button>
                 {props.profiles.map((profile) => (
                   <button
                     className={`profile-card ${selectedProfileId === profile.id || (!selectedProfileId && decision?.selectedProfileId === profile.id) ? "active" : ""}`}

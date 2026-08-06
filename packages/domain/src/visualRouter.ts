@@ -1,7 +1,9 @@
 import type { Shot } from "./types";
+import type { ChannelDna, ChannelStyleId } from "./channelDna";
 
 export interface VisualRoutingOptions {
-  visualStyle?: "vox-documentary";
+  visualStyle?: "vox-documentary" | ChannelStyleId;
+  channelDna?: ChannelDna;
 }
 
 export function routeShotVisual(shot: Shot): Shot["visualMode"] {
@@ -23,6 +25,8 @@ export function routeShotVisual(shot: Shot): Shot["visualMode"] {
 export function applyVisualRouting(shots: Shot[], options: VisualRoutingOptions = {}): Shot[] {
   return shots.map((shot) => ({
     ...shot,
-    visualMode: options.visualStyle === "vox-documentary" && !shot.approvedAssetId ? "ai_image" : routeShotVisual(shot)
+    visualMode: options.visualStyle === "vox-documentary" || options.channelDna?.visualStyle.styleId === "editorial-explainer" || options.channelDna?.visualStyle.styleId === "minimal-infographic"
+      ? (shot.approvedAssetId ? "reuse" : /diagram|chart|timeline|explain/i.test(shot.purpose) ? "diagram" : "ai_image")
+      : routeShotVisual(shot)
   }));
 }

@@ -3,6 +3,7 @@ import { seedChannelProfiles } from "./seedProfiles";
 import type { ChannelProfile, FactoryProject, PipelineStage, VideoFormat, VisualWorkflowMode, WorkflowMode } from "./types";
 import { normalizeReferenceIdentity } from "./referenceIdentity";
 import { characterVersionIsApproved, resolveApprovedCharacterVersion } from "./character";
+import { globalChannelDna, resolveChannelDna, type ChannelStyleId } from "./channelDna";
 import { workflowStageDefinitions } from "./workflowRegistry";
 
 function uniqueId(prefix: string): string {
@@ -31,6 +32,7 @@ export function createFixtureProject(input: {
   format: VideoFormat;
   targetLanguage: string;
   selectedProfileId?: string;
+  channelId?: string | "none";
   targetDuration?: string;
   projectName?: string;
   workflowMode?: WorkflowMode;
@@ -38,7 +40,7 @@ export function createFixtureProject(input: {
   characterVersionId?: string;
   inputMode?: "topic" | "existing_script" | "reference";
   aspectRatio?: "16:9" | "9:16" | "1:1";
-  visualStyle?: "vox-documentary";
+  visualStyle?: "vox-documentary" | ChannelStyleId;
   voiceId?: string;
   outputResolution?: "1080p" | "720p";
   sourceScript?: string;
@@ -52,7 +54,9 @@ export function createFixtureProject(input: {
 }): FactoryProject {
   const profiles = input.profiles ?? seedChannelProfiles;
   const routeDecision = routeChannelProfile(profiles, input);
-  const profile = profiles.find((item) => item.id === routeDecision.selectedProfileId) ?? profiles[0]!;
+  const requestedChannelId = input.channelId === "none" ? undefined : input.channelId ?? input.selectedProfileId;
+  const profile = profiles.find((item) => item.id === requestedChannelId) ?? profiles.find((item) => item.id === routeDecision.selectedProfileId) ?? profiles[0]!;
+  const channelDna = input.channelId === "none" ? globalChannelDna : resolveChannelDna(globalChannelDna, profile.channelDna);
   const competitorReferences = input.competitorReference?.pastedTranscript.trim()
     ? (() => {
         const sourceUrl = input.competitorReference.sourceUrl?.trim();
@@ -90,11 +94,14 @@ export function createFixtureProject(input: {
       targetDuration: input.targetDuration?.trim() || defaultTargetDuration(input.format),
       language: input.targetLanguage,
       workflowMode: input.workflowMode ?? "semi_automatic",
-      visualWorkflow: input.visualWorkflow ?? (input.workflowMode === "guided" ? "legacy" : "character_first"),
+      visualWorkflow: input.channelId === "none" ? "legacy" : input.visualWorkflow ?? (input.workflowMode === "guided" ? "legacy" : "character_first"),
+      channelId: input.channelId === "none" ? null : profile.id,
+      channelDnaSnapshot: channelDna,
+      channelStyleId: channelDna.visualStyle.styleId,
       ...(boundCharacterVersionId ? { characterVersionId: boundCharacterVersionId } : {}),
       inputMode: input.inputMode ?? (input.competitorReference ? "reference" : "topic"),
       aspectRatio: input.aspectRatio ?? (input.format === "short" ? "9:16" : "16:9"),
-      visualStyle: input.visualStyle ?? "vox-documentary",
+      visualStyle: input.visualStyle === "vox-documentary" && channelDna.visualStyle.styleId !== "editorial-explainer" ? channelDna.visualStyle.styleId : input.visualStyle ?? "vox-documentary",
       ...(input.voiceId ? { voiceId: input.voiceId } : {}),
       outputResolution: input.outputResolution ?? "1080p",
       ...(input.sourceScript?.trim() ? { sourceScript: input.sourceScript.trim() } : {}),

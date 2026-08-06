@@ -38,6 +38,7 @@ const routeIcons: Record<RouteId, LucideIcon> = {
   build: MonitorPlay,
   dashboard: Gauge,
   projects: FolderKanban,
+  channels: Route,
   create: Plus,
   production: Play,
   "scene-review": Video,

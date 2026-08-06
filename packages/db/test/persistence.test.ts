@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createFixtureProject } from "@lsf/domain";
+import { createDefaultChannelDna, createFixtureProject } from "@lsf/domain";
 import { AppSettingsStore, assertForeignKeysEnabled, GenerationJobStore, ImageCertificationStore, migrations as registeredMigrations, openFactoryDatabase, ProjectRepository, runMigrations, TextCertificationStore, TtsJobStore, WorkflowRunStore } from "../src";
 
 function openTemp() {
@@ -1119,6 +1119,18 @@ describe("project persistence", () => {
     expect(loadedProfile?.characterVersions?.[0]?.references).toHaveLength(5);
     expect(loadedProject?.setup.characterVersionId).toBe(characterVersion.id);
     expect(loadedProject?.assetConcepts?.[0]?.semanticBeat).toBe("Cash rises");
+    db.close();
+  });
+
+  it("round-trips Channel DNA and project channel snapshots", () => {
+    const { db, repo } = openTemp();
+    const profile = repo.listChannelProfiles()[0]!;
+    const channelDna = createDefaultChannelDna({ name: profile.name, styleId: "cute-daily-life-cartoon" });
+    repo.saveChannelProfile({ ...profile, channelDna });
+    const project = createFixtureProject({ profiles: [{ ...profile, channelDna }], selectedProfileId: profile.id, topic: "Red panda money lesson", format: "short", targetLanguage: "Vietnamese" });
+    repo.saveProject(project);
+    expect(repo.loadChannelProfile(profile.id)?.channelDna?.visualStyle.styleId).toBe("cute-daily-life-cartoon");
+    expect(repo.loadProject(project.id)?.setup.channelDnaSnapshot?.visualStyle.styleId).toBe("cute-daily-life-cartoon");
     db.close();
   });
 

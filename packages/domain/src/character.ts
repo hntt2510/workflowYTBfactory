@@ -1,3 +1,5 @@
+import type { ChannelDna } from "./channelDna";
+
 export const characterReferenceViews = [
   "hero",
   "half_body",
@@ -86,17 +88,18 @@ export function characterVersionIsApproved(version: CharacterVersion | undefined
 
 /** Resolve the requested character first, then the channel's active approved version. */
 export function resolveApprovedCharacterVersion(
-  profile: { characterVersions?: CharacterVersion[]; activeCharacterVersionId?: string } | undefined,
+  profile: { characterVersions?: CharacterVersion[]; activeCharacterVersionId?: string; channelDna?: ChannelDna } | undefined,
   requestedVersionId?: string
-): CharacterVersion | undefined {
+): (CharacterVersion & { channelDna?: ChannelDna }) | undefined {
   const versions = profile?.characterVersions ?? [];
+  const withChannelDna = (version: CharacterVersion | undefined): (CharacterVersion & { channelDna?: ChannelDna }) | undefined => version && profile?.channelDna ? { ...version, channelDna: profile.channelDna } : version;
   const requested = requestedVersionId ? versions.find((version) => version.id === requestedVersionId) : undefined;
-  if (characterVersionIsApproved(requested)) return requested;
+  if (characterVersionIsApproved(requested)) return withChannelDna(requested);
   const active = profile?.activeCharacterVersionId
     ? versions.find((version) => version.id === profile.activeCharacterVersionId)
     : undefined;
-  if (characterVersionIsApproved(active)) return active;
-  return versions.find((version) => characterVersionIsApproved(version));
+  if (characterVersionIsApproved(active)) return withChannelDna(active);
+  return withChannelDna(versions.find((version) => characterVersionIsApproved(version)));
 }
 
 export function characterReferenceViewsForCount(count = 5): CharacterReferenceView[] {

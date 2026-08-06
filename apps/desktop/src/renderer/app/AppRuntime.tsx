@@ -173,7 +173,7 @@ export function AppRuntime() {
 
   const profiles = bootstrap.profiles;
   const projectSummaries = bootstrap.projects;
-  const selectedProfile = selectedProject ? profiles.find((profile) => profile.id === selectedProject.profileId) : undefined;
+  const selectedProfile = selectedProject?.setup.channelId === null ? undefined : selectedProject ? profiles.find((profile) => profile.id === selectedProject.profileId) : undefined;
 
   return (
     <AppShell collapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)} route={route} selectedProject={selectedProject} selectedProfile={selectedProfile} projects={projectSummaries} queue={bootstrap.queue} onOpenProject={openProject} setRoute={navigate}>

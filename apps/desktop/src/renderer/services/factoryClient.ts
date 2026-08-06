@@ -7,7 +7,7 @@ import {
   type ChannelRouteDecision,
   type FactoryProject
 } from "@lsf/domain";
-import type { ChannelProfile } from "@lsf/domain";
+import type { ChannelDna, ChannelProfile } from "@lsf/domain";
 import type {
   BootstrapData,
   GenerateLocalTtsInput,
@@ -184,6 +184,11 @@ function webFallback(): LongShortFactoryApi {
       };
     },
     async listChannelProfiles() { return seedChannelProfiles; },
+    async saveChannelDna(input: { profileId: string; channelDna: ChannelDna }): Promise<ChannelProfile> {
+      const profile = seedChannelProfiles.find((candidate) => candidate.id === input.profileId);
+      if (!profile) throw new Error("Channel profile not found.");
+      return { ...profile, channelDna: input.channelDna };
+    },
     async generateCharacterPack(): Promise<ChannelProfile> { throw new Error("Character generation requires Electron main process."); },
     async retryCharacterReference(): Promise<ChannelProfile> { throw new Error("Character generation requires Electron main process."); },
     async uploadCharacterReference(): Promise<ChannelProfile> { throw new Error("Character reference upload requires Electron main process."); },
@@ -549,6 +554,7 @@ function toSummary(project: FactoryProject): ProjectSummary {
     id: project.id,
     topic: project.topic,
     profileId: project.profileId,
+    ...(project.setup.channelId !== undefined ? { channelId: project.setup.channelId } : {}),
     format: project.format,
     projectName: project.setup.projectName,
     targetLanguage: project.setup.language,

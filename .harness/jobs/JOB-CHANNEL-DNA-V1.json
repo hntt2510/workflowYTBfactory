@@ -1,0 +1,76 @@
+{
+  "jobId": "JOB-CHANNEL-DNA-V1",
+  "type": "long",
+  "title": "Channel DNA and style-aware creator workspace",
+  "status": "planned",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Add backward-compatible Channel DNA profiles, deterministic style recommendations, channel-scoped characters/assets, project channel snapshots, and typed Channels UI without changing the legacy production pipeline.",
+  "businessContext": "Creators need one reusable channel identity and visual grammar so the same topic produces consistent characters, assets, pacing, and storyboard direction across projects.",
+  "allowedPaths": [
+    ".harness/jobs/JOB-CHANNEL-DNA-V1.json",
+    "packages/domain/src/channelDna.ts",
+    "packages/domain/src/types.ts",
+    "packages/domain/src/character.ts",
+    "packages/domain/src/seedProfiles.ts",
+    "packages/domain/src/index.ts",
+    "packages/domain/src/ipcSchemas.ts",
+    "packages/domain/src/pipeline.ts",
+    "packages/domain/src/visualRouter.ts",
+    "packages/domain/src/styleSkills.ts",
+    "packages/domain/test/channelDna.test.ts",
+    "packages/domain/test/ipcSchemas.test.ts",
+    "packages/domain/test/visualRouter.test.ts",
+    "packages/db/src/projectRepository.ts",
+    "packages/db/test/persistence.test.ts",
+    "apps/desktop/src/main/main.ts",
+    "apps/desktop/src/main/assetConceptService.ts",
+    "apps/desktop/src/main/assetConceptService.test.ts",
+    "apps/desktop/src/main/outlineService.ts",
+    "apps/desktop/src/main/promptPreparationService.ts",
+    "apps/desktop/src/main/promptPreparationService.test.ts",
+    "apps/desktop/src/preload/preload.cjs",
+    "apps/desktop/src/renderer/types.ts",
+    "apps/desktop/src/renderer/services/factoryClient.ts",
+    "apps/desktop/src/renderer/navigation.ts",
+    "apps/desktop/src/renderer/layouts/AppShell.tsx",
+    "apps/desktop/src/renderer/app/AppRuntime.tsx",
+    "apps/desktop/src/renderer/routes/RouteScreen.tsx",
+    "apps/desktop/src/renderer/features/projects/CreateScreens.tsx",
+    "apps/desktop/src/renderer/features/settings/ChannelProfilesScreen.tsx"
+    ,"apps/desktop/src/renderer/navigation.test.ts"
+  ],
+  "forbiddenPaths": [
+    "packages/providers/**",
+    "packages/generation-queue/**",
+    "python/capcut_bridge/**",
+    "OmniVoice/**",
+    "docs/product/acceptance-criteria.md",
+    "docs/product/open-questions.md"
+  ],
+  "dependencies": [
+    "character-first visual workflow V1",
+    "runtime output and character consistency V1.1",
+    "existing typed preload IPC and SQLite JSON persistence"
+  ],
+  "acceptanceCriteria": [
+    "The permanent sidebar exposes Home, Projects, Channels, Asset Library, and Settings while legacy route hashes remain valid.",
+    "Channel profiles persist backward-compatible DNA groups for identity, content direction, visual style, characters, assets, and production defaults.",
+    "The style catalog contains all eight approved styles and deterministic topic/style/content-direction recommendations distinguish editorial explainer from cute daily-life output.",
+    "Project creation can select a channel or explicitly choose no channel and stores a resolved Channel DNA snapshot without breaking legacy projects.",
+    "Character, asset concepts, visual routing, prompt preparation, and project build inputs can consume the stored Channel DNA snapshot.",
+    "Typed preload IPC validates Channel DNA updates and renderer uses only the typed API.",
+    "Focused domain, persistence, service, typecheck, and diff checks pass."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run packages/domain/test/channelDna.test.ts packages/domain/test/ipcSchemas.test.ts packages/domain/test/visualRouter.test.ts packages/db/test/persistence.test.ts apps/desktop/src/main/assetConceptService.test.ts apps/desktop/src/main/promptPreparationService.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": [
+    "A migration would risk existing saved project data or user-uploaded files.",
+    "A required provider capability cannot be represented by deterministic local metadata and prompts."
+  ]
+}

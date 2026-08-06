@@ -24,6 +24,7 @@ import {
   createFixtureProject,
   characterVersionIsApproved,
   resolveApprovedCharacterVersion,
+  normalizeChannelDna,
   createStageAttention,
   addCompetitorReferenceRequestSchema,
   addCompetitorReferenceResponseSchema,
@@ -204,6 +205,7 @@ import {
   channelRouteInputSchema,
   channelProfilesResponseSchema,
   channelProfileResponseSchema,
+  saveChannelDnaRequestSchema,
   characterPackRequestSchema,
   characterVersionSchema,
   characterVersionRequestSchema,
@@ -216,7 +218,7 @@ import {
   assetConceptsOutputSchema,
   prepareExistingScript
 } from "@lsf/domain";
-import type { ChannelProfile, CharacterReferenceView, CharacterVersion, CompetitorReference, FactoryProject, ReferenceSetState, StageAttention, WorkflowArtifact, WorkflowStageStatus } from "@lsf/domain";
+import type { ChannelDna, ChannelProfile, CharacterReferenceView, CharacterVersion, CompetitorReference, FactoryProject, ReferenceSetState, StageAttention, WorkflowArtifact, WorkflowStageStatus } from "@lsf/domain";
 import { PersistentGenerationQueue } from "@lsf/generation-queue";
 import { NineRouterClient } from "@lsf/providers";
 import { listNineRouterModels } from "./nineRouterModelService";
@@ -2308,6 +2310,7 @@ ipcMain.handle("fixture-project", (_event, input: unknown) => {
     format: request.format,
     targetLanguage: request.targetLanguage,
     ...(request.selectedProfileId ? { selectedProfileId: request.selectedProfileId } : {}),
+    ...(request.channelId ? { channelId: request.channelId } : {}),
     profiles: projectRepository.listChannelProfiles(),
     ...(request.targetDuration ? { targetDuration: request.targetDuration } : {}),
     ...(request.projectName ? { projectName: request.projectName } : {}),
@@ -2513,6 +2516,15 @@ ipcMain.handle("get-reference-change-impact", () => referenceChangeImpactRespons
 }));
 
 ipcMain.handle("list-channel-profiles", () => channelProfilesResponseSchema.parse(projectRepository.listChannelProfiles()));
+
+ipcMain.handle("save-channel-dna", (_event, input: unknown) => {
+  const request = saveChannelDnaRequestSchema.parse(input);
+  const profile = projectRepository.loadChannelProfile(request.profileId);
+  if (!profile) throw new Error("Channel profile not found.");
+  const nextProfile: ChannelProfile = { ...profile, channelDna: normalizeChannelDna(request.channelDna as unknown as ChannelDna) };
+  projectRepository.saveChannelProfile(nextProfile);
+  return channelProfileResponseSchema.parse(nextProfile);
+});
 
 ipcMain.handle("generate-character-pack", async (_event, input: unknown) => {
   const request = characterPackRequestSchema.parse(input);
@@ -4093,6 +4105,7 @@ ipcMain.handle("run-asset-concepts", async (_event, input: unknown) => {
       const result = await runAssetConcepts({
       shots: routing.shots.map((shot) => ({ id: shot.id, purpose: shot.purpose, visualMode: shot.visualMode, ...(shot.semanticBeat ? { semanticBeat: shot.semanticBeat } : {}), subjectAction: shot.subjectAction, startState: shot.startState, endState: shot.endState })),
       character,
+      ...(project.setup.channelDnaSnapshot ? { channelDna: project.setup.channelDnaSnapshot } : {}),
       manualMode: project.setup.visualWorkflow === "character_first",
       credentialStore,
       certificationStore: textCertificationStore
@@ -4960,7 +4973,8 @@ ipcMain.handle("run-timeline-assembly", (_event, input: unknown) => {
     const asset = approvedAssetId ? approvedAssets.get(approvedAssetId) : undefined;
     if (!asset || !approvedAssetId) throw new Error(`Approved asset is missing for shot ${shot.id}.`);
     assertCurrentApprovedAsset(asset, shot.id);
-    return { id: `visual-${shot.id}`, track: "primary_visual" as const, sourceId: approvedAssetId, startFrame: shot.startFrame, durationFrames: shot.durationFrames, fps, ...(shot.motion ? { motion: shot.motion } : {}) };
+    const motion = shot.motion ?? (project.setup.channelDnaSnapshot ? { effect: project.setup.channelDnaSnapshot.productionDefaults.defaultMotion, intensity: "subtle" as const, rationale: "Channel DNA production default" } : undefined);
+    return { id: `visual-${shot.id}`, track: "primary_visual" as const, sourceId: approvedAssetId, startFrame: shot.startFrame, durationFrames: shot.durationFrames, fps, ...(motion ? { motion } : {}) };
   });
   const visualEnd = visuals.reduce((end, item) => Math.max(end, item.startFrame + item.durationFrames), 0);
   for (let index = 1; index < visuals.length; index += 1) if (visuals[index - 1]!.startFrame + visuals[index - 1]!.durationFrames !== visuals[index]!.startFrame) throw new Error("Primary visual track contains a gap or overlap.");

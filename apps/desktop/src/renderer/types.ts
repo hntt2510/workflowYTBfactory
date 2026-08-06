@@ -1,9 +1,10 @@
-import type { AssetConcept, ChannelProfile, ChannelRouteDecision, CharacterReferenceView, CharacterVersion, CompetitorDnaOutput, CompetitorReference, FactoryProject, CleanedTranscriptOutput, ReferenceSegmentationOutput, StageEligibility, SubtitlePreset, WorkflowStageStatus } from "@lsf/domain";
+import type { AssetConcept, ChannelDna, ChannelProfile, ChannelRouteDecision, ChannelStyleId, CharacterReferenceView, CharacterVersion, CompetitorDnaOutput, CompetitorReference, FactoryProject, CleanedTranscriptOutput, ReferenceSegmentationOutput, StageEligibility, SubtitlePreset, WorkflowStageStatus } from "@lsf/domain";
 
 export interface ProjectSummary {
   id: string;
   topic: string;
   profileId: string;
+  channelId?: string | null;
   format: "long" | "short";
   projectName: string;
   targetLanguage: string;
@@ -338,6 +339,7 @@ export interface ImageModelCertificationResponse { status: "not_tested" | "verif
 export interface LongShortFactoryApi {
   bootstrap: () => Promise<BootstrapData>;
   listChannelProfiles: () => Promise<ChannelProfile[]>;
+  saveChannelDna: (input: { profileId: string; channelDna: ChannelDna }) => Promise<ChannelProfile>;
   generateCharacterPack: (input: CharacterGenerationInput) => Promise<ChannelProfile>;
   retryCharacterReference: (input: { profileId: string; versionId: string; view: CharacterReferenceView }) => Promise<ChannelProfile>;
   uploadCharacterReference: (input: { profileId: string; versionId: string; view: CharacterReferenceView }) => Promise<ChannelProfile>;
@@ -373,6 +375,7 @@ export interface LongShortFactoryApi {
     format: "long" | "short";
     targetLanguage: string;
     selectedProfileId?: string;
+    channelId?: string | "none";
   }) => Promise<ChannelRouteDecision>;
   fixtureProject: (input: {
     topic: string;
@@ -385,7 +388,7 @@ export interface LongShortFactoryApi {
     workflowMode?: "guided" | "semi_automatic" | "full_automatic";
     inputMode?: "topic" | "existing_script" | "reference";
     aspectRatio?: "16:9" | "9:16" | "1:1";
-    visualStyle?: "vox-documentary";
+    visualStyle?: "vox-documentary" | ChannelStyleId;
     voiceId?: string;
     outputResolution?: "1080p" | "720p";
     sourceScript?: string;
