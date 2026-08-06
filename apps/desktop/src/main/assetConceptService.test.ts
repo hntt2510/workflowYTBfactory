@@ -62,6 +62,34 @@ describe("asset concept service", () => {
     db.close();
   });
 
+  it("maps concepts to approved channel assets and rejects unknown asset references", async () => {
+    const { db, credentialStore, certificationStore } = await setupProvider();
+    const channelDna = createDefaultChannelDna({ styleId: "minimal-infographic" });
+    channelDna.assets = [{ id: "cash-stack", name: "Cash stack", kind: "prop", description: "A neat stack of cash.", tags: ["cash", "money"], approved: true }];
+    const profile = buildChannelPromptProfile({ channelId: "insurance-made-simple", channelDna, niche: "Insurance education" });
+    const promptContext = resolveChannelPromptContext({ channelId: profile.channelId, profile, taskType: "director" });
+    let request = "";
+    const concept = { id: "asset-1", shotId: "shot-1", semanticBeat: "Cash rises", kind: "object" as const, role: "Money stack", description: "A rising stack of money.", visualConstraints: ["clean"], colorPalette: ["green"], motionIntent: "slide up", needsReferenceImage: false, referenceAssetId: "cash-stack" };
+    await expect(runAssetConcepts({
+      shots: [{ id: "shot-1", purpose: "Explain cash flow", visualMode: "ai_image", semanticBeat: "Cash rises", subjectAction: "increase", startState: {}, endState: {} }],
+      character,
+      promptContext,
+      credentialStore,
+      certificationStore,
+      createClient: () => ({ createResponseText: async ({ input }) => { request = input; return { text: JSON.stringify({ concepts: [concept] }) }; } })
+    })).resolves.toMatchObject({ output: { concepts: [{ referenceAssetId: "cash-stack" }] } });
+    expect(request).toContain("Cash stack");
+    await expect(runAssetConcepts({
+      shots: [{ id: "shot-1", purpose: "Explain cash flow", visualMode: "ai_image", subjectAction: "increase", startState: {}, endState: {} }],
+      character,
+      promptContext,
+      credentialStore,
+      certificationStore,
+      createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify({ concepts: [{ ...concept, referenceAssetId: "other-channel-asset" }] }) }) })
+    })).rejects.toMatchObject({ category: "invalid_output" });
+    db.close();
+  });
+
   it("rejects an output that omits a shot", async () => {
     const { db, credentialStore, certificationStore } = await setupProvider();
     await expect(runAssetConcepts({

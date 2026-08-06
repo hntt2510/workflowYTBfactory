@@ -27,15 +27,16 @@ type AssetConceptShot = {
 };
 
 function buildAssetConceptRequest(shots: AssetConceptShot[], character: CharacterVersion, channelDna?: ChannelDna, promptContext?: ResolvedChannelPromptContext): string {
-  return `Create a concise visual asset concept for every shot. Use only the resolved channel asset grammar, palette, character identity, and motion grammar. Return strict JSON {"concepts":[...]}. Each concept must use exactly {"id":string,"shotId":string,"semanticBeat":string,"kind":"object"|"diagram"|"background"|"teacher_gesture"|"text_card","role":string,"description":string,"visualConstraints":string[],"colorPalette":string[],"motionIntent":string,"needsReferenceImage":boolean}. Use the same character identity across teaching gestures. Do not create final image prompts or invent assets outside this channel. Character lock: ${JSON.stringify({ name: character.name, persona: character.persona, invariantTraits: character.invariantTraits, prohibitedChanges: character.prohibitedChanges })}. Channel DNA: ${JSON.stringify(channelDna)}. Resolved Prompt Context: ${JSON.stringify(promptContext)}. Shots: ${JSON.stringify(shots)}`;
+  return `Create a concise visual asset concept for every shot. Use only the resolved channel asset grammar, palette, character identity, and motion grammar. Return strict JSON {"concepts":[...]}. Each concept must use exactly {"id":string,"shotId":string,"semanticBeat":string,"kind":"object"|"diagram"|"background"|"teacher_gesture"|"text_card","role":string,"description":string,"visualConstraints":string[],"colorPalette":string[],"motionIntent":string,"needsReferenceImage":boolean,"referenceAssetId"?:string}. Set referenceAssetId only when the concept uses one of the approved channel assets listed below; otherwise omit it. Use the same character identity across teaching gestures. Do not create final image prompts or invent assets outside this channel. Character lock: ${JSON.stringify({ name: character.name, persona: character.persona, invariantTraits: character.invariantTraits, prohibitedChanges: character.prohibitedChanges })}. Channel DNA: ${JSON.stringify(channelDna)}. Approved channel assets: ${JSON.stringify(promptContext?.assets ?? [])}. Resolved Prompt Context: ${JSON.stringify(promptContext)}. Shots: ${JSON.stringify(shots)}`;
 }
 
-function parseAssetConceptBatch(text: string, shotIds: ReadonlySet<string>): ReturnType<typeof assetConceptsOutputSchema.parse>["concepts"] {
+function parseAssetConceptBatch(text: string, shotIds: ReadonlySet<string>, allowedAssetIds: ReadonlySet<string>): ReturnType<typeof assetConceptsOutputSchema.parse>["concepts"] {
   let parsed: unknown;
   try { parsed = JSON.parse(text.trim()); } catch { throw new AssetConceptError("invalid_json", "Asset Concepts returned invalid JSON."); }
   const result = assetConceptsOutputSchema.safeParse(parsed);
   if (!result.success) throw new AssetConceptError("invalid_output", "Asset Concepts returned an invalid structured output.");
   try { validateAssetConcepts(result.data.concepts, shotIds); } catch (error) { throw new AssetConceptError("invalid_output", error instanceof Error ? error.message : "Asset Concepts referenced an invalid shot."); }
+  if (result.data.concepts.some((concept) => concept.referenceAssetId && !allowedAssetIds.has(concept.referenceAssetId))) throw new AssetConceptError("invalid_output", "Asset Concepts referenced an asset outside the active channel profile.");
   if (result.data.concepts.length !== shotIds.size) throw new AssetConceptError("invalid_output", "Asset Concepts must return exactly one concept per shot.");
   return result.data.concepts;
 }
@@ -66,7 +67,8 @@ export async function runAssetConcepts(input: {
   } catch (error) {
     throw new AssetConceptError("provider_failed", error instanceof NineRouterTextResponseError ? `Asset Concepts provider request failed: ${error.status}.` : "Asset Concepts provider request failed.");
   }
-  const concepts = responses.flatMap((response, index) => parseAssetConceptBatch(response.text, new Set(batches[index]!.map((shot) => shot.id))));
+  const allowedAssetIds = new Set(input.promptContext?.assets.map((asset) => asset.assetId) ?? []);
+  const concepts = responses.flatMap((response, index) => parseAssetConceptBatch(response.text, new Set(batches[index]!.map((shot) => shot.id)), allowedAssetIds));
   try { validateAssetConcepts(concepts, new Set(input.shots.map((shot) => shot.id))); } catch (error) { throw new AssetConceptError("invalid_output", error instanceof Error ? error.message : "Asset Concepts referenced an invalid shot."); }
   if (concepts.length !== input.shots.length) throw new AssetConceptError("invalid_output", "Asset Concepts must return exactly one concept per shot.");
   return { output: assetConceptsOutputSchema.parse({ concepts }), ...(responses.find((response) => response.returnedModelId)?.returnedModelId ? { returnedModelId: responses.find((response) => response.returnedModelId)!.returnedModelId } : {}) };
@@ -81,6 +83,7 @@ function deterministicAssetConcept(shot: AssetConceptShot, channelDna?: ChannelD
       : /background|room|office|street|environment/.test(text)
         ? "background"
         : "object";
+  const referenceAssetId = promptContext?.assets.find((asset) => [asset.name, ...asset.tags].some((term) => term && text.includes(term.toLowerCase())))?.assetId;
   return {
     id: `concept-${shot.id}`,
     shotId: shot.id,
@@ -91,6 +94,7 @@ function deterministicAssetConcept(shot: AssetConceptShot, channelDna?: ChannelD
     visualConstraints: ["Readable at the target aspect ratio", "Keep the visual focus aligned with the approved storyboard"],
     colorPalette: promptContext?.visualIdentity.palette.slice(0, 5) ?? channelDna?.visualStyle.palette.slice(0, 5) ?? ["warm coral accent", "charcoal", "cream"],
     motionIntent: `Use ${channelDna?.productionDefaults.defaultMotion ?? promptContext?.productionGrammar.preferredMotion[0] ?? "zoom_in"} with the channel motion grammar; do not invent a new action.`,
-    needsReferenceImage: false
+    needsReferenceImage: false,
+    ...(referenceAssetId ? { referenceAssetId } : {})
   };
 }
