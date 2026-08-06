@@ -55,11 +55,15 @@ export function planFfmpegPreviewCommand(input: {
   const bedLabel = group(bedLabels, "bed_mix");
   const sfxLabel = group(sfxLabels, "sfx_mix");
   let finalBedLabel = bedLabel;
+  let finalNarrationLabel = narrationLabel;
   if (bedLabel && narrationLabel) {
-    filterParts.push(`${bedLabel}${narrationLabel}sidechaincompress=threshold=0.04:ratio=8:attack=20:release=300:makeup=1[ducked_bed]`);
+    // The narration mix is needed both as the ducking sidechain and in the final mix.
+    filterParts.push(`${narrationLabel}asplit=2[narration_voice][narration_sidechain]`);
+    filterParts.push(`${bedLabel}[narration_sidechain]sidechaincompress=threshold=0.04:ratio=8:attack=20:release=300:makeup=1[ducked_bed]`);
+    finalNarrationLabel = "[narration_voice]";
     finalBedLabel = "[ducked_bed]";
   }
-  const mixedLabels = [narrationLabel, finalBedLabel, sfxLabel].filter((label): label is string => Boolean(label));
+  const mixedLabels = [finalNarrationLabel, finalBedLabel, sfxLabel].filter((label): label is string => Boolean(label));
   const timelineDurationSeconds = timelineDurationFrames / input.timeline.fps;
   const audioMix = `${mixedLabels.join("")}amix=inputs=${mixedLabels.length}:duration=longest:dropout_transition=0,apad=whole_dur=${timelineDurationSeconds.toFixed(6)},atrim=duration=${timelineDurationSeconds.toFixed(6)},asetpts=PTS-STARTPTS[a]`;
   filterParts.push(audioMix);

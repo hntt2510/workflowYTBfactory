@@ -788,7 +788,7 @@ function createWindow() {
 
 const creatorStudioFinalFixtureTopic = "Creator Studio final flow fixture";
 
-function seedCreatorStudioFinalFixture(): void {
+async function seedCreatorStudioFinalFixture(): Promise<void> {
   if (projectRepository.listProjects().some((project) => project.topic === creatorStudioFinalFixtureTopic)) return;
 
   const base = createFixtureProject({
@@ -813,7 +813,6 @@ function seedCreatorStudioFinalFixture(): void {
     mkdirSync(dirname(targetPath), { recursive: true });
     copyFileSync(join(fixtureRoot, sourceRelativePath), targetPath);
   };
-  copyFixture("creator-studio-v1.mp4", previewRelativeFilePath);
   copyFixture(join("audio", "subtitles.srt"), subtitleRelativeFilePath);
   copyFixture(join("frames", "001.png"), assetRelativeFilePath);
   copyFixture(join("audio", "voice-fixture.wav"), voiceRelativeFilePath);
@@ -821,6 +820,8 @@ function seedCreatorStudioFinalFixture(): void {
 
   const assetPath = resolveWorkspaceArtifactPath(assetRelativeFilePath);
   const voicePath = resolveWorkspaceArtifactPath(voiceRelativeFilePath);
+  const musicPath = resolveWorkspaceArtifactPath(musicRelativeFilePath);
+  const subtitlePath = resolveWorkspaceArtifactPath(subtitleRelativeFilePath);
   const assetBytes = readFileSync(assetPath);
   const voiceBytes = readFileSync(voicePath);
   const assetSha256 = createHash("sha256").update(assetBytes).digest("hex");
@@ -850,6 +851,18 @@ function seedCreatorStudioFinalFixture(): void {
       { id: "subtitles-creator-studio-final", track: "subtitles" as const, sourceId: subtitleRelativeFilePath, startFrame: 0, durationFrames: 300, fps: 30 }
     ]
   };
+  await renderPreview({
+    timeline,
+    outputPath: resolveWorkspaceArtifactPath(previewRelativeFilePath),
+    resolution: "1080p-vertical",
+    visualInputs: [{ filePath: assetPath, startFrame: 0, durationFrames: 300, motion }],
+    audioInputs: [
+      { filePath: voicePath, startFrame: 0, durationFrames: 300, kind: "narration" },
+      { filePath: musicPath, startFrame: 0, durationFrames: 300, kind: "music", volume: 0.15, loop: true }
+    ],
+    subtitleFilePath: subtitlePath,
+    subtitlePreset: "vox-clean"
+  });
   const narration = "Dòng tiền cho biết tiền đang đi vào và đi ra khỏi một doanh nghiệp như thế nào.";
   const scriptSections = [{
     id: sectionId,
@@ -1129,7 +1142,7 @@ app.whenReady().then(async () => {
       });
     }
   } else if (process.env.LSF_E2E_UI_MODE === "creator-studio-final") {
-    seedCreatorStudioFinalFixture();
+    await seedCreatorStudioFinalFixture();
   }
   const win = createWindow();
   if (process.env.LSF_E2E_UI_REPORT_PATH) {

@@ -53,4 +53,21 @@ describe("FFmpeg preview planning", () => {
     expect(plan.join(" ")).toContain("crop=1920:1080");
     expect(plan.join(" ")).toContain("(ih-oh)*0.8");
   });
+
+  it("splits narration before ducking a supplied music bed", () => {
+    const plan = planFfmpegPreviewCommand({
+      timeline,
+      outputPath: "preview.mp4",
+      resolution: "1080p-vertical",
+      visualInputs: [{ filePath: "asset.png", startFrame: 0, durationFrames: 30 }],
+      audioInputs: [
+        { filePath: "voice.wav", kind: "narration" },
+        { filePath: "music.wav", kind: "music", volume: 0.15, loop: true }
+      ]
+    });
+    const command = plan.join(" ");
+    expect(command).toContain("asplit=2[narration_voice][narration_sidechain]");
+    expect(command).toContain("[narration_sidechain]sidechaincompress");
+    expect(command).toContain("[narration_voice][ducked_bed]amix");
+  });
 });
