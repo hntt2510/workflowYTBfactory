@@ -1,5 +1,6 @@
+import { createHash } from "node:crypto";
 import type { ProviderCredentialStore, TextCertificationStore } from "@lsf/db";
-import { promptPreparationOutputSchema, resolveCharacterCompositionLock, type AssetConcept, type ChannelDna, type CharacterVersion, type ShotMotionPlan } from "@lsf/domain";
+import { promptPreparationOutputSchema, resolveChannelPromptContext, resolveCharacterCompositionLock, type AssetConcept, type ChannelDna, type CharacterVersion, type ResolvedChannelPromptContext, type ShotMotionPlan } from "@lsf/domain";
 import { NineRouterClient, NineRouterTextResponseError } from "@lsf/providers";
 import { loadNineRouterTextCertification } from "./nineRouterTextCertificationService";
 
@@ -9,15 +10,24 @@ export const promptPreparationBatchSize = 4;
 interface TextClient { createResponseText(input: { model: string; input: string; timeoutMs?: number }): Promise<{ text: string; returnedModelId?: string }>; }
 
 type PromptShot = { id: string; sceneId?: string; purpose?: string; durationFrames?: number; visualMode: string; framing: string; cameraAngle: string; cameraMovement: string; subjectAction: string; continuityRefs: string[]; semanticBeat?: string | undefined; assetConceptIds?: string[] | undefined; motion?: ShotMotionPlan | undefined };
+type PromptContextMetadata = { channelId: string; channelProfileVersion: number; projectSnapshotVersion: number; resolvedContextHash: string };
 
-export async function runPromptPreparation(input: { shots: PromptShot[]; aspectRatio: "16:9" | "9:16"; character?: CharacterVersion | undefined; channelDna?: ChannelDna; assetConcepts?: AssetConcept[] | undefined; manualMode?: boolean; frameNumbersByShot?: ReadonlyMap<string, string>; credentialStore: ProviderCredentialStore; certificationStore: TextCertificationStore; createClient?: (config: { baseUrl: string; apiKey: string }) => TextClient }) {
+export async function runPromptPreparation(input: { shots: PromptShot[]; aspectRatio: "16:9" | "9:16"; character?: CharacterVersion | undefined; channelDna?: ChannelDna; assetConcepts?: AssetConcept[] | undefined; promptContext?: ResolvedChannelPromptContext; promptContextMetadata?: PromptContextMetadata; manualMode?: boolean; frameNumbersByShot?: ReadonlyMap<string, string>; credentialStore: ProviderCredentialStore; certificationStore: TextCertificationStore; createClient?: (config: { baseUrl: string; apiKey: string }) => TextClient }) {
   const channelDna = input.channelDna ?? (input.character as (CharacterVersion & { channelDna?: ChannelDna }) | undefined)?.channelDna;
+  const embeddedProfile = (input.character as (CharacterVersion & { channelPromptProfile?: Parameters<typeof resolveChannelPromptContext>[0]["profile"] }) | undefined)?.channelPromptProfile;
+  const promptContext = input.promptContext ?? (embeddedProfile ? resolveChannelPromptContext({ channelId: embeddedProfile.channelId, profile: embeddedProfile, taskType: "scene_image_generation", projectSnapshotVersion: embeddedProfile.version }) : undefined);
+  const promptContextMetadata = input.promptContextMetadata ?? (promptContext ? {
+    channelId: promptContext.channelId,
+    channelProfileVersion: promptContext.profileVersion,
+    projectSnapshotVersion: promptContext.projectSnapshotVersion,
+    resolvedContextHash: createHash("sha256").update(JSON.stringify(promptContext)).digest("hex")
+  } : undefined);
   const imageShots = input.shots.filter((shot) => ["ai_image", "ai_video", "stock_image", "stock_video", "manual_upload", "uploaded"].includes(shot.visualMode));
   if (input.manualMode) {
-    const prompts = imageShots.map((shot) => localPromptForShot(shot, input.aspectRatio, input.character, input.assetConcepts ?? [], channelDna));
+    const prompts = imageShots.map((shot) => localPromptForShot(shot, input.aspectRatio, input.character, input.assetConcepts ?? [], channelDna, promptContext, promptContextMetadata));
     const output = promptPreparationOutputSchema.parse({
       prompts,
-      scenePrompts: compileScenePromptPackages(input.shots, prompts, input.aspectRatio, input.character, input.assetConcepts ?? [], input.frameNumbersByShot)
+      scenePrompts: compileScenePromptPackages(input.shots, prompts, input.aspectRatio, input.character, input.assetConcepts ?? [], input.frameNumbersByShot, promptContext, promptContextMetadata)
     });
     return { output };
   }
@@ -31,7 +41,7 @@ export async function runPromptPreparation(input: { shots: PromptShot[]; aspectR
   const batches = Array.from({ length: Math.ceil(aiShots.length / promptPreparationBatchSize) }, (_, index) => aiShots.slice(index * promptPreparationBatchSize, (index + 1) * promptPreparationBatchSize));
   let responses: Array<{ text: string; returnedModelId?: string }>;
   try {
-    responses = await Promise.all(batches.map((batch) => client.createResponseText({ model: settings.textModel!, timeoutMs: promptPreparationTimeoutMs, input: buildPromptRequest(batch, input.aspectRatio, input.character, input.assetConcepts, channelDna) })));
+    responses = await Promise.all(batches.map((batch) => client.createResponseText({ model: settings.textModel!, timeoutMs: promptPreparationTimeoutMs, input: buildPromptRequest(batch, input.aspectRatio, input.character, input.assetConcepts, channelDna, promptContext) })));
   } catch (error) {
     throw new PromptPreparationError("provider_failed", error instanceof NineRouterTextResponseError ? `Prompt Preparation provider request failed: ${error.status}.` : "Prompt Preparation provider request failed.");
   }
@@ -43,24 +53,25 @@ export async function runPromptPreparation(input: { shots: PromptShot[]; aspectR
   for (const concept of input.assetConcepts ?? []) conceptsByShot.set(concept.shotId, [...(conceptsByShot.get(concept.shotId) ?? []), concept]);
   const finalPrompts = prompts.map((prompt) => {
       const shot = shotMap.get(prompt.shotId);
-      const contract = promptContractSuffix(input.character, conceptsByShot.get(prompt.shotId) ?? [], channelDna);
+      const contract = promptContractSuffix(input.character, conceptsByShot.get(prompt.shotId) ?? [], channelDna, promptContext);
       return {
         ...prompt,
         positivePrompt: appendPromptContract(prompt.positivePrompt, contract),
         ...(shot?.semanticBeat ? { semanticBeat: shot.semanticBeat } : {}),
         ...(shot?.assetConceptIds?.length ? { assetConceptIds: shot.assetConceptIds } : {}),
-        ...(shot?.motion ? { motion: shot.motion } : {})
+        ...(shot?.motion ? { motion: shot.motion } : {}),
+        ...(promptContextMetadata ? { promptContext: promptContextMetadata } : {})
       };
     });
   const output = promptPreparationOutputSchema.parse({
     prompts: finalPrompts,
-    scenePrompts: compileScenePromptPackages(input.shots, finalPrompts, input.aspectRatio, input.character, input.assetConcepts ?? [], input.frameNumbersByShot)
+    scenePrompts: compileScenePromptPackages(input.shots, finalPrompts, input.aspectRatio, input.character, input.assetConcepts ?? [], input.frameNumbersByShot, promptContext, promptContextMetadata)
   });
   const returnedModelId = responses.find((response) => response.returnedModelId)?.returnedModelId;
   return { output, ...(returnedModelId ? { returnedModelId } : {}) };
 }
 
-function promptContractSuffix(character: CharacterVersion | undefined, concepts: AssetConcept[], channelDna?: ChannelDna): string {
+function promptContractSuffix(character: CharacterVersion | undefined, concepts: AssetConcept[], channelDna?: ChannelDna, promptContext?: ResolvedChannelPromptContext): string {
   const parts: string[] = [];
   if (character) {
     const composition = resolveCharacterCompositionLock(character);
@@ -70,6 +81,7 @@ function promptContractSuffix(character: CharacterVersion | undefined, concepts:
     parts.push(`Approved asset mapping: ${concepts.map((concept) => `${concept.id} ${concept.kind} ${concept.role}: ${concept.description}`).join(" | ")}`);
   }
   if (channelDna) parts.push(`Channel DNA: style ${channelDna.visualStyle.name}; scene grammar ${channelDna.visualStyle.sceneGrammar.join(" -> ")}; motion grammar ${channelDna.visualStyle.motionGrammar.join(", ")}; palette ${channelDna.visualStyle.palette.join(", ")}; content pillars ${channelDna.contentDirection.pillars.join(" | ")}.`);
+  if (promptContext) parts.push(`Resolved channel context ${promptContext.channelId} v${promptContext.projectSnapshotVersion}: style ${promptContext.visualStyle}; lane ${promptContext.contentLane}; characters ${promptContext.characters.map((item) => item.name).join(", ") || "none"}; assets ${promptContext.assets.map((item) => item.name).join(", ") || "none"}; locks ${promptContext.continuityLocks.join(" | ")}; forbidden ${promptContext.forbiddenChanges.join(" | ")}.`);
   return parts.join(" ");
 }
 
@@ -85,36 +97,39 @@ function buildPromptRequest(
   aspectRatio: "16:9" | "9:16",
   character: CharacterVersion | undefined,
   assetConcepts: AssetConcept[] | undefined,
-  channelDna?: ChannelDna
+  channelDna?: ChannelDna,
+  promptContext?: ResolvedChannelPromptContext
 ): string {
   const shotIds = new Set(shots.map((shot) => shot.id));
   const concepts = (assetConcepts ?? []).filter((concept) => shotIds.has(concept.shotId));
   const composition = character ? resolveCharacterCompositionLock(character) : undefined;
-  return `Prepare final image prompts only for approved AI-routed shots. Return strict JSON {"prompts":[...]}. Each prompt must use exactly {"shotId":string,"promptVersionId":string,"positivePrompt":string,"negativePrompt":string,"aspectRatio":"16:9"|"9:16","continuityConstraints":string[],"prohibitedElements":string[]}. Put character identity, subject, approved asset concept, Channel DNA style grammar, action, semantic beat, framing, camera, lighting, mood, composition lock, and aspect ratio in positivePrompt; keep negativePrompt separate. Do not create assets or imitate copyrighted characters. Character lock: ${JSON.stringify(character ? { name: character.name, persona: character.persona, invariantTraits: character.invariantTraits, prohibitedChanges: character.prohibitedChanges, composition } : undefined)}. Channel DNA: ${JSON.stringify(channelDna)}. Asset concepts: ${JSON.stringify(concepts)}. Required aspect ratio: ${aspectRatio}. Shots: ${JSON.stringify(shots)}\n`;
+  return `Prepare final image prompts only for approved AI-routed shots. Return strict JSON {"prompts":[...]}. Each prompt must use exactly {"shotId":string,"promptVersionId":string,"positivePrompt":string,"negativePrompt":string,"aspectRatio":"16:9"|"9:16","continuityConstraints":string[],"prohibitedElements":string[]}. Put only the resolved channel context, character identity, subject, approved asset concept, action, semantic beat, framing, camera, lighting, mood, composition lock, and aspect ratio in positivePrompt; keep negativePrompt separate. Do not create assets or imitate copyrighted characters. Character lock: ${JSON.stringify(character ? { name: character.name, persona: character.persona, invariantTraits: character.invariantTraits, prohibitedChanges: character.prohibitedChanges, composition } : undefined)}. Channel DNA: ${JSON.stringify(channelDna)}. Resolved Prompt Context: ${JSON.stringify(promptContext)}. Asset concepts: ${JSON.stringify(concepts)}. Required aspect ratio: ${aspectRatio}. Shots: ${JSON.stringify(shots)}\n`;
 }
 
-function localPromptForShot(shot: PromptShot, aspectRatio: "16:9" | "9:16", character: CharacterVersion | undefined, assetConcepts: AssetConcept[], channelDna?: ChannelDna) {
+function localPromptForShot(shot: PromptShot, aspectRatio: "16:9" | "9:16", character: CharacterVersion | undefined, assetConcepts: AssetConcept[], channelDna?: ChannelDna, promptContext?: ResolvedChannelPromptContext, promptContextMetadata?: PromptContextMetadata) {
   const conceptText = assetConcepts.filter((concept) => concept.shotId === shot.id).map((concept) => `${concept.role}: ${concept.description}`).join("; ");
   const composition = character ? resolveCharacterCompositionLock(character) : undefined;
   const characterText = character ? `Use the locked teacher identity ${character.name}: ${character.persona.appearance}; preserve ${character.invariantTraits.join(", ")}.` : "Use the approved visual continuity bible.";
   const styleText = channelDna ? `Channel DNA style: ${channelDna.visualStyle.name}. Scene grammar: ${channelDna.visualStyle.sceneGrammar.join(", ")}. Motion grammar: ${channelDna.visualStyle.motionGrammar.join(", ")}. Palette: ${channelDna.visualStyle.palette.join(", ")}.` : "Use the approved channel visual grammar.";
+  const contextText = promptContext ? `Resolved channel context ${promptContext.channelId} v${promptContext.projectSnapshotVersion}: lane ${promptContext.contentLane}; style ${promptContext.visualStyle}; approved characters ${promptContext.characters.map((item) => item.name).join(", ") || "none"}; approved assets ${promptContext.assets.map((item) => `${item.name}: ${item.promptDescription}`).join(" | ") || "none"}; locks ${promptContext.continuityLocks.join(" | ")}; forbidden ${promptContext.forbiddenChanges.join(" | ")}.` : "Use only the selected channel context; never borrow another channel's identity.";
   const compositionText = composition ? `Composition lock: ${composition.aspectRatio} canvas; ${composition.subjectAnchor}; subject box x=${composition.subjectBox.x}, y=${composition.subjectBox.y}, width=${composition.subjectBox.width}, height=${composition.subjectBox.height}; ${composition.cameraDistance}; ${composition.headroom}; keep the safe zone x=${composition.safeZone.x}, y=${composition.safeZone.y}, width=${composition.safeZone.width}, height=${composition.safeZone.height} clear for diagrams and subtitles.` : "Keep the approved composition and safe zones unchanged.";
   const continuity = shot.continuityRefs.length ? `Continuity references: ${shot.continuityRefs.join(", ")}.` : "Keep continuity with the previous storyboard frame.";
   return {
     shotId: shot.id,
     promptVersionId: `prompt-${shot.id}-manual-v1`,
-    positivePrompt: `${compositionText} ${styleText} ${characterText} Create the approved storyboard frame for ${shot.purpose ?? shot.id}. ${shot.semanticBeat ?? "Follow the semantic beat exactly."} Subject action: ${shot.subjectAction}. Framing: ${shot.framing}; camera: ${shot.cameraAngle}; movement intent: ${shot.cameraMovement}. ${conceptText ? `Approved asset concept: ${conceptText}.` : "Use only the approved scene asset direction."} ${continuity} Output one clean ${aspectRatio} image with no text, logo, contact sheet, or watermark unless explicitly required by the storyboard.`,
+    positivePrompt: `${compositionText} ${styleText} ${contextText} ${characterText} Create the approved storyboard frame for ${shot.purpose ?? shot.id}. ${shot.semanticBeat ?? "Follow the semantic beat exactly."} Subject action: ${shot.subjectAction}. Framing: ${shot.framing}; camera: ${shot.cameraAngle}; movement intent: ${shot.cameraMovement}. ${conceptText ? `Approved asset concept: ${conceptText}.` : "Use only the approved scene asset direction."} ${continuity} Output one clean ${aspectRatio} image with no text, logo, contact sheet, or watermark unless explicitly required by the storyboard.`,
     negativePrompt: "No identity drift, wardrobe drift, extra limbs, inconsistent framing, invented props, contact sheet, logo, watermark, or unrelated text.",
     aspectRatio,
     continuityConstraints: [continuity, "Preserve approved character and environment continuity."],
     prohibitedElements: ["identity drift", "unapproved text or logo", "contact sheet"],
     ...(shot.semanticBeat ? { semanticBeat: shot.semanticBeat } : {}),
     ...(shot.assetConceptIds?.length ? { assetConceptIds: shot.assetConceptIds } : {}),
-    ...(shot.motion ? { motion: shot.motion } : {})
+    ...(shot.motion ? { motion: shot.motion } : {}),
+    ...(promptContextMetadata ? { promptContext: promptContextMetadata } : {})
   };
 }
 
-function compileScenePromptPackages(shots: PromptShot[], prompts: ReturnType<typeof promptPreparationOutputSchema.parse>["prompts"], aspectRatio: "16:9" | "9:16", character: CharacterVersion | undefined, assetConcepts: AssetConcept[], frameNumbersByShot?: ReadonlyMap<string, string>) {
+function compileScenePromptPackages(shots: PromptShot[], prompts: ReturnType<typeof promptPreparationOutputSchema.parse>["prompts"], aspectRatio: "16:9" | "9:16", character: CharacterVersion | undefined, assetConcepts: AssetConcept[], frameNumbersByShot?: ReadonlyMap<string, string>, promptContext?: ResolvedChannelPromptContext, promptContextMetadata?: PromptContextMetadata) {
   const promptByShot = new Map(prompts.map((prompt) => [prompt.shotId, prompt]));
   const groups = new Map<string, PromptShot[]>();
   for (const shot of shots) {
@@ -146,8 +161,9 @@ function compileScenePromptPackages(shots: PromptShot[], prompts: ReturnType<typ
     const composition = character ? resolveCharacterCompositionLock(character) : undefined;
     const compositionLock = composition ? ` Keep the teacher in the locked ${composition.subjectAnchor} position within normalized box x=${composition.subjectBox.x}, y=${composition.subjectBox.y}, width=${composition.subjectBox.width}, height=${composition.subjectBox.height}; preserve ${composition.headroom} and leave the safe zone x=${composition.safeZone.x}, y=${composition.safeZone.y}, width=${composition.safeZone.width}, height=${composition.safeZone.height} for explanatory assets and subtitles.` : " Keep the approved composition and subtitle safe zone unchanged.";
     const frameInstructions = frameManifest.map((frame) => frame.assetStrategy === "REUSE_EXISTING" ? `Frame ${frame.displayNumber} (${frame.role}, REUSE_EXISTING): ${frame.delta}` : `Frame ${frame.displayNumber} (${frame.role}, save as ${frame.expectedFilename}): ${frame.delta} Attach references in this order: ${frame.referenceInstructions.join(" ")}`);
-    const promptText = `Create scene ${sceneId} for a ${aspectRatio} YouTube explainer as exactly ${generatedFrameNumbers.length} new separate image files. ${locks.join(" ")}${compositionLock} Use the first generated frame as the base reference and use each preceding approved frame for continuity. Do not create a contact sheet, do not combine frames, and do not add text, logos, or watermarks unless the storyboard explicitly requires them. ${frameInstructions.join(" ")} For REUSE_EXISTING frames, do not generate a file; reuse the named approved frame in the edit. Continue without asking for confirmation between frames.`;
-    return { sceneId, promptVersionId: `scene-prompt-${sceneId}-v1`, targetTool: "GG Lab", compilationMode: "scene_prompt", promptText, frameNumbers: frameManifest.map((frame) => frame.displayNumber), generatedFrameNumbers, referenceInstructions: ["Attach the approved character master reference when the teacher appears.", "Use the previous generated frame in this scene as the internal reference for continuity."], continuityLocks: locks, prohibitedChanges: [...new Set(frameManifest.flatMap((frame) => frame.prohibitedChanges))], expectedAspectRatio: aspectRatio, frameManifest };
+    const contextText = promptContext ? `Use only channelId=${promptContext.channelId}, channel style=${promptContext.visualStyle}, content lane=${promptContext.contentLane}, story pattern=${promptContext.storyPattern.join(" -> ")}, approved characters=${promptContext.characters.map((item) => item.name).join(", ") || "none"}, approved assets=${promptContext.assets.map((item) => item.name).join(", ") || "none"}. Continuity locks: ${promptContext.continuityLocks.join(" | ")}. Forbidden changes: ${promptContext.forbiddenChanges.join(" | ")}.` : "Use only the approved project context and never borrow another channel's style, character, or asset.";
+    const promptText = `Create scene ${sceneId} for a ${aspectRatio} YouTube scene as exactly ${generatedFrameNumbers.length} new separate image files. ${contextText} ${locks.join(" ")}${compositionLock} Use the first generated frame as the base reference and use each preceding approved frame for continuity. Do not create a contact sheet, do not combine frames, and do not add text, logos, or watermarks unless the storyboard explicitly requires them. ${frameInstructions.join(" ")} For REUSE_EXISTING frames, do not generate a file; reuse the named approved frame in the edit. Continue without asking for confirmation between frames.`;
+    return { sceneId, promptVersionId: `scene-prompt-${sceneId}-v1`, targetTool: "GG Lab", compilationMode: "scene_prompt", promptText, frameNumbers: frameManifest.map((frame) => frame.displayNumber), generatedFrameNumbers, referenceInstructions: ["Attach only the approved character references listed by the resolved channel context.", "Use the previous generated frame in this scene as the internal reference for continuity."], continuityLocks: [...new Set([...locks, ...(promptContext?.continuityLocks ?? [])])], prohibitedChanges: [...new Set([...frameManifest.flatMap((frame) => frame.prohibitedChanges), ...(promptContext?.forbiddenChanges ?? [])])], expectedAspectRatio: aspectRatio, frameManifest, ...(promptContextMetadata ? { promptContext: promptContextMetadata } : {}) };
   });
 }
 

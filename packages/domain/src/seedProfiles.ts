@@ -1,5 +1,5 @@
 import type { ChannelProfile } from "./types";
-import { createDefaultChannelDna } from "./channelDna";
+import { buildChannelPromptProfile, createDefaultChannelDna } from "./channelDna";
 
 export const seedChannelProfiles: ChannelProfile[] = [
   {
@@ -290,4 +290,5 @@ const seededStyleByProfile: Record<string, Parameters<typeof createDefaultChanne
 };
 for (const profile of seedChannelProfiles) {
   profile.channelDna = createDefaultChannelDna({ name: profile.name, audience: profile.targetAudience, language: profile.language, tone: profile.tone, ...(seededStyleByProfile[profile.id] ?? {}) });
+  profile.channelPromptProfile = buildChannelPromptProfile({ channelId: profile.id, channelDna: profile.channelDna, niche: profile.niche });
 }

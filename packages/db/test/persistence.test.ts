@@ -1147,6 +1147,8 @@ describe("project persistence", () => {
     repo.saveProject(project);
     expect(repo.loadChannelProfile(profile.id)?.channelDna?.visualStyle.styleId).toBe("cute-daily-life-cartoon");
     expect(repo.loadProject(project.id)?.setup.channelDnaSnapshot?.visualStyle.styleId).toBe("cute-daily-life-cartoon");
+    expect(repo.loadProject(project.id)?.setup.channelPromptProfileSnapshot?.channelId).toBe(profile.id);
+    expect(repo.loadProject(project.id)?.setup.channelPromptProfileSnapshot?.version).toBeGreaterThan(0);
     db.close();
   });
 

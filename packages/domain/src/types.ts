@@ -1,6 +1,6 @@
 import type { AssetConcept } from "./assetConcepts";
 import type { CharacterVersion } from "./character";
-import type { ChannelDna, ChannelDnaOverrides, ChannelStyleId } from "./channelDna";
+import type { ChannelDna, ChannelDnaOverrides, ChannelPromptProfile, ChannelStyleId } from "./channelDna";
 import type { ShotMotionPlan } from "./motion";
 
 export type VideoFormat = "long" | "short";
@@ -48,6 +48,7 @@ export interface ProjectSetup {
   visualWorkflow?: VisualWorkflowMode;
   channelId?: string | null;
   channelDnaSnapshot?: ChannelDna;
+  channelPromptProfileSnapshot?: ChannelPromptProfile;
   channelOverrides?: ChannelDnaOverrides;
   characterVersionId?: string;
   inputMode?: ProductionInputMode;
@@ -122,6 +123,7 @@ export interface ChannelProfile {
   routerSignals: string[];
   safetyRules: string[];
   channelDna?: ChannelDna;
+  channelPromptProfile?: ChannelPromptProfile;
   characterVersions?: CharacterVersion[];
   activeCharacterVersionId?: string;
 }

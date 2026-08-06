@@ -1,3 +1,5 @@
+import type { CharacterVersion } from "./character";
+
 export const channelStyleIds = [
   "editorial-explainer",
   "2d-character-animation",
@@ -76,6 +78,7 @@ export interface ChannelVisualStyleDna {
 }
 
 export interface ChannelCharacterSlot {
+  channelId?: string;
   id: string;
   name: string;
   role: string;
@@ -88,6 +91,7 @@ export interface ChannelCharacterSlot {
 }
 
 export interface ChannelAssetLibraryItem {
+  channelId?: string;
   id: string;
   name: string;
   kind: "prop" | "background" | "diagram" | "sound" | "overlay";
@@ -124,6 +128,101 @@ export interface ChannelDna {
   assets: ChannelAssetLibraryItem[];
   productionDefaults: ChannelProductionDefaultsDna;
   updatedAt: string;
+}
+
+export interface ChannelPromptCharacterProfile {
+  channelId: string;
+  characterId: string;
+  characterVersionId?: string;
+  name: string;
+  role: string;
+  priority: ChannelCharacterPriority;
+  species?: string;
+  personality?: string;
+  relationship?: string;
+  usageRules: string[];
+  referenceIds: string[];
+  referenceAuthority: {
+    controls: string[];
+    doesNotControl: string[];
+  };
+  continuityLocks: string[];
+  forbiddenChanges: string[];
+}
+
+export interface ChannelPromptAssetProfile {
+  channelId: string;
+  assetId: string;
+  name: string;
+  kind: ChannelAssetLibraryItem["kind"];
+  role: string;
+  requiredOrOptional: "required" | "optional";
+  allowedScenes: string[];
+  continuityLocks: string[];
+  promptDescription: string;
+  referenceFile?: string;
+  tags: string[];
+}
+
+export type ChannelPromptTaskType = "story" | "director" | "scene_prompt" | "scene_image_generation" | "build";
+
+export interface ChannelPromptProfile {
+  channelId: string;
+  version: number;
+  masterPrompt: string;
+  contentIdentity: {
+    topic: string;
+    niche: string;
+    audience: string;
+    language: string;
+    promise: string;
+    contentLane: string;
+    pillars: string[];
+    preferredAngles: string[];
+    tone: string[];
+    forbiddenTopics: string[];
+  };
+  visualIdentity: {
+    styleId: ChannelStyleId;
+    styleDescription: string;
+    palette: string[];
+    lineTreatment: string;
+    characterTreatment: string;
+    backgroundTreatment: string;
+    lightingRules: string[];
+    compositionRules: string[];
+    forbiddenVisualChanges: string[];
+  };
+  characterRegistry: ChannelPromptCharacterProfile[];
+  assetRegistry: ChannelPromptAssetProfile[];
+  productionGrammar: {
+    storyPattern: string[];
+    frameRoles: string[];
+    frameDensity: { min: number; max: number };
+    preferredMotion: string[];
+    preferredTransitions: string[];
+    averageVisualBeatSeconds: number;
+    motionIntensity: string;
+  };
+}
+
+export interface ResolvedChannelPromptContext {
+  channelId: string;
+  profileVersion: number;
+  projectSnapshotVersion: number;
+  taskType: ChannelPromptTaskType;
+  contentLane: string;
+  visualStyle: string;
+  characters: ChannelPromptCharacterProfile[];
+  assets: ChannelPromptAssetProfile[];
+  storyPattern: string[];
+  continuityLocks: string[];
+  forbiddenChanges: string[];
+  source: {
+    channelProfile: string;
+    projectSnapshot: string;
+    scene: string;
+  };
 }
 
 export type ChannelDnaOverrides = Partial<{
@@ -419,10 +518,198 @@ export function normalizeChannelDna(value: ChannelDna | ChannelDnaOverrides | un
     identity: { ...fallback.identity, ...(value?.identity ?? {}), description: value?.identity?.description ?? fallback.identity.description, mainTopic: value?.identity?.mainTopic ?? fallback.identity.mainTopic, secondaryTopics: [...(value?.identity?.secondaryTopics ?? fallback.identity.secondaryTopics)], keywords: [...(value?.identity?.keywords ?? fallback.identity.keywords)], prohibitedTopics: [...(value?.identity?.prohibitedTopics ?? fallback.identity.prohibitedTopics)], formats: [...(value?.identity?.formats ?? fallback.identity.formats)], goals: [...(value?.identity?.goals ?? fallback.identity.goals)] },
     contentDirection: { ...fallback.contentDirection, ...(value?.contentDirection ?? {}), primary: value?.contentDirection?.primary ?? fallback.contentDirection.primary, secondary: [...(value?.contentDirection?.secondary ?? fallback.contentDirection.secondary)], contentTypes: [...(value?.contentDirection?.contentTypes ?? fallback.contentDirection.contentTypes)], pillars: [...(value?.contentDirection?.pillars ?? fallback.contentDirection.pillars)], defaultAngles: [...(value?.contentDirection?.defaultAngles ?? fallback.contentDirection.defaultAngles)], hookPatterns: [...(value?.contentDirection?.hookPatterns ?? fallback.contentDirection.hookPatterns)], payoffPatterns: [...(value?.contentDirection?.payoffPatterns ?? fallback.contentDirection.payoffPatterns)] },
     visualStyle: { ...fallback.visualStyle, ...(value?.visualStyle ?? {}), styleId, name: value?.visualStyle?.name ?? preset.name, description: value?.visualStyle?.description ?? preset.description, palette: [...(value?.visualStyle?.palette ?? fallback.visualStyle.palette)], sceneGrammar: [...(value?.visualStyle?.sceneGrammar ?? preset.sceneGrammar)], motionGrammar: [...(value?.visualStyle?.motionGrammar ?? fallback.visualStyle.motionGrammar)], assetGrammar: [...(value?.visualStyle?.assetGrammar ?? fallback.visualStyle.assetGrammar)], productionProfile: value?.visualStyle?.productionProfile ?? getChannelStyleProductionProfile(styleId), ...(value?.visualStyle?.customConfig ? { customConfig: value.visualStyle.customConfig } : fallback.visualStyle.customConfig ? { customConfig: fallback.visualStyle.customConfig } : {}) },
-    characters: (value?.characters ?? fallback.characters).map((character) => ({ id: character.id, name: character.name, role: character.role, priority: character.priority, ...(character.species ? { species: character.species } : {}), ...(character.personality ? { personality: character.personality } : {}), ...(character.relationship ? { relationship: character.relationship } : {}), ...(character.usageRules ? { usageRules: [...character.usageRules] } : {}), ...(character.characterVersionId ? { characterVersionId: character.characterVersionId } : {}) })),
-    assets: (value?.assets ?? fallback.assets).map((asset) => ({ id: asset.id, name: asset.name, kind: asset.kind, description: asset.description, tags: [...asset.tags], ...(asset.category ? { category: asset.category } : {}), ...(asset.approved !== undefined ? { approved: asset.approved } : {}), ...(asset.relativeFilePath ? { relativeFilePath: asset.relativeFilePath } : {}) })),
+    characters: (value?.characters ?? fallback.characters).map((character) => ({ ...(character.channelId ? { channelId: character.channelId } : {}), id: character.id, name: character.name, role: character.role, priority: character.priority, ...(character.species ? { species: character.species } : {}), ...(character.personality ? { personality: character.personality } : {}), ...(character.relationship ? { relationship: character.relationship } : {}), ...(character.usageRules ? { usageRules: [...character.usageRules] } : {}), ...(character.characterVersionId ? { characterVersionId: character.characterVersionId } : {}) })),
+    assets: (value?.assets ?? fallback.assets).map((asset) => ({ ...(asset.channelId ? { channelId: asset.channelId } : {}), id: asset.id, name: asset.name, kind: asset.kind, description: asset.description, tags: [...asset.tags], ...(asset.category ? { category: asset.category } : {}), ...(asset.approved !== undefined ? { approved: asset.approved } : {}), ...(asset.relativeFilePath ? { relativeFilePath: asset.relativeFilePath } : {}) })),
     productionDefaults: { ...fallback.productionDefaults, ...(value?.productionDefaults ?? {}), ...(value?.productionDefaults?.frameDensity ? { frameDensity: value.productionDefaults.frameDensity } : fallback.productionDefaults.frameDensity ? { frameDensity: fallback.productionDefaults.frameDensity } : {}) },
     updatedAt: value && "updatedAt" in value && value.updatedAt ? value.updatedAt : fallback.updatedAt
+  };
+}
+
+export function buildChannelPromptProfile(input: {
+  channelId: string;
+  channelDna: ChannelDna;
+  version?: number;
+  niche?: string;
+  characterVersions?: readonly CharacterVersion[];
+  activeCharacterVersionId?: string;
+}): ChannelPromptProfile {
+  const channelId = input.channelId.trim();
+  if (!channelId) throw new Error("Channel Prompt Profile requires a channelId.");
+  const dna = normalizeChannelDna(input.channelDna, input.channelDna);
+  const versions = new Map((input.characterVersions ?? []).map((version) => [version.id, version] as const));
+  const slots = [...dna.characters];
+  const activeVersion = input.activeCharacterVersionId ? versions.get(input.activeCharacterVersionId) : undefined;
+  if (!slots.length && activeVersion) {
+    slots.push({ id: activeVersion.id, name: activeVersion.name, role: activeVersion.persona.role, priority: "primary", characterVersionId: activeVersion.id });
+  }
+  const characterRegistry = slots.map((slot) => {
+    const version = slot.characterVersionId ? versions.get(slot.characterVersionId) : undefined;
+    const referenceIds = version?.references.filter((reference) => reference.status === "approved").map((reference) => reference.id) ?? [];
+    const continuityLocks = [...new Set([
+      ...(version?.invariantTraits ?? []),
+      ...(slot.usageRules ?? []),
+      "Preserve the approved silhouette and identity across every frame."
+    ])];
+    const forbiddenChanges = [...new Set([
+      ...(version?.prohibitedChanges ?? []),
+      "Do not replace this character with another channel character.",
+      "Do not redesign species, body proportions, costume, or palette."
+    ])];
+    return {
+      channelId,
+      characterId: slot.id,
+      name: slot.name,
+      role: slot.role,
+      priority: slot.priority,
+      ...(slot.characterVersionId ? { characterVersionId: slot.characterVersionId } : {}),
+      ...(slot.species ? { species: slot.species } : {}),
+      ...(slot.personality ? { personality: slot.personality } : {}),
+      ...(slot.relationship ? { relationship: slot.relationship } : {}),
+      usageRules: [...(slot.usageRules ?? [])],
+      referenceIds,
+      referenceAuthority: {
+        controls: ["species", "face identity", "markings", "body proportions", "wardrobe and palette", "illustration treatment"],
+        doesNotControl: ["current pose", "facial expression", "camera angle", "scene background"]
+      },
+      continuityLocks,
+      forbiddenChanges
+    } satisfies ChannelPromptCharacterProfile;
+  });
+  const assetRegistry = dna.assets.map((asset) => ({
+    channelId,
+    assetId: asset.id,
+    name: asset.name,
+    kind: asset.kind,
+    role: asset.category ?? asset.kind,
+    requiredOrOptional: asset.approved === false ? "optional" as const : "required" as const,
+    allowedScenes: [],
+    continuityLocks: [asset.description],
+    promptDescription: asset.description,
+    ...(asset.relativeFilePath ? { referenceFile: asset.relativeFilePath } : {}),
+    tags: [...asset.tags]
+  }));
+  const custom = dna.visualStyle.customConfig;
+  const production = dna.visualStyle.productionProfile;
+  const contentLane = [dna.contentDirection.primary, ...dna.contentDirection.secondary].join("+");
+  const visualIdentity = {
+    styleId: dna.visualStyle.styleId,
+    styleDescription: dna.visualStyle.description,
+    palette: [...dna.visualStyle.palette],
+    lineTreatment: custom?.lineArt || production.visualGrammar.join(", "),
+    characterTreatment: custom?.characterTreatment || production.referenceStrategy.join(", "),
+    backgroundTreatment: custom?.backgroundTreatment || production.visualGrammar.join(", "),
+    lightingRules: [custom?.lighting || "Keep lighting consistent across the scene."],
+    compositionRules: [
+      ...dna.visualStyle.assetGrammar,
+      ...(custom?.camera ? [custom.camera] : []),
+      ...(custom?.promptLocks ?? [])
+    ],
+    forbiddenVisualChanges: [
+      "No photorealism or unrelated visual style drift.",
+      "No logos, watermarks, contact sheets, or unapproved text.",
+      ...(custom?.promptLocks ?? [])
+    ]
+  } satisfies ChannelPromptProfile["visualIdentity"];
+  const profile: ChannelPromptProfile = {
+    channelId,
+    version: Math.max(1, Math.floor(input.version ?? 1)),
+    contentIdentity: {
+      topic: dna.identity.mainTopic,
+      niche: input.niche ?? dna.identity.description,
+      audience: dna.identity.audience,
+      language: dna.identity.language,
+      promise: dna.identity.channelPromise,
+      contentLane,
+      pillars: [...dna.contentDirection.pillars],
+      preferredAngles: [...dna.contentDirection.defaultAngles],
+      tone: dna.identity.tone.split(",").map((item) => item.trim()).filter(Boolean),
+      forbiddenTopics: [...dna.identity.prohibitedTopics]
+    },
+    visualIdentity,
+    characterRegistry,
+    assetRegistry,
+    productionGrammar: {
+      storyPattern: [...production.storytellingGrammar],
+      frameRoles: [...production.storyboardGrammar],
+      frameDensity: { min: production.frameDensity.min, max: production.frameDensity.max },
+      preferredMotion: [...production.motionGrammar],
+      preferredTransitions: [dna.productionDefaults.transitionStyle ?? "cut"],
+      averageVisualBeatSeconds: dna.productionDefaults.visualBeatSeconds,
+      motionIntensity: dna.productionDefaults.motionIntensity ?? "subtle"
+    },
+    masterPrompt: ""
+  };
+  profile.masterPrompt = [
+    `You are directing content exclusively for channelId=${channelId}.`,
+    `Topic: ${profile.contentIdentity.topic}. Niche: ${profile.contentIdentity.niche}. Audience: ${profile.contentIdentity.audience}. Language: ${profile.contentIdentity.language}.`,
+    `Promise: ${profile.contentIdentity.promise}. Content lane: ${profile.contentIdentity.contentLane}.`,
+    `Story pattern: ${profile.productionGrammar.storyPattern.join(" -> ")}.`,
+    `Visual style: ${profile.visualIdentity.styleDescription}. Palette: ${profile.visualIdentity.palette.join(", ")}.`,
+    `Line treatment: ${profile.visualIdentity.lineTreatment}. Character treatment: ${profile.visualIdentity.characterTreatment}. Background treatment: ${profile.visualIdentity.backgroundTreatment}.`,
+    `Composition rules: ${profile.visualIdentity.compositionRules.join(" | ")}.`,
+    profile.characterRegistry.length
+      ? `Approved characters: ${profile.characterRegistry.map((character) => `${character.name} (${character.role}); locks: ${character.continuityLocks.join(", ")}`).join(" | ")}.`
+      : "No fixed character is configured; do not invent a recurring character.",
+    profile.assetRegistry.length
+      ? `Approved channel assets: ${profile.assetRegistry.map((asset) => `${asset.name} (${asset.role}): ${asset.promptDescription}`).join(" | ")}.`
+      : "No channel asset is configured; do not borrow assets from another channel.",
+    `Forbidden changes: ${[...profile.visualIdentity.forbiddenVisualChanges, ...profile.characterRegistry.flatMap((character) => character.forbiddenChanges)].join(" | ")}.`
+  ].join(" ");
+  return profile;
+}
+
+export function resolveChannelPromptContext(input: {
+  channelId: string;
+  profile: ChannelPromptProfile;
+  taskType: ChannelPromptTaskType;
+  projectSnapshotVersion?: number;
+  scene?: {
+    characterIds?: string[];
+    assetIds?: string[];
+    continuityLocks?: string[];
+    forbiddenChanges?: string[];
+  };
+}): ResolvedChannelPromptContext {
+  const channelId = input.channelId.trim();
+  if (!channelId || input.profile.channelId !== channelId) throw new Error("Channel Prompt Profile does not belong to the active channel.");
+  const requestedCharacters = input.scene?.characterIds;
+  const requestedAssets = input.scene?.assetIds;
+  const characters = requestedCharacters
+    ? input.profile.characterRegistry.filter((character) => requestedCharacters.includes(character.characterId))
+    : input.profile.characterRegistry.filter((character) => character.priority === "primary");
+  const assets = requestedAssets
+    ? input.profile.assetRegistry.filter((asset) => requestedAssets.includes(asset.assetId))
+    : input.profile.assetRegistry.filter((asset) => asset.requiredOrOptional === "required");
+  const selectedCharacterIds = new Set(characters.map((character) => character.characterId));
+  const selectedAssetIds = new Set(assets.map((asset) => asset.assetId));
+  if (requestedCharacters?.some((id) => !selectedCharacterIds.has(id)) || requestedAssets?.some((id) => !selectedAssetIds.has(id))) {
+    throw new Error("Resolved Prompt Context referenced data outside the active channel profile.");
+  }
+  return {
+    channelId,
+    profileVersion: input.profile.version,
+    projectSnapshotVersion: input.projectSnapshotVersion ?? input.profile.version,
+    taskType: input.taskType,
+    contentLane: input.profile.contentIdentity.contentLane,
+    visualStyle: input.profile.visualIdentity.styleId,
+    characters,
+    assets,
+    storyPattern: [...input.profile.productionGrammar.storyPattern],
+    continuityLocks: [...new Set([
+      ...characters.flatMap((character) => character.continuityLocks),
+      ...assets.flatMap((asset) => asset.continuityLocks),
+      ...(input.scene?.continuityLocks ?? [])
+    ])],
+    forbiddenChanges: [...new Set([
+      ...input.profile.visualIdentity.forbiddenVisualChanges,
+      ...characters.flatMap((character) => character.forbiddenChanges),
+      ...(input.scene?.forbiddenChanges ?? [])
+    ])],
+    source: {
+      channelProfile: `channel:${channelId}:v${input.profile.version}`,
+      projectSnapshot: `project-snapshot:v${input.projectSnapshotVersion ?? input.profile.version}`,
+      scene: input.scene ? "scene-context" : "none"
+    }
   };
 }
 

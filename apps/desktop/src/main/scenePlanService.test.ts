@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { MemoryKeychain, openFactoryDatabase, ProviderCredentialStore, TextCertificationStore } from "@lsf/db";
+import { buildChannelPromptProfile, createDefaultChannelDna } from "@lsf/domain";
 import { fingerprintBaseUrl } from "./nineRouterTextCertificationService";
 import { runScenePlan } from "./scenePlanService";
 
@@ -16,4 +17,5 @@ describe("scene plan service", () => {
   it("rejects scenes that rewrite approved narration", async () => { const { db, credentials, certifications } = await setup(); await expect(runScenePlan({ script, fps: 30, credentialStore: credentials, certificationStore: certifications, createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify({ ...output, scenes: [{ ...output.scenes[0], narration: "Changed narration." }] }) }) }) })).rejects.toMatchObject({ category: "invalid_output" }); db.close(); });
   it("rejects scene plans that skip an approved script section", async () => { const { db, credentials, certifications } = await setup(); const twoSectionScript = { sections: [...script.sections, { id: "script-2", narration: "Second narration.", purpose: "Payoff", estimatedSeconds: 2, proofObjects: [] }] }; await expect(runScenePlan({ script: twoSectionScript, fps: 30, credentialStore: credentials, certificationStore: certifications, createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify(output) }) }) })).rejects.toMatchObject({ category: "invalid_output" }); db.close(); });
   it("rejects scene plans that leave an initial timing gap", async () => { const { db, credentials, certifications } = await setup(); await expect(runScenePlan({ script, fps: 30, credentialStore: credentials, certificationStore: certifications, createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify({ ...output, scenes: [{ ...output.scenes[0], startFrame: 30 }] }) }) }) })).rejects.toMatchObject({ category: "invalid_output" }); db.close(); });
+  it("passes the selected channel storyboard grammar to the provider", async () => { const { db, credentials, certifications } = await setup(); const channelPromptProfile = buildChannelPromptProfile({ channelId: "milo-red-panda", channelDna: createDefaultChannelDna({ styleId: "cute-daily-life-cartoon" }) }); let request = ""; await runScenePlan({ script, fps: 30, channelPromptProfile, credentialStore: credentials, certificationStore: certifications, createClient: () => ({ createResponseText: async (input) => { request = input.input; return { text: JSON.stringify(output) }; } }) }); expect(request).toContain("milo-red-panda"); expect(request).toContain("character objective"); db.close(); });
 });

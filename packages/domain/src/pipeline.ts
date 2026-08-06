@@ -3,7 +3,7 @@ import { seedChannelProfiles } from "./seedProfiles";
 import type { ChannelProfile, FactoryProject, PipelineStage, VideoFormat, VisualWorkflowMode, WorkflowMode } from "./types";
 import { normalizeReferenceIdentity } from "./referenceIdentity";
 import { characterVersionIsApproved, resolveApprovedCharacterVersion } from "./character";
-import { globalChannelDna, resolveChannelDna, type ChannelStyleId } from "./channelDna";
+import { buildChannelPromptProfile, globalChannelDna, resolveChannelDna, type ChannelStyleId } from "./channelDna";
 import { workflowStageDefinitions } from "./workflowRegistry";
 
 function uniqueId(prefix: string): string {
@@ -56,7 +56,9 @@ export function createFixtureProject(input: {
   const profiles = input.profiles ?? seedChannelProfiles;
   const routeDecision = routeChannelProfile(profiles, input);
   const requestedChannelId = input.channelId === "none" ? undefined : input.channelId ?? input.selectedProfileId;
-  const profile = profiles.find((item) => item.id === requestedChannelId) ?? profiles.find((item) => item.id === routeDecision.selectedProfileId) ?? profiles[0]!;
+  const explicitlySelectedProfile = requestedChannelId ? profiles.find((item) => item.id === requestedChannelId) : undefined;
+  if (requestedChannelId && !explicitlySelectedProfile) throw new Error("The selected channel profile is unavailable.");
+  const profile = explicitlySelectedProfile ?? profiles.find((item) => item.id === routeDecision.selectedProfileId) ?? profiles[0]!;
   const channelOverrides = input.projectStyleId
     ? { visualStyle: { styleId: input.projectStyleId } }
     : undefined;
@@ -105,6 +107,15 @@ export function createFixtureProject(input: {
       visualWorkflow: input.channelId === "none" ? "legacy" : input.visualWorkflow ?? (input.workflowMode === "guided" ? "legacy" : "character_first"),
       channelId: input.channelId === "none" ? null : profile.id,
       channelDnaSnapshot: channelDna,
+      ...(input.channelId === "none" ? {} : {
+        channelPromptProfileSnapshot: buildChannelPromptProfile({
+          channelId: profile.id,
+          channelDna,
+          niche: profile.niche,
+          ...(profile.characterVersions ? { characterVersions: profile.characterVersions } : {}),
+          ...(profile.activeCharacterVersionId ? { activeCharacterVersionId: profile.activeCharacterVersionId } : {})
+        })
+      }),
       ...(channelOverrides ? { channelOverrides } : {}),
       channelStyleId: channelDna.visualStyle.styleId,
       ...(boundCharacterVersionId ? { characterVersionId: boundCharacterVersionId } : {}),

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { channelDnaSchema, createDefaultChannelDna, createFixtureProject, getChannelStylePreset, normalizeChannelDna, recommendChannelDirection, recommendChannelIdeas, resolveChannelDna } from "../src";
+import { buildChannelPromptProfile, channelDnaSchema, createDefaultChannelDna, createFixtureProject, getChannelStylePreset, normalizeChannelDna, recommendChannelDirection, recommendChannelIdeas, resolveChannelDna, resolveChannelPromptContext } from "../src";
 
 describe("Channel DNA", () => {
   it("exposes the eight approved style presets", () => {
@@ -39,5 +39,17 @@ describe("Channel DNA", () => {
     expect(project.setup.channelStyleId).toBe("motion-collage");
     expect(project.setup.channelOverrides?.visualStyle?.styleId).toBe("motion-collage");
     expect(project.setup.channelDnaSnapshot?.visualStyle.styleId).toBe("motion-collage");
+    expect(project.setup.channelPromptProfileSnapshot?.channelId).toBe("insurance-made-simple");
+    expect(project.setup.channelPromptProfileSnapshot?.version).toBeGreaterThan(0);
+  });
+
+  it("compiles and resolves channel-isolated prompt context", () => {
+    const insurance = buildChannelPromptProfile({ channelId: "insurance-made-simple", channelDna: createDefaultChannelDna({ name: "Insurance", styleId: "minimal-infographic" }), niche: "Insurance education" });
+    const milo = buildChannelPromptProfile({ channelId: "milo-red-panda", channelDna: createDefaultChannelDna({ name: "Milo", styleId: "cute-daily-life-cartoon" }), niche: "Character daily life" });
+    expect(insurance.masterPrompt).not.toBe(milo.masterPrompt);
+    expect(insurance.channelId).not.toBe(milo.channelId);
+    const context = resolveChannelPromptContext({ channelId: insurance.channelId, profile: insurance, taskType: "scene_image_generation" });
+    expect(context.channelId).toBe("insurance-made-simple");
+    expect(() => resolveChannelPromptContext({ channelId: milo.channelId, profile: insurance, taskType: "scene_image_generation" })).toThrow(/active channel/);
   });
 });

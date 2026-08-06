@@ -917,7 +917,8 @@ export const visualRoutingRequestSchema = z.object({ projectId: idSchema }).stri
 export const visualRoutingArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: visualRoutingOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const visualRoutingArtifactsResponseSchema = z.array(visualRoutingArtifactResponseSchema);
 export const editVisualRoutingRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema, shotId: idSchema, visualMode: shotPlanShotSchema.shape.visualMode, motionEffect: motionPlanSchema.shape.effect.optional() }).strict();
-export const visualPromptSchema = z.object({ shotId: idSchema, promptVersionId: idSchema, positivePrompt: z.string().min(1).max(10000), negativePrompt: z.string().min(1).max(5000), aspectRatio: z.enum(["16:9", "9:16"]), continuityConstraints: z.array(z.string().min(1).max(1000)).max(50), prohibitedElements: z.array(z.string().min(1).max(1000)).max(50), semanticBeat: z.string().min(1).max(2000).optional(), assetConceptIds: z.array(idSchema).max(20).optional(), motion: motionPlanSchema.optional() }).strict();
+const promptContextMetadataSchema = z.object({ channelId: idSchema, channelProfileVersion: z.number().int().positive(), projectSnapshotVersion: z.number().int().positive(), resolvedContextHash: z.string().length(64) }).strict();
+export const visualPromptSchema = z.object({ shotId: idSchema, promptVersionId: idSchema, positivePrompt: z.string().min(1).max(10000), negativePrompt: z.string().min(1).max(5000), aspectRatio: z.enum(["16:9", "9:16"]), continuityConstraints: z.array(z.string().min(1).max(1000)).max(50), prohibitedElements: z.array(z.string().min(1).max(1000)).max(50), semanticBeat: z.string().min(1).max(2000).optional(), assetConceptIds: z.array(idSchema).max(20).optional(), motion: motionPlanSchema.optional(), promptContext: promptContextMetadataSchema.optional() }).strict();
 const storyboardFrameSpecSchema = z.object({
   shotId: idSchema,
   displayNumber: z.string().regex(/^\d{3}$/),
@@ -945,7 +946,8 @@ const scenePromptPackageSchema = z.object({
   continuityLocks: z.array(z.string().min(1).max(2000)).max(50),
   prohibitedChanges: z.array(z.string().min(1).max(1000)).max(30).optional(),
   expectedAspectRatio: z.enum(["16:9", "9:16"]),
-  frameManifest: z.array(storyboardFrameSpecSchema).min(1).max(20)
+  frameManifest: z.array(storyboardFrameSpecSchema).min(1).max(20),
+  promptContext: promptContextMetadataSchema.optional()
 }).strict();
 export const promptPreparationOutputSchema = z.object({ prompts: z.array(visualPromptSchema).max(500), scenePrompts: z.array(scenePromptPackageSchema).max(200).optional() }).strict();
 export const promptPreparationRequestSchema = z.object({ projectId: idSchema, sceneId: idSchema.optional() }).strict();

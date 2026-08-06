@@ -1,4 +1,4 @@
-import type { ChannelDna } from "./channelDna";
+import type { ChannelDna, ChannelPromptProfile } from "./channelDna";
 
 export const characterReferenceViews = [
   "hero",
@@ -88,11 +88,13 @@ export function characterVersionIsApproved(version: CharacterVersion | undefined
 
 /** Resolve the requested character first, then the channel's active approved version. */
 export function resolveApprovedCharacterVersion(
-  profile: { characterVersions?: CharacterVersion[]; activeCharacterVersionId?: string; channelDna?: ChannelDna } | undefined,
+  profile: { characterVersions?: CharacterVersion[]; activeCharacterVersionId?: string; channelDna?: ChannelDna; channelPromptProfile?: ChannelPromptProfile } | undefined,
   requestedVersionId?: string
-): (CharacterVersion & { channelDna?: ChannelDna }) | undefined {
+): (CharacterVersion & { channelDna?: ChannelDna; channelPromptProfile?: ChannelPromptProfile }) | undefined {
   const versions = profile?.characterVersions ?? [];
-  const withChannelDna = (version: CharacterVersion | undefined): (CharacterVersion & { channelDna?: ChannelDna }) | undefined => version && profile?.channelDna ? { ...version, channelDna: profile.channelDna } : version;
+  const withChannelDna = (version: CharacterVersion | undefined): (CharacterVersion & { channelDna?: ChannelDna; channelPromptProfile?: ChannelPromptProfile }) | undefined => version
+    ? { ...version, ...(profile?.channelDna ? { channelDna: profile.channelDna } : {}), ...(profile?.channelPromptProfile ? { channelPromptProfile: profile.channelPromptProfile } : {}) }
+    : version;
   const requested = requestedVersionId ? versions.find((version) => version.id === requestedVersionId) : undefined;
   if (characterVersionIsApproved(requested)) return withChannelDna(requested);
   const active = profile?.activeCharacterVersionId
