@@ -76,26 +76,33 @@ describe("prompt preparation service", () => {
     const db = openFactoryDatabase(join(mkdtempSync(join(tmpdir(), "lsf-prompts-channel-context-")), "factory.sqlite"));
     const dna = createDefaultChannelDna({ name: "Milo", styleId: "cute-daily-life-cartoon" });
     dna.characters = [{ id: "milo", name: "Milo", role: "primary character", priority: "primary", species: "red panda", usageRules: ["Milo remains the emotional focus."] }];
-    dna.assets = [{ id: "milo-satchel", name: "Green satchel", kind: "prop", category: "prop", description: "small muted-green crossbody satchel", tags: ["milo", "identity"], approved: true }];
+    dna.assets = [
+      { id: "milo-satchel", name: "Green satchel", kind: "prop", category: "prop", description: "small muted-green crossbody satchel", tags: ["milo", "identity"], approved: true },
+      { id: "unrelated-prop", name: "Red toolbox", kind: "prop", category: "prop", description: "red toolbox kept in storage", tags: ["tool"], approved: true },
+      { id: "forest-path", name: "Forest path", kind: "background", category: "location", description: "warm storybook forest path", tags: ["location"], approved: true }
+    ];
     const profile = buildChannelPromptProfile({ channelId: "milo-red-panda", channelDna: dna, niche: "daily character stories" });
-    const context = resolveChannelPromptContext({ channelId: "milo-red-panda", profile, taskType: "scene_image_generation", projectSnapshotVersion: 3, scene: { characterIds: ["milo"], assetIds: ["milo-satchel"] } });
-    const metadata = { channelId: context.channelId, channelProfileVersion: context.profileVersion, projectSnapshotVersion: context.projectSnapshotVersion, resolvedContextHash: "a".repeat(64) };
+    const context = resolveChannelPromptContext({ channelId: "milo-red-panda", profile, taskType: "scene_image_generation", projectSnapshotVersion: 3 });
+    const metadata = { channelId: context.channelId, channelProfileVersion: context.profileVersion, projectSnapshotVersion: context.projectSnapshotVersion, resolvedContextHash: "a".repeat(64), summary: { contentLane: context.contentLane, visualStyle: context.visualStyle, characters: ["Milo"], assets: ["Green satchel"], projectOverrides: [], sceneOverrides: [] } };
     const result = await runPromptPreparation({
       manualMode: true,
-      shots: [{ id: "shot-context", sceneId: "scene-context", visualMode: "ai_image", framing: "Medium-wide", cameraAngle: "Eye level", cameraMovement: "Gentle push-in", subjectAction: "Milo explains the satchel", continuityRefs: [], semanticBeat: "Identity prop appears", assetConceptIds: ["concept-satchel"] }],
+      shots: [{ id: "shot-context", sceneId: "scene-context", visualMode: "ai_image", framing: "Medium-wide", cameraAngle: "Eye level", cameraMovement: "Gentle push-in", subjectAction: "Milo explains the satchel", continuityRefs: [], semanticBeat: "Identity item appears", assetConceptIds: ["concept-satchel"] }],
       aspectRatio: "9:16",
       channelDna: dna,
       promptContext: context,
       promptContextMetadata: metadata,
-      assetConcepts: [{ id: "concept-satchel", shotId: "shot-context", semanticBeat: "Identity prop appears", kind: "object", role: "identity prop", description: "The green satchel stays on Milo's body.", visualConstraints: ["same strap position"], colorPalette: ["muted green"], motionIntent: "none", needsReferenceImage: false }],
+      assetConcepts: [{ id: "concept-satchel", shotId: "shot-context", semanticBeat: "Identity item appears", kind: "object", role: "identity prop", description: "The green satchel stays on Milo's body.", visualConstraints: ["same strap position"], colorPalette: ["muted green"], motionIntent: "none", needsReferenceImage: false }],
       credentialStore: new ProviderCredentialStore(db, new MemoryKeychain()),
       certificationStore: new TextCertificationStore(db)
     });
     expect(result.output.prompts[0]?.positivePrompt).toContain("milo-red-panda");
     expect(result.output.prompts[0]?.positivePrompt).toContain("Green satchel");
+    expect(result.output.prompts[0]?.positivePrompt).not.toContain("Red toolbox");
+    expect(result.output.prompts[0]?.positivePrompt).not.toContain("Forest path");
     expect(result.output.prompts[0]?.promptContext).toMatchObject(metadata);
     expect(result.output.prompts[0]?.promptContext?.summary).toMatchObject({ visualStyle: "cute-daily-life-cartoon", characters: ["Milo"], assets: ["Green satchel"] });
     expect(result.output.scenePrompts?.[0]?.promptText).toContain("channelId=milo-red-panda");
+    expect(result.output.scenePrompts?.[0]?.promptText).not.toContain("Forest path");
     expect(result.output.scenePrompts?.[0]?.promptContext).toMatchObject(metadata);
     db.close();
   });

@@ -142,10 +142,18 @@ function shotUsesCharacter(shot: PromptShot, character: CharacterVersion | undef
 
 function promptContextForShot(shot: PromptShot | undefined, character: CharacterVersion | undefined, concepts: AssetConcept[], context: ResolvedChannelPromptContext | undefined): ResolvedChannelPromptContext | undefined {
   if (!context || !shot) return context;
-  const text = `${shot.purpose ?? ""} ${shot.subjectAction} ${shot.semanticBeat ?? ""}`.toLowerCase();
-  const assets = character
-    ? context.assets
-    : context.assets.filter((asset) => [asset.name, ...asset.tags].some((term) => term && text.includes(term.toLowerCase())) || concepts.some((concept) => concept.referenceAssetId === asset.assetId));
+  return promptContextForText(`${shot.purpose ?? ""} ${shot.subjectAction} ${shot.semanticBeat ?? ""}`, character, concepts, context);
+}
+
+function promptContextForText(textValue: string, character: CharacterVersion | undefined, concepts: AssetConcept[], context: ResolvedChannelPromptContext): ResolvedChannelPromptContext {
+  const text = textValue.toLowerCase();
+  const assets = context.assets.filter((asset) => {
+    const terms = [asset.name, asset.role, asset.promptDescription, ...asset.tags].filter(Boolean).map((term) => term.toLowerCase());
+    const textMatch = terms.some((term) => text.includes(term));
+    const conceptMatch = concepts.some((concept) => concept.referenceAssetId === asset.assetId);
+    const identityMatch = character && terms.some((term) => /identity|character|wardrobe|costume|satchel|scarf/.test(term));
+    return textMatch || conceptMatch || Boolean(identityMatch);
+  });
   const characters = character ? context.characters : [];
   return {
     ...context,
@@ -190,6 +198,10 @@ function compileScenePromptPackages(shots: PromptShot[], prompts: ReturnType<typ
   let globalNumber = Math.max(0, ...[...existingNumbers].map((value) => Number(value)).filter(Number.isFinite)) + 1;
   return [...groups.entries()].map(([sceneId, sceneShots]) => {
     const sceneCharacter = sceneShots.some((shot) => shotUsesCharacter(shot, character)) ? character : undefined;
+    const sceneConcepts = assetConcepts.filter((concept) => sceneShots.some((shot) => shot.id === concept.shotId));
+    const scenePromptContext = promptContext
+      ? promptContextForText(sceneShots.map((shot) => `${shot.purpose ?? ""} ${shot.subjectAction} ${shot.semanticBeat ?? ""}`).join(" "), sceneCharacter, sceneConcepts, promptContext)
+      : undefined;
     const frameManifest = sceneShots.map((shot, index) => {
       const prompt = promptByShot.get(shot.id);
       const shotCharacter = shotUsesCharacter(shot, character) ? character : undefined;
@@ -213,9 +225,9 @@ function compileScenePromptPackages(shots: PromptShot[], prompts: ReturnType<typ
     const composition = sceneCharacter ? resolveCharacterCompositionLock(sceneCharacter) : undefined;
     const compositionLock = composition ? ` Keep the teacher in the locked ${composition.subjectAnchor} position within normalized box x=${composition.subjectBox.x}, y=${composition.subjectBox.y}, width=${composition.subjectBox.width}, height=${composition.subjectBox.height}; preserve ${composition.headroom} and leave the safe zone x=${composition.safeZone.x}, y=${composition.safeZone.y}, width=${composition.safeZone.width}, height=${composition.safeZone.height} for explanatory assets and subtitles.` : " Keep the approved composition and subtitle safe zone unchanged.";
     const frameInstructions = frameManifest.map((frame) => frame.assetStrategy === "REUSE_EXISTING" ? `Frame ${frame.displayNumber} (${frame.role}, REUSE_EXISTING): ${frame.delta}` : `Frame ${frame.displayNumber} (${frame.role}, save as ${frame.expectedFilename}): ${frame.delta} Attach references in this order: ${frame.referenceInstructions.join(" ")}`);
-    const contextText = promptContext ? `Use only channelId=${promptContext.channelId}, channel style=${promptContext.visualStyle} (${promptContext.visualIdentity.styleDescription}), palette=${promptContext.visualIdentity.palette.join(", ")}, line treatment=${promptContext.visualIdentity.lineTreatment}, character treatment=${promptContext.visualIdentity.characterTreatment}, background treatment=${promptContext.visualIdentity.backgroundTreatment}, content lane=${promptContext.contentLane}, story pattern=${promptContext.storyPattern.join(" -> ")}, approved characters=${promptContext.characters.map((item) => `${item.name} refs=${item.referenceIds.join(", ") || "master"} controls=${item.referenceAuthority.controls.join(", ")} does-not-control=${item.referenceAuthority.doesNotControl.join(", ")}`).join(" | ") || "none"}, approved assets=${promptContext.assets.map((item) => item.name).join(", ") || "none"}. Continuity locks: ${promptContext.continuityLocks.join(" | ")}. Forbidden changes: ${promptContext.forbiddenChanges.join(" | ")}.` : "Use only the approved project context and never borrow another channel's style, character, or asset.";
+      const contextText = scenePromptContext ? `Use only channelId=${scenePromptContext.channelId}, channel style=${scenePromptContext.visualStyle} (${scenePromptContext.visualIdentity.styleDescription}), palette=${scenePromptContext.visualIdentity.palette.join(", ")}, line treatment=${scenePromptContext.visualIdentity.lineTreatment}, character treatment=${scenePromptContext.visualIdentity.characterTreatment}, background treatment=${scenePromptContext.visualIdentity.backgroundTreatment}, content lane=${scenePromptContext.contentLane}, story pattern=${scenePromptContext.storyPattern.join(" -> ")}, approved characters=${scenePromptContext.characters.map((item) => `${item.name} refs=${item.referenceIds.join(", ") || "master"} controls=${item.referenceAuthority.controls.join(", ")} does-not-control=${item.referenceAuthority.doesNotControl.join(", ")}`).join(" | ") || "none"}, approved assets=${scenePromptContext.assets.map((item) => item.name).join(", ") || "none"}. Continuity locks: ${scenePromptContext.continuityLocks.join(" | ")}. Forbidden changes: ${scenePromptContext.forbiddenChanges.join(" | ")}.` : "Use only the approved project context and never borrow another channel's style, character, or asset.";
     const promptText = `Create scene ${sceneId} for a ${aspectRatio} YouTube scene as exactly ${generatedFrameNumbers.length} new separate image files. ${contextText} ${locks.join(" ")}${compositionLock} Use the first generated frame as the base reference and use each preceding approved frame for continuity. Do not create a contact sheet, do not combine frames, and do not add text, logos, or watermarks unless the storyboard explicitly requires them. ${frameInstructions.join(" ")} For REUSE_EXISTING frames, do not generate a file; reuse the named approved frame in the edit. Continue without asking for confirmation between frames.`;
-    return { sceneId, promptVersionId: `scene-prompt-${sceneId}-v1`, targetTool: "GG Lab", compilationMode: "scene_prompt", promptText, frameNumbers: frameManifest.map((frame) => frame.displayNumber), generatedFrameNumbers, referenceInstructions: [...promptContext?.characters.map((item) => `Attach approved references for ${item.name}: ${item.referenceIds.join(", ") || "the channel character master"}; these references control ${item.referenceAuthority.controls.join(", ")} but not ${item.referenceAuthority.doesNotControl.join(", ")}.`) ?? [], "Use the previous generated frame in this scene as the internal reference for continuity."], continuityLocks: [...new Set([...locks, ...(promptContext?.continuityLocks ?? [])])], prohibitedChanges: [...new Set([...frameManifest.flatMap((frame) => frame.prohibitedChanges), ...(promptContext?.forbiddenChanges ?? [])])], expectedAspectRatio: aspectRatio, frameManifest, ...(promptContextMetadata ? { promptContext: promptContextMetadata } : {}) };
+    return { sceneId, promptVersionId: `scene-prompt-${sceneId}-v1`, targetTool: "GG Lab", compilationMode: "scene_prompt", promptText, frameNumbers: frameManifest.map((frame) => frame.displayNumber), generatedFrameNumbers, referenceInstructions: [...scenePromptContext?.characters.map((item) => `Attach approved references for ${item.name}: ${item.referenceIds.join(", ") || "the channel character master"}; these references control ${item.referenceAuthority.controls.join(", ")} but not ${item.referenceAuthority.doesNotControl.join(", ")}.`) ?? [], "Use the previous generated frame in this scene as the internal reference for continuity."], continuityLocks: [...new Set([...locks, ...(scenePromptContext?.continuityLocks ?? [])])], prohibitedChanges: [...new Set([...frameManifest.flatMap((frame) => frame.prohibitedChanges), ...(scenePromptContext?.forbiddenChanges ?? [])])], expectedAspectRatio: aspectRatio, frameManifest, ...(promptContextMetadata ? { promptContext: promptContextMetadata } : {}) };
   });
 }
 

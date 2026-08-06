@@ -39,6 +39,8 @@ describe("Channel DNA", () => {
     expect(project.setup.channelStyleId).toBe("motion-collage");
     expect(project.setup.channelOverrides?.visualStyle?.styleId).toBe("motion-collage");
     expect(project.setup.channelDnaSnapshot?.visualStyle.styleId).toBe("motion-collage");
+    expect(project.setup.channelDnaSnapshot?.visualStyle.productionProfile.storyboardGrammar).toContain("LAYER_STACK");
+    expect(project.setup.channelDnaSnapshot?.productionDefaults.defaultMotion).toBe("slide_up");
     expect(project.setup.channelPromptProfileSnapshot?.channelId).toBe("insurance-made-simple");
     expect(project.setup.channelPromptProfileSnapshot?.version).toBeGreaterThan(0);
   });

@@ -1,4 +1,5 @@
 import type { CharacterVersion } from "./character";
+import { motionEffectsFromGrammar } from "./motion";
 
 export const channelStyleIds = [
   "editorial-explainer",
@@ -757,7 +758,26 @@ export function resolveChannelDna(global: ChannelDna = globalChannelDna, channel
 
 function applyChannelDnaOverrides(base: ChannelDna, override?: ChannelDnaOverrides): ChannelDna {
   if (!override) return base;
-  return normalizeChannelDna({ ...base, ...override, identity: { ...base.identity, ...(override.identity ?? {}) }, contentDirection: { ...base.contentDirection, ...(override.contentDirection ?? {}) }, visualStyle: { ...base.visualStyle, ...(override.visualStyle ?? {}) }, productionDefaults: { ...base.productionDefaults, ...(override.productionDefaults ?? {}) } }, base);
+  const styleId = override.visualStyle?.styleId;
+  const styleChanged = Boolean(styleId && styleId !== base.visualStyle.styleId);
+  const preset = styleChanged ? getChannelStylePreset(styleId!) : undefined;
+  const preferredMotion = preset ? motionEffectsFromGrammar(preset.motionGrammar)[0] : undefined;
+  return normalizeChannelDna({
+    ...base,
+    ...override,
+    identity: { ...base.identity, ...(override.identity ?? {}) },
+    contentDirection: { ...base.contentDirection, ...(override.contentDirection ?? {}) },
+    visualStyle: {
+      ...base.visualStyle,
+      ...(preset ? { name: preset.name, description: preset.description, sceneGrammar: [...preset.sceneGrammar], motionGrammar: [...preset.motionGrammar], palette: [...preset.defaultPalette], productionProfile: preset.productionProfile } : {}),
+      ...(override.visualStyle ?? {})
+    },
+    productionDefaults: {
+      ...base.productionDefaults,
+      ...(preset && preferredMotion && !override.productionDefaults?.defaultMotion ? { defaultMotion: preferredMotion, transitionStyle: preset.motionGrammar[0] ?? "cut", frameDensity: { min: preset.productionProfile.frameDensity.min, max: preset.productionProfile.frameDensity.max } } : {}),
+      ...(override.productionDefaults ?? {})
+    }
+  }, base);
 }
 
 export interface ChannelRecommendation {

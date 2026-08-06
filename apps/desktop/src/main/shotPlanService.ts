@@ -1,5 +1,5 @@
 import type { ProviderCredentialStore, TextCertificationStore } from "@lsf/db";
-import { imageBudgetForDuration, maxAiImagesPerMinute, selectMotionEffect, shotPlanOutputSchema, type ResolvedChannelPromptContext } from "@lsf/domain";
+import { imageBudgetForDuration, maxAiImagesPerMinute, motionEffectsFromGrammar, selectMotionEffect, shotPlanOutputSchema, type ResolvedChannelPromptContext } from "@lsf/domain";
 import { NineRouterClient, NineRouterTextResponseError } from "@lsf/providers";
 import { loadNineRouterTextCertification } from "./nineRouterTextCertificationService";
 
@@ -35,6 +35,7 @@ export async function runShotPlan(input: {
   const apiKey = await input.credentialStore.resolveProviderSecret("9router");
   if (!settings?.textModel || !apiKey) throw new ShotPlanError("credential_missing", "The selected text model or credential is unavailable.");
   const characterFirst = input.characterFirst === true;
+  const preferredMotionEffects = characterFirst ? motionEffectsFromGrammar(input.promptContext?.productionGrammar.preferredMotion) : [];
   if (characterFirst) validateCharacterFirstScenes(input.scenes, input.fps);
   let response: { text: string; returnedModelId?: string };
   try {
@@ -98,7 +99,7 @@ export async function runShotPlan(input: {
     shots: budgetedShots.map((shot) => ({
       ...shot,
       semanticBeat: shot.semanticBeat?.trim() || shot.purpose,
-      motion: shot.motion ?? selectMotionEffect({ purpose: shot.purpose, subjectAction: shot.subjectAction, ...(shot.semanticBeat ? { assetRole: shot.semanticBeat } : {}) })
+      motion: shot.motion?.userOverride ? shot.motion : selectMotionEffect({ purpose: shot.purpose, subjectAction: shot.subjectAction, ...(shot.semanticBeat ? { assetRole: shot.semanticBeat } : {}), preferredEffects: preferredMotionEffects })
     }))
   });
   return { output, ...(response.returnedModelId ? { returnedModelId: response.returnedModelId } : {}) };
