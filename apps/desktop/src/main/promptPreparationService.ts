@@ -10,21 +10,48 @@ export const promptPreparationBatchSize = 4;
 interface TextClient { createResponseText(input: { model: string; input: string; timeoutMs?: number }): Promise<{ text: string; returnedModelId?: string }>; }
 
 type PromptShot = { id: string; sceneId?: string; purpose?: string; durationFrames?: number; visualMode: string; framing: string; cameraAngle: string; cameraMovement: string; subjectAction: string; continuityRefs: string[]; semanticBeat?: string | undefined; assetConceptIds?: string[] | undefined; motion?: ShotMotionPlan | undefined };
-type PromptContextMetadata = { channelId: string; channelProfileVersion: number; projectSnapshotVersion: number; resolvedContextHash: string };
+export type PromptContextMetadata = {
+  channelId: string;
+  channelProfileVersion: number;
+  projectSnapshotVersion: number;
+  resolvedContextHash: string;
+  summary?: {
+    contentLane: string;
+    visualStyle: string;
+    characters: string[];
+    assets: string[];
+    projectOverrides: string[];
+    sceneOverrides: string[];
+  } | undefined;
+};
 
 export async function runPromptPreparation(input: { shots: PromptShot[]; aspectRatio: "16:9" | "9:16"; character?: CharacterVersion | undefined; channelDna?: ChannelDna; assetConcepts?: AssetConcept[] | undefined; promptContext?: ResolvedChannelPromptContext; promptContextMetadata?: PromptContextMetadata; manualMode?: boolean; frameNumbersByShot?: ReadonlyMap<string, string>; credentialStore: ProviderCredentialStore; certificationStore: TextCertificationStore; createClient?: (config: { baseUrl: string; apiKey: string }) => TextClient }) {
   const channelDna = input.channelDna ?? (input.character as (CharacterVersion & { channelDna?: ChannelDna }) | undefined)?.channelDna;
   const embeddedProfile = (input.character as (CharacterVersion & { channelPromptProfile?: Parameters<typeof resolveChannelPromptContext>[0]["profile"] }) | undefined)?.channelPromptProfile;
   const promptContext = input.promptContext ?? (embeddedProfile ? resolveChannelPromptContext({ channelId: embeddedProfile.channelId, profile: embeddedProfile, taskType: "scene_image_generation", projectSnapshotVersion: embeddedProfile.version }) : undefined);
-  const promptContextMetadata = input.promptContextMetadata ?? (promptContext ? {
-    channelId: promptContext.channelId,
-    channelProfileVersion: promptContext.profileVersion,
-    projectSnapshotVersion: promptContext.projectSnapshotVersion,
-    resolvedContextHash: createHash("sha256").update(JSON.stringify(promptContext)).digest("hex")
-  } : undefined);
+  const fallbackSummary = promptContext ? {
+    contentLane: promptContext.contentLane,
+    visualStyle: promptContext.visualStyle,
+    characters: promptContext.characters.map((item) => item.name),
+    assets: promptContext.assets.map((item) => item.name),
+    projectOverrides: [],
+    sceneOverrides: []
+  } : undefined;
+  const promptContextMetadata = input.promptContextMetadata && promptContext
+    ? { ...input.promptContextMetadata, ...(input.promptContextMetadata.summary ? {} : { summary: fallbackSummary }) }
+    : promptContext ? {
+      channelId: promptContext.channelId,
+      channelProfileVersion: promptContext.profileVersion,
+      projectSnapshotVersion: promptContext.projectSnapshotVersion,
+      resolvedContextHash: createHash("sha256").update(JSON.stringify(promptContext)).digest("hex"),
+      summary: fallbackSummary
+    } : undefined;
   const imageShots = input.shots.filter((shot) => ["ai_image", "ai_video", "stock_image", "stock_video", "manual_upload", "uploaded"].includes(shot.visualMode));
   if (input.manualMode) {
-    const prompts = imageShots.map((shot) => localPromptForShot(shot, input.aspectRatio, input.character, input.assetConcepts ?? [], channelDna, promptContext, promptContextMetadata));
+    const prompts = imageShots.map((shot) => {
+      const shotCharacter = shotUsesCharacter(shot, input.character) ? input.character : undefined;
+      return localPromptForShot(shot, input.aspectRatio, shotCharacter, input.assetConcepts ?? [], channelDna, promptContextForShot(shot, shotCharacter, input.assetConcepts ?? [], promptContext), promptContextMetadata);
+    });
     const output = promptPreparationOutputSchema.parse({
       prompts,
       scenePrompts: compileScenePromptPackages(input.shots, prompts, input.aspectRatio, input.character, input.assetConcepts ?? [], input.frameNumbersByShot, promptContext, promptContextMetadata)
@@ -53,7 +80,8 @@ export async function runPromptPreparation(input: { shots: PromptShot[]; aspectR
   for (const concept of input.assetConcepts ?? []) conceptsByShot.set(concept.shotId, [...(conceptsByShot.get(concept.shotId) ?? []), concept]);
   const finalPrompts = prompts.map((prompt) => {
       const shot = shotMap.get(prompt.shotId);
-      const contract = promptContractSuffix(input.character, conceptsByShot.get(prompt.shotId) ?? [], channelDna, promptContext);
+      const shotCharacter = shot && shotUsesCharacter(shot, input.character) ? input.character : undefined;
+      const contract = promptContractSuffix(shotCharacter, conceptsByShot.get(prompt.shotId) ?? [], channelDna, promptContextForShot(shot, shotCharacter, conceptsByShot.get(prompt.shotId) ?? [], promptContext));
       return {
         ...prompt,
         positivePrompt: appendPromptContract(prompt.positivePrompt, contract),
@@ -81,7 +109,7 @@ function promptContractSuffix(character: CharacterVersion | undefined, concepts:
     parts.push(`Approved asset mapping: ${concepts.map((concept) => `${concept.id} ${concept.kind} ${concept.role}: ${concept.description}`).join(" | ")}`);
   }
   if (channelDna) parts.push(`Channel DNA: style ${channelDna.visualStyle.name}; scene grammar ${channelDna.visualStyle.sceneGrammar.join(" -> ")}; motion grammar ${channelDna.visualStyle.motionGrammar.join(", ")}; palette ${channelDna.visualStyle.palette.join(", ")}; content pillars ${channelDna.contentDirection.pillars.join(" | ")}.`);
-  if (promptContext) parts.push(`Resolved channel context ${promptContext.channelId} v${promptContext.projectSnapshotVersion}: style ${promptContext.visualStyle}; lane ${promptContext.contentLane}; characters ${promptContext.characters.map((item) => item.name).join(", ") || "none"}; assets ${promptContext.assets.map((item) => item.name).join(", ") || "none"}; locks ${promptContext.continuityLocks.join(" | ")}; forbidden ${promptContext.forbiddenChanges.join(" | ")}.`);
+  if (promptContext) parts.push(`Resolved channel context ${promptContext.channelId} v${promptContext.projectSnapshotVersion}: style ${promptContext.visualStyle} (${promptContext.visualIdentity.styleDescription}); palette ${promptContext.visualIdentity.palette.join(", ")}; lane ${promptContext.contentLane}; characters ${promptContext.characters.map((item) => `${item.name} refs=${item.referenceIds.join(", ") || "master"} controls=${item.referenceAuthority.controls.join(", ")} does-not-control=${item.referenceAuthority.doesNotControl.join(", ")}`).join(" | ") || "none"}; assets ${promptContext.assets.map((item) => `${item.name}: ${item.promptDescription}`).join(" | ") || "none"}; locks ${promptContext.continuityLocks.join(" | ")}; forbidden ${promptContext.forbiddenChanges.join(" | ")}.`);
   return parts.join(" ");
 }
 
@@ -106,12 +134,34 @@ function buildPromptRequest(
   return `Prepare final image prompts only for approved AI-routed shots. Return strict JSON {"prompts":[...]}. Each prompt must use exactly {"shotId":string,"promptVersionId":string,"positivePrompt":string,"negativePrompt":string,"aspectRatio":"16:9"|"9:16","continuityConstraints":string[],"prohibitedElements":string[]}. Put only the resolved channel context, character identity, subject, approved asset concept, action, semantic beat, framing, camera, lighting, mood, composition lock, and aspect ratio in positivePrompt; keep negativePrompt separate. Do not create assets or imitate copyrighted characters. Character lock: ${JSON.stringify(character ? { name: character.name, persona: character.persona, invariantTraits: character.invariantTraits, prohibitedChanges: character.prohibitedChanges, composition } : undefined)}. Channel DNA: ${JSON.stringify(channelDna)}. Resolved Prompt Context: ${JSON.stringify(promptContext)}. Asset concepts: ${JSON.stringify(concepts)}. Required aspect ratio: ${aspectRatio}. Shots: ${JSON.stringify(shots)}\n`;
 }
 
+function shotUsesCharacter(shot: PromptShot, character: CharacterVersion | undefined): boolean {
+  if (!character) return false;
+  const text = `${character.name} ${character.persona.role} ${shot.purpose ?? ""} ${shot.subjectAction} ${shot.semanticBeat ?? ""}`.toLowerCase();
+  return [character.name, "teacher", "present", "explain", "gesture", "point", "talk", "host"].some((term) => term && text.includes(term.toLowerCase()));
+}
+
+function promptContextForShot(shot: PromptShot | undefined, character: CharacterVersion | undefined, concepts: AssetConcept[], context: ResolvedChannelPromptContext | undefined): ResolvedChannelPromptContext | undefined {
+  if (!context || !shot) return context;
+  const text = `${shot.purpose ?? ""} ${shot.subjectAction} ${shot.semanticBeat ?? ""}`.toLowerCase();
+  const assets = character
+    ? context.assets
+    : context.assets.filter((asset) => [asset.name, ...asset.tags].some((term) => term && text.includes(term.toLowerCase())) || concepts.some((concept) => concept.referenceAssetId === asset.assetId));
+  const characters = character ? context.characters : [];
+  return {
+    ...context,
+    characters,
+    assets,
+    continuityLocks: [...new Set([...characters.flatMap((item) => item.continuityLocks), ...assets.flatMap((item) => item.continuityLocks)])],
+    forbiddenChanges: [...new Set([...context.visualIdentity.forbiddenVisualChanges, ...characters.flatMap((item) => item.forbiddenChanges)])]
+  };
+}
+
 function localPromptForShot(shot: PromptShot, aspectRatio: "16:9" | "9:16", character: CharacterVersion | undefined, assetConcepts: AssetConcept[], channelDna?: ChannelDna, promptContext?: ResolvedChannelPromptContext, promptContextMetadata?: PromptContextMetadata) {
   const conceptText = assetConcepts.filter((concept) => concept.shotId === shot.id).map((concept) => `${concept.role}: ${concept.description}`).join("; ");
   const composition = character ? resolveCharacterCompositionLock(character) : undefined;
   const characterText = character ? `Use the locked teacher identity ${character.name}: ${character.persona.appearance}; preserve ${character.invariantTraits.join(", ")}.` : "Use the approved visual continuity bible.";
   const styleText = channelDna ? `Channel DNA style: ${channelDna.visualStyle.name}. Scene grammar: ${channelDna.visualStyle.sceneGrammar.join(", ")}. Motion grammar: ${channelDna.visualStyle.motionGrammar.join(", ")}. Palette: ${channelDna.visualStyle.palette.join(", ")}.` : "Use the approved channel visual grammar.";
-  const contextText = promptContext ? `Resolved channel context ${promptContext.channelId} v${promptContext.projectSnapshotVersion}: lane ${promptContext.contentLane}; style ${promptContext.visualStyle}; approved characters ${promptContext.characters.map((item) => item.name).join(", ") || "none"}; approved assets ${promptContext.assets.map((item) => `${item.name}: ${item.promptDescription}`).join(" | ") || "none"}; locks ${promptContext.continuityLocks.join(" | ")}; forbidden ${promptContext.forbiddenChanges.join(" | ")}.` : "Use only the selected channel context; never borrow another channel's identity.";
+  const contextText = promptContext ? `Resolved channel context ${promptContext.channelId} v${promptContext.projectSnapshotVersion}: lane ${promptContext.contentLane}; style ${promptContext.visualStyle} (${promptContext.visualIdentity.styleDescription}); palette ${promptContext.visualIdentity.palette.join(", ")}; line treatment ${promptContext.visualIdentity.lineTreatment}; character treatment ${promptContext.visualIdentity.characterTreatment}; background treatment ${promptContext.visualIdentity.backgroundTreatment}; lighting ${promptContext.visualIdentity.lightingRules.join(" | ")}; composition ${promptContext.visualIdentity.compositionRules.join(" | ")}; approved characters ${promptContext.characters.map((item) => `${item.name} refs=${item.referenceIds.join(", ") || "master"} controls=${item.referenceAuthority.controls.join(", ")} does-not-control=${item.referenceAuthority.doesNotControl.join(", ")}`).join(" | ") || "none"}; approved assets ${promptContext.assets.map((item) => `${item.name}: ${item.promptDescription}`).join(" | ") || "none"}; locks ${promptContext.continuityLocks.join(" | ")}; forbidden ${promptContext.forbiddenChanges.join(" | ")}.` : "Use only the selected channel context; never borrow another channel's identity.";
   const compositionText = composition ? `Composition lock: ${composition.aspectRatio} canvas; ${composition.subjectAnchor}; subject box x=${composition.subjectBox.x}, y=${composition.subjectBox.y}, width=${composition.subjectBox.width}, height=${composition.subjectBox.height}; ${composition.cameraDistance}; ${composition.headroom}; keep the safe zone x=${composition.safeZone.x}, y=${composition.safeZone.y}, width=${composition.safeZone.width}, height=${composition.safeZone.height} clear for diagrams and subtitles.` : "Keep the approved composition and safe zones unchanged.";
   const continuity = shot.continuityRefs.length ? `Continuity references: ${shot.continuityRefs.join(", ")}.` : "Keep continuity with the previous storyboard frame.";
   return {
@@ -139,14 +189,16 @@ function compileScenePromptPackages(shots: PromptShot[], prompts: ReturnType<typ
   const existingNumbers = new Set(frameNumbersByShot ? [...frameNumbersByShot.values()] : []);
   let globalNumber = Math.max(0, ...[...existingNumbers].map((value) => Number(value)).filter(Number.isFinite)) + 1;
   return [...groups.entries()].map(([sceneId, sceneShots]) => {
+    const sceneCharacter = sceneShots.some((shot) => shotUsesCharacter(shot, character)) ? character : undefined;
     const frameManifest = sceneShots.map((shot, index) => {
       const prompt = promptByShot.get(shot.id);
+      const shotCharacter = shotUsesCharacter(shot, character) ? character : undefined;
       const displayNumber = frameNumbersByShot?.get(shot.id) ?? String(globalNumber++).padStart(3, "0");
       const role = /reuse/i.test(shot.visualMode) ? "REUSE" : index === 0 ? "BASE" : /expression|face/i.test(`${shot.purpose} ${shot.subjectAction}`) ? "EXPRESSION_CHANGE" : /pose|gesture|move|point/i.test(`${shot.purpose} ${shot.subjectAction}`) ? "POSE_CHANGE" : /chart|money|diagram|insert|cutaway/i.test(`${shot.purpose} ${shot.subjectAction}`) ? "INSERT" : "ACTION_KEYFRAME";
       const assetStrategy = role === "REUSE" ? "REUSE_EXISTING" : role === "BASE" ? "NEW_BASE" : role === "EXPRESSION_CHANGE" ? "EXPRESSION_VARIATION" : role === "POSE_CHANGE" ? "POSE_VARIATION" : role === "INSERT" ? "INSERT_DETAIL" : /environment|background/i.test(`${shot.purpose} ${shot.subjectAction}`) ? "BACKGROUND_VARIATION" : /diagram|graphic|text card/i.test(`${shot.visualMode} ${shot.purpose}`) ? "GRAPHIC_ASSET" : "REFERENCE_VARIATION";
       const concepts = assetConcepts.filter((concept) => concept.shotId === shot.id);
-      const referenceInstructions = shot.continuityRefs.length ? shot.continuityRefs.map((ref) => `Use ${ref} as the continuity reference; keep identity, wardrobe, palette, lighting direction, and camera side unchanged.`) : ["Attach the approved character master reference when the teacher appears."];
-      const prohibitedChanges = character ? [...character.prohibitedChanges, "Do not move the teacher out of the locked subject box.", "Do not place diagrams, money, charts, or subtitles inside the teacher subject box."] : ["Do not invent new characters, props, text, or logos."];
+      const referenceInstructions = shot.continuityRefs.length ? shot.continuityRefs.map((ref) => `Use ${ref} as the continuity reference; keep identity, wardrobe, palette, lighting direction, and camera side unchanged.`) : shotCharacter ? [`Attach approved references for ${shotCharacter.name}: ${promptContext?.characters.find((item) => item.name === shotCharacter.name)?.referenceIds.join(", ") || "the channel character master"}.`] : ["Do not introduce a character that is not required by this shot."];
+      const prohibitedChanges = shotCharacter ? [...shotCharacter.prohibitedChanges, "Do not move the teacher out of the locked subject box.", "Do not place diagrams, money, charts, or subtitles inside the teacher subject box."] : ["Do not invent new characters, props, text, or logos."];
       const delta = role === "REUSE" ? "Reuse the approved source frame without generating a new image; only apply the approved crop or motion in the timeline." : `${prompt?.positivePrompt ?? shot.subjectAction}${concepts.length ? ` Approved asset mapping: ${concepts.map((concept) => `${concept.role} - ${concept.description}`).join("; ")}.` : ""}`;
       const acceptanceChecklist = ["One separate image file, not a contact sheet", `Readable ${aspectRatio} composition`, "Approved character identity and framing remain stable", "No unapproved text, logo, or watermark"];
       return { shotId: shot.id, displayNumber, assetId: `asset-${shot.id}`, role, assetStrategy, purpose: shot.purpose ?? shot.id, durationFrames: shot.durationFrames ?? 1, delta, continuityRefs: shot.continuityRefs, referenceInstructions, prohibitedChanges, expectedFilename: `${displayNumber}.png`, acceptanceChecklist };
@@ -155,15 +207,15 @@ function compileScenePromptPackages(shots: PromptShot[], prompts: ReturnType<typ
       "Create each frame as a separate image file, never a contact sheet.",
       "Do not skip frames or stop for confirmation between frames.",
       "Continue until the scene is complete and save every generated frame using its exact three-digit filename.",
-      character ? `Keep the approved character bible unchanged: ${character.invariantTraits.join("; ")}.` : "Keep the approved visual bible unchanged."
+      sceneCharacter ? `Keep the approved character bible unchanged: ${sceneCharacter.invariantTraits.join("; ")}.` : "Keep the approved visual bible unchanged."
     ];
     const generatedFrameNumbers = frameManifest.filter((frame) => frame.assetStrategy !== "REUSE_EXISTING" && frame.assetStrategy !== "NO_NEW_ASSET").map((frame) => frame.displayNumber);
-    const composition = character ? resolveCharacterCompositionLock(character) : undefined;
+    const composition = sceneCharacter ? resolveCharacterCompositionLock(sceneCharacter) : undefined;
     const compositionLock = composition ? ` Keep the teacher in the locked ${composition.subjectAnchor} position within normalized box x=${composition.subjectBox.x}, y=${composition.subjectBox.y}, width=${composition.subjectBox.width}, height=${composition.subjectBox.height}; preserve ${composition.headroom} and leave the safe zone x=${composition.safeZone.x}, y=${composition.safeZone.y}, width=${composition.safeZone.width}, height=${composition.safeZone.height} for explanatory assets and subtitles.` : " Keep the approved composition and subtitle safe zone unchanged.";
     const frameInstructions = frameManifest.map((frame) => frame.assetStrategy === "REUSE_EXISTING" ? `Frame ${frame.displayNumber} (${frame.role}, REUSE_EXISTING): ${frame.delta}` : `Frame ${frame.displayNumber} (${frame.role}, save as ${frame.expectedFilename}): ${frame.delta} Attach references in this order: ${frame.referenceInstructions.join(" ")}`);
-    const contextText = promptContext ? `Use only channelId=${promptContext.channelId}, channel style=${promptContext.visualStyle}, content lane=${promptContext.contentLane}, story pattern=${promptContext.storyPattern.join(" -> ")}, approved characters=${promptContext.characters.map((item) => item.name).join(", ") || "none"}, approved assets=${promptContext.assets.map((item) => item.name).join(", ") || "none"}. Continuity locks: ${promptContext.continuityLocks.join(" | ")}. Forbidden changes: ${promptContext.forbiddenChanges.join(" | ")}.` : "Use only the approved project context and never borrow another channel's style, character, or asset.";
+    const contextText = promptContext ? `Use only channelId=${promptContext.channelId}, channel style=${promptContext.visualStyle} (${promptContext.visualIdentity.styleDescription}), palette=${promptContext.visualIdentity.palette.join(", ")}, line treatment=${promptContext.visualIdentity.lineTreatment}, character treatment=${promptContext.visualIdentity.characterTreatment}, background treatment=${promptContext.visualIdentity.backgroundTreatment}, content lane=${promptContext.contentLane}, story pattern=${promptContext.storyPattern.join(" -> ")}, approved characters=${promptContext.characters.map((item) => `${item.name} refs=${item.referenceIds.join(", ") || "master"} controls=${item.referenceAuthority.controls.join(", ")} does-not-control=${item.referenceAuthority.doesNotControl.join(", ")}`).join(" | ") || "none"}, approved assets=${promptContext.assets.map((item) => item.name).join(", ") || "none"}. Continuity locks: ${promptContext.continuityLocks.join(" | ")}. Forbidden changes: ${promptContext.forbiddenChanges.join(" | ")}.` : "Use only the approved project context and never borrow another channel's style, character, or asset.";
     const promptText = `Create scene ${sceneId} for a ${aspectRatio} YouTube scene as exactly ${generatedFrameNumbers.length} new separate image files. ${contextText} ${locks.join(" ")}${compositionLock} Use the first generated frame as the base reference and use each preceding approved frame for continuity. Do not create a contact sheet, do not combine frames, and do not add text, logos, or watermarks unless the storyboard explicitly requires them. ${frameInstructions.join(" ")} For REUSE_EXISTING frames, do not generate a file; reuse the named approved frame in the edit. Continue without asking for confirmation between frames.`;
-    return { sceneId, promptVersionId: `scene-prompt-${sceneId}-v1`, targetTool: "GG Lab", compilationMode: "scene_prompt", promptText, frameNumbers: frameManifest.map((frame) => frame.displayNumber), generatedFrameNumbers, referenceInstructions: ["Attach only the approved character references listed by the resolved channel context.", "Use the previous generated frame in this scene as the internal reference for continuity."], continuityLocks: [...new Set([...locks, ...(promptContext?.continuityLocks ?? [])])], prohibitedChanges: [...new Set([...frameManifest.flatMap((frame) => frame.prohibitedChanges), ...(promptContext?.forbiddenChanges ?? [])])], expectedAspectRatio: aspectRatio, frameManifest, ...(promptContextMetadata ? { promptContext: promptContextMetadata } : {}) };
+    return { sceneId, promptVersionId: `scene-prompt-${sceneId}-v1`, targetTool: "GG Lab", compilationMode: "scene_prompt", promptText, frameNumbers: frameManifest.map((frame) => frame.displayNumber), generatedFrameNumbers, referenceInstructions: [...promptContext?.characters.map((item) => `Attach approved references for ${item.name}: ${item.referenceIds.join(", ") || "the channel character master"}; these references control ${item.referenceAuthority.controls.join(", ")} but not ${item.referenceAuthority.doesNotControl.join(", ")}.`) ?? [], "Use the previous generated frame in this scene as the internal reference for continuity."], continuityLocks: [...new Set([...locks, ...(promptContext?.continuityLocks ?? [])])], prohibitedChanges: [...new Set([...frameManifest.flatMap((frame) => frame.prohibitedChanges), ...(promptContext?.forbiddenChanges ?? [])])], expectedAspectRatio: aspectRatio, frameManifest, ...(promptContextMetadata ? { promptContext: promptContextMetadata } : {}) };
   });
 }
 

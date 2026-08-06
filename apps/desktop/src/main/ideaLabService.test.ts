@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { MemoryKeychain, openFactoryDatabase, ProviderCredentialStore, TextCertificationStore } from "@lsf/db";
-import { generateIdeaLab } from "@lsf/domain";
+import { buildChannelPromptProfile, createDefaultChannelDna, generateIdeaLab, resolveChannelPromptContext } from "@lsf/domain";
 import { fingerprintBaseUrl } from "./nineRouterTextCertificationService";
 import { runIdeaLab } from "./ideaLabService";
 
@@ -39,6 +39,18 @@ describe("idea lab service", () => {
     const { db, credentialStore, certificationStore } = await setup();
     const duplicatedCandidates = candidates.map((candidate, index) => index === 1 ? { ...candidate, id: candidates[0]!.id } : candidate);
     await expect(runIdeaLab({ ...input, credentialStore, certificationStore, createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify({ candidates: duplicatedCandidates }) }) }) })).rejects.toMatchObject({ category: "invalid_output" });
+    db.close();
+  });
+
+  it("compiles idea generation from the selected channel content identity", async () => {
+    const { db, credentialStore, certificationStore } = await setup();
+    const profile = buildChannelPromptProfile({ channelId: "insurance-made-simple", channelDna: createDefaultChannelDna({ name: "Insurance", styleId: "minimal-infographic" }), niche: "Insurance education" });
+    const promptContext = resolveChannelPromptContext({ channelId: profile.channelId, profile, taskType: "story" });
+    let request = "";
+    await runIdeaLab({ ...input, promptContext, credentialStore, certificationStore, createClient: () => ({ createResponseText: async (value) => { request = value.input; return { text: JSON.stringify({ candidates }) }; } }) });
+    expect(request).toContain("insurance-made-simple");
+    expect(request).toContain("Insurance education");
+    expect(request).not.toContain("milo-red-panda");
     db.close();
   });
 });

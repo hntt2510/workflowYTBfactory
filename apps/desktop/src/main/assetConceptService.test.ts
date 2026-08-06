@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { MemoryKeychain, openFactoryDatabase, ProviderCredentialStore, TextCertificationStore } from "@lsf/db";
-import type { CharacterVersion } from "@lsf/domain";
+import { buildChannelPromptProfile, createDefaultChannelDna, resolveChannelPromptContext, type CharacterVersion } from "@lsf/domain";
 import { NineRouterTextResponseError } from "@lsf/providers";
 import { fingerprintBaseUrl } from "./nineRouterTextCertificationService";
 import { runAssetConcepts } from "./assetConceptService";
@@ -40,15 +40,20 @@ const character = {
 describe("asset concept service", () => {
   it("includes character lock and validates one concept per shot", async () => {
     const { db, credentialStore, certificationStore } = await setupProvider();
+    const profile = buildChannelPromptProfile({ channelId: "insurance-made-simple", channelDna: createDefaultChannelDna({ styleId: "minimal-infographic" }), niche: "Insurance education" });
+    const promptContext = resolveChannelPromptContext({ channelId: profile.channelId, profile, taskType: "director" });
     const result = await runAssetConcepts({
       shots: [{ id: "shot-1", purpose: "Explain cash flow", visualMode: "ai_image", semanticBeat: "Cash rises", subjectAction: "increase", startState: {}, endState: {} }],
       character,
+      promptContext,
       credentialStore,
       certificationStore,
       createClient: () => ({
         createResponseText: async ({ input }) => {
           expect(input).toContain("Character lock");
           expect(input).toContain("Mina");
+          expect(input).toContain("insurance-made-simple");
+          expect(input).not.toContain("milo-red-panda");
           return { text: JSON.stringify({ concepts: [{ id: "asset-1", shotId: "shot-1", semanticBeat: "Cash rises", kind: "object", role: "Money stack", description: "A rising stack of money.", visualConstraints: ["clean"], colorPalette: ["green"], motionIntent: "slide up", needsReferenceImage: false }] }) };
         }
       })

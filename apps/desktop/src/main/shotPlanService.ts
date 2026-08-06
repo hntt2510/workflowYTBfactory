@@ -1,5 +1,5 @@
 import type { ProviderCredentialStore, TextCertificationStore } from "@lsf/db";
-import { imageBudgetForDuration, maxAiImagesPerMinute, selectMotionEffect, shotPlanOutputSchema } from "@lsf/domain";
+import { imageBudgetForDuration, maxAiImagesPerMinute, selectMotionEffect, shotPlanOutputSchema, type ResolvedChannelPromptContext } from "@lsf/domain";
 import { NineRouterClient, NineRouterTextResponseError } from "@lsf/providers";
 import { loadNineRouterTextCertification } from "./nineRouterTextCertificationService";
 
@@ -24,6 +24,7 @@ export async function runShotPlan(input: {
   scenes: ShotPlanScene[];
   fps: number;
   characterFirst?: boolean;
+  promptContext?: ResolvedChannelPromptContext;
   credentialStore: ProviderCredentialStore;
   certificationStore: TextCertificationStore;
   createClient?: (config: { baseUrl: string; apiKey: string }) => TextClient;
@@ -46,6 +47,7 @@ export async function runShotPlan(input: {
       "Split narration into semantic visual beats, target 2-4 seconds per visual, and allow up to 5 seconds only when needed to preserve meaning.",
       `Use no more than ${maxAiImagesPerMinute} AI-generated images per minute; reuse assets or explanatory visuals after that budget.`,
       "Every shot must map to a supplied scene, use the supplied fps, cover each scene continuously from its start to its end, and never use endFrame. Do not create assets.",
+      `Use only this channel's resolved visual and production grammar: ${JSON.stringify(input.promptContext ? { channelId: input.promptContext.channelId, visualIdentity: input.promptContext.visualIdentity, storyPattern: input.promptContext.storyPattern, productionGrammar: input.promptContext.productionGrammar } : undefined)}`,
       JSON.stringify({ scenes: input.scenes, fps: input.fps, characterFirst: input.characterFirst === true })
     ].join("\n");
     response = await (input.createClient?.({ baseUrl: settings.baseUrl, apiKey }) ?? new NineRouterClient({ baseUrl: settings.baseUrl, apiKey, timeoutMs: shotPlanTimeoutMs })).createResponseText({ model: settings.textModel, input: instruction, timeoutMs: shotPlanTimeoutMs });

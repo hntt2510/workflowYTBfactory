@@ -30,7 +30,7 @@ export function AssetsWorkspace(props: ProjectWorkspaceProps) {
       </div>
 
       <div className="studio-workspace-body studio-assets-panel">
-        <VisualsScreen project={props.project} textCertification={props.textCertification} imageCertification={props.imageCertification} setSelectedProject={props.setSelectedProject} setImageCertification={props.setImageCertification} startSemiAutomatic={props.startSemiAutomatic} surface="asset-intake" showHeader={false} />
+        <VisualsScreen project={props.project} selectedProfile={props.selectedProfile} textCertification={props.textCertification} imageCertification={props.imageCertification} setSelectedProject={props.setSelectedProject} setImageCertification={props.setImageCertification} startSemiAutomatic={props.startSemiAutomatic} surface="asset-intake" showHeader={false} />
       </div>
     </div>
   );

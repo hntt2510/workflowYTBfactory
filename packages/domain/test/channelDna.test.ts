@@ -50,6 +50,19 @@ describe("Channel DNA", () => {
     expect(insurance.channelId).not.toBe(milo.channelId);
     const context = resolveChannelPromptContext({ channelId: insurance.channelId, profile: insurance, taskType: "scene_image_generation" });
     expect(context.channelId).toBe("insurance-made-simple");
+    expect(context.contentIdentity.niche).toBe("Insurance education");
+    expect(context.visualStyle).toBe("minimal-infographic");
+    expect(context.productionGrammar.preferredMotion.length).toBeGreaterThan(0);
+    expect(resolveChannelPromptContext({ channelId: insurance.channelId, profile: insurance, taskType: "story" }).assets).toEqual([]);
     expect(() => resolveChannelPromptContext({ channelId: milo.channelId, profile: insurance, taskType: "scene_image_generation" })).toThrow(/active channel/);
+  });
+
+  it("drops channel-tagged characters and assets from another channel", () => {
+    const dna = createDefaultChannelDna({ name: "Insurance", styleId: "minimal-infographic" });
+    dna.characters = [{ id: "milo", channelId: "milo-red-panda", name: "Milo", role: "character", priority: "primary" }];
+    dna.assets = [{ id: "forest", channelId: "milo-red-panda", name: "Forest", kind: "background", description: "Warm forest", tags: [] }];
+    const profile = buildChannelPromptProfile({ channelId: "insurance-made-simple", channelDna: dna });
+    expect(profile.characterRegistry).toEqual([]);
+    expect(profile.assetRegistry).toEqual([]);
   });
 });

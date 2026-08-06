@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { FactoryProject } from "@lsf/domain";
+import type { ChannelProfile, FactoryProject } from "@lsf/domain";
 import { resolveStageEligibilities } from "@lsf/domain";
 import { factoryClient } from "../../services/factoryClient";
 import { DataTable, DisabledAction, EmptyState, PageHeader, SectionCard, StatusBadge, TagList } from "../../components/ui";
@@ -182,7 +182,7 @@ function storyboardRole(shot: FactoryProject["shots"][number]): string {
   return "ACTION_KEYFRAME";
 }
 
-export function VisualsScreen(props: { project: FactoryProject; textCertification: TextModelCertificationResponse; imageCertification: ImageModelCertificationResponse; setSelectedProject: (project: FactoryProject | null) => void; setImageCertification: (certification: ImageModelCertificationResponse) => void; startSemiAutomatic: (chain: SemiAutomaticChain, project: FactoryProject) => Promise<void>; surface?: "prompt-studio" | "asset-intake"; showHeader?: boolean }) {
+export function VisualsScreen(props: { project: FactoryProject; selectedProfile?: ChannelProfile | undefined; textCertification: TextModelCertificationResponse; imageCertification: ImageModelCertificationResponse; setSelectedProject: (project: FactoryProject | null) => void; setImageCertification: (certification: ImageModelCertificationResponse) => void; startSemiAutomatic: (chain: SemiAutomaticChain, project: FactoryProject) => Promise<void>; surface?: "prompt-studio" | "asset-intake"; showHeader?: boolean }) {
   const [artifacts, setArtifacts] = useState<VisualRoutingArtifact[]>([]);
   const [conceptArtifacts, setConceptArtifacts] = useState<AssetConceptArtifact[]>([]);
   const [promptArtifacts, setPromptArtifacts] = useState<PromptPreparationArtifact[]>([]);
@@ -199,6 +199,9 @@ export function VisualsScreen(props: { project: FactoryProject; textCertificatio
   const assetEligibility = resolveStageEligibilities(props.project, { imageVerified: props.imageCertification.status === "verified" }).find((stage) => stage.stageId === "asset-acquisition")!;
   const assetReviewEligibility = resolveStageEligibilities(props.project).find((stage) => stage.stageId === "asset-review")!;
   const latestPrompt = promptArtifacts.find((artifact) => artifact.status === "needs_review" || artifact.status === "approved") ?? promptArtifacts.at(-1);
+  const promptContext = latestPrompt?.payloadJson.scenePrompts?.find((scenePrompt) => scenePrompt.promptContext)?.promptContext
+    ?? latestPrompt?.payloadJson.prompts.find((prompt) => prompt.promptContext)?.promptContext;
+  const snapshotProfile = props.project.setup.channelPromptProfileSnapshot ?? props.selectedProfile?.channelPromptProfile;
   const latestReview = assetReviewArtifacts.find((artifact) => artifact.status === "needs_review") ?? assetReviewArtifacts.find((artifact) => artifact.status === "approved") ?? assetReviewArtifacts.at(-1);
   const reviewItems = latestReview?.payloadJson.assets ?? [];
   const requiredShots = props.project.shots.filter((shot) => shot.visualMode !== "reuse");
@@ -246,6 +249,16 @@ export function VisualsScreen(props: { project: FactoryProject; textCertificatio
     </> : null}
     {!props.surface ? <StageStatusHeader stageName="Prompt Studio" stageNumber={21} eligibility={promptEligibility} dependencies={["Approved Asset Concepts"]} purpose="Một cảnh, một prompt hoàn chỉnh để copy sang GG Lab. Ứng dụng không tự tạo ảnh." /> : null}
     <SectionCard title="Prompt Studio theo cảnh" description="Mỗi prompt hướng dẫn GG Lab tạo nhiều frame riêng, đánh số toàn cục và dùng frame trước làm tham chiếu nội bộ.">
+      {promptContext ? <div className="prompt-context-card" aria-label="Prompt context">
+        <strong>Prompt context</strong>
+        <span>Channel: {props.selectedProfile?.name ?? promptContext.channelId}</span>
+        <span>Profile version: {promptContext.channelProfileVersion} · Project snapshot: {promptContext.projectSnapshotVersion}</span>
+        <span>Style: {promptContext.summary?.visualStyle ?? snapshotProfile?.visualIdentity.styleId ?? "Configured channel style"}</span>
+        <span>Content lane: {promptContext.summary?.contentLane ?? snapshotProfile?.contentIdentity.contentLane ?? "Configured channel lane"}</span>
+        <span>Characters: {(promptContext.summary?.characters ?? snapshotProfile?.characterRegistry.filter((item) => item.priority === "primary").map((item) => item.name) ?? []).join(", ") || "none"}</span>
+        <span>Channel assets: {(promptContext.summary?.assets ?? snapshotProfile?.assetRegistry.filter((item) => item.requiredOrOptional === "required").map((item) => item.name) ?? []).join(", ") || "none"}</span>
+        <small>Resolved context hash: {promptContext.resolvedContextHash}</small>
+      </div> : null}
       {promptEligibility.runnable ? <button className="button primary" type="button" onClick={() => void perform(() => factoryClient.runPromptPreparation({ projectId: props.project.id }), "Prompt theo cảnh đã sẵn sàng để copy.")} disabled={running}>Tạo prompt theo cảnh</button> : null}
       {latestPrompt?.payloadJson.scenePrompts?.length ? <div className="prompt-studio-grid">{latestPrompt.payloadJson.scenePrompts.map((scenePrompt) => <article className="prompt-card" key={scenePrompt.sceneId}><div className="prompt-card-header"><div><strong>{scenePrompt.sceneId}</strong><span>{scenePrompt.frameNumbers.join(" · ")} · {scenePrompt.expectedAspectRatio}</span></div><div className="button-row"><button className="button compact" type="button" onClick={() => void copyScenePrompt(scenePrompt.promptText)}>Copy prompt</button><button className="button secondary compact" type="button" disabled={running || promptEligibility.status !== "approved"} title={promptEligibility.status !== "approved" ? "Hãy duyệt prompt hiện tại trước khi tạo lại riêng scene này." : undefined} onClick={() => void perform(() => factoryClient.runPromptPreparation({ projectId: props.project.id, sceneId: scenePrompt.sceneId }), `Đã tạo lại prompt cho ${scenePrompt.sceneId}.`)}>Tạo lại scene</button></div></div><textarea readOnly value={scenePrompt.promptText} aria-label={`Prompt cho ${scenePrompt.sceneId}`} /><div className="prompt-meta"><span>Tham chiếu: {scenePrompt.referenceInstructions.length}</span><span>Khoá continuity: {scenePrompt.continuityLocks.length}</span></div></article>)}</div> : latestPrompt?.payloadJson.prompts.length ? <div className="studio-stack">{latestPrompt.payloadJson.prompts.map((prompt) => <article className="prompt-card" key={prompt.shotId}><div className="prompt-card-header"><strong>{prompt.shotId}</strong><button className="button compact" type="button" onClick={() => void copyScenePrompt(prompt.positivePrompt)}>Copy prompt</button></div><p>{prompt.positivePrompt}</p></article>)}</div> : <EmptyState title="Chưa có prompt" detail="Duyệt định tuyến và tạo concept hình ảnh trước khi tạo prompt." />}
       {latestPrompt?.status === "needs_review" ? <div className="button-row"><button className="button compact" type="button" onClick={() => void perform(() => factoryClient.approvePromptPreparation({ projectId: props.project.id }), "Đã duyệt prompt theo cảnh.")} disabled={running || !promptEligibility.approvable}>Duyệt prompt</button><button className="button danger compact" type="button" onClick={() => void perform(() => factoryClient.rejectPromptPreparation({ projectId: props.project.id }), "Đã từ chối prompt theo cảnh.")} disabled={running}>Từ chối</button></div> : null}

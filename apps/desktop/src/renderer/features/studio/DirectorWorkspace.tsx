@@ -53,7 +53,7 @@ export function DirectorWorkspace(props: ProjectWorkspaceProps & { initialTab?: 
       <div className="studio-workspace-body">
         {tab === "scenes" ? <ScenesScreen project={props.project} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} textCertification={props.textCertification} /> : null}
         {tab === "storyboard" ? <ShotsScreen project={props.project} setSelectedProject={props.setSelectedProject} textCertification={props.textCertification} /> : null}
-        {tab === "prompts" ? <VisualsScreen project={props.project} textCertification={props.textCertification} imageCertification={props.imageCertification} setSelectedProject={props.setSelectedProject} setImageCertification={props.setImageCertification} startSemiAutomatic={props.startSemiAutomatic} surface="prompt-studio" showHeader={false} /> : null}
+        {tab === "prompts" ? <VisualsScreen project={props.project} selectedProfile={props.selectedProfile} textCertification={props.textCertification} imageCertification={props.imageCertification} setSelectedProject={props.setSelectedProject} setImageCertification={props.setImageCertification} startSemiAutomatic={props.startSemiAutomatic} surface="prompt-studio" showHeader={false} /> : null}
       </div>
     </div>
   );

@@ -208,14 +208,19 @@ export interface ChannelPromptProfile {
 
 export interface ResolvedChannelPromptContext {
   channelId: string;
+  projectId?: string;
+  sceneId?: string;
   profileVersion: number;
   projectSnapshotVersion: number;
   taskType: ChannelPromptTaskType;
   contentLane: string;
+  contentIdentity: ChannelPromptProfile["contentIdentity"];
   visualStyle: string;
+  visualIdentity: ChannelPromptProfile["visualIdentity"];
   characters: ChannelPromptCharacterProfile[];
   assets: ChannelPromptAssetProfile[];
   storyPattern: string[];
+  productionGrammar: ChannelPromptProfile["productionGrammar"];
   continuityLocks: string[];
   forbiddenChanges: string[];
   source: {
@@ -537,7 +542,7 @@ export function buildChannelPromptProfile(input: {
   if (!channelId) throw new Error("Channel Prompt Profile requires a channelId.");
   const dna = normalizeChannelDna(input.channelDna, input.channelDna);
   const versions = new Map((input.characterVersions ?? []).map((version) => [version.id, version] as const));
-  const slots = [...dna.characters];
+  const slots = dna.characters.filter((slot) => !slot.channelId || slot.channelId === channelId);
   const activeVersion = input.activeCharacterVersionId ? versions.get(input.activeCharacterVersionId) : undefined;
   if (!slots.length && activeVersion) {
     slots.push({ id: activeVersion.id, name: activeVersion.name, role: activeVersion.persona.role, priority: "primary", characterVersionId: activeVersion.id });
@@ -575,7 +580,7 @@ export function buildChannelPromptProfile(input: {
       forbiddenChanges
     } satisfies ChannelPromptCharacterProfile;
   });
-  const assetRegistry = dna.assets.map((asset) => ({
+  const assetRegistry = dna.assets.filter((asset) => !asset.channelId || asset.channelId === channelId).map((asset) => ({
     channelId,
     assetId: asset.id,
     name: asset.name,
@@ -662,6 +667,8 @@ export function resolveChannelPromptContext(input: {
   channelId: string;
   profile: ChannelPromptProfile;
   taskType: ChannelPromptTaskType;
+  projectId?: string;
+  sceneId?: string;
   projectSnapshotVersion?: number;
   scene?: {
     characterIds?: string[];
@@ -673,28 +680,57 @@ export function resolveChannelPromptContext(input: {
   const channelId = input.channelId.trim();
   if (!channelId || input.profile.channelId !== channelId) throw new Error("Channel Prompt Profile does not belong to the active channel.");
   const requestedCharacters = input.scene?.characterIds;
-  const requestedAssets = input.scene?.assetIds;
+  const rawRequestedAssets = input.scene?.assetIds;
+  const requestedAssets = rawRequestedAssets?.filter((id) => !id.startsWith("concept-"));
+  const sceneScoped = Boolean(input.scene);
   const characters = requestedCharacters
     ? input.profile.characterRegistry.filter((character) => requestedCharacters.includes(character.characterId))
-    : input.profile.characterRegistry.filter((character) => character.priority === "primary");
+    : sceneScoped || input.taskType === "story"
+      ? []
+      : input.profile.characterRegistry.filter((character) => character.priority === "primary");
   const assets = requestedAssets
     ? input.profile.assetRegistry.filter((asset) => requestedAssets.includes(asset.assetId))
-    : input.profile.assetRegistry.filter((asset) => asset.requiredOrOptional === "required");
+    : sceneScoped || input.taskType === "story"
+      ? []
+      : input.profile.assetRegistry.filter((asset) => asset.requiredOrOptional === "required");
   const selectedCharacterIds = new Set(characters.map((character) => character.characterId));
   const selectedAssetIds = new Set(assets.map((asset) => asset.assetId));
-  if (requestedCharacters?.some((id) => !selectedCharacterIds.has(id)) || requestedAssets?.some((id) => !selectedAssetIds.has(id))) {
+  if (requestedCharacters?.some((id) => !selectedCharacterIds.has(id)) || rawRequestedAssets?.some((id) => !id.startsWith("concept-") && !selectedAssetIds.has(id))) {
     throw new Error("Resolved Prompt Context referenced data outside the active channel profile.");
   }
   return {
     channelId,
+    ...(input.projectId ? { projectId: input.projectId } : {}),
+    ...(input.sceneId ? { sceneId: input.sceneId } : {}),
     profileVersion: input.profile.version,
     projectSnapshotVersion: input.projectSnapshotVersion ?? input.profile.version,
     taskType: input.taskType,
     contentLane: input.profile.contentIdentity.contentLane,
+    contentIdentity: {
+      ...input.profile.contentIdentity,
+      pillars: [...input.profile.contentIdentity.pillars],
+      preferredAngles: [...input.profile.contentIdentity.preferredAngles],
+      tone: [...input.profile.contentIdentity.tone],
+      forbiddenTopics: [...input.profile.contentIdentity.forbiddenTopics]
+    },
     visualStyle: input.profile.visualIdentity.styleId,
+    visualIdentity: {
+      ...input.profile.visualIdentity,
+      palette: [...input.profile.visualIdentity.palette],
+      lightingRules: [...input.profile.visualIdentity.lightingRules],
+      compositionRules: [...input.profile.visualIdentity.compositionRules],
+      forbiddenVisualChanges: [...input.profile.visualIdentity.forbiddenVisualChanges]
+    },
     characters,
     assets,
     storyPattern: [...input.profile.productionGrammar.storyPattern],
+    productionGrammar: {
+      ...input.profile.productionGrammar,
+      frameRoles: [...input.profile.productionGrammar.frameRoles],
+      preferredMotion: [...input.profile.productionGrammar.preferredMotion],
+      preferredTransitions: [...input.profile.productionGrammar.preferredTransitions],
+      frameDensity: { ...input.profile.productionGrammar.frameDensity }
+    },
     continuityLocks: [...new Set([
       ...characters.flatMap((character) => character.continuityLocks),
       ...assets.flatMap((asset) => asset.continuityLocks),
@@ -708,7 +744,7 @@ export function resolveChannelPromptContext(input: {
     source: {
       channelProfile: `channel:${channelId}:v${input.profile.version}`,
       projectSnapshot: `project-snapshot:v${input.projectSnapshotVersion ?? input.profile.version}`,
-      scene: input.scene ? "scene-context" : "none"
+      scene: input.sceneId ?? (input.scene ? "scene-context" : "none")
     }
   };
 }

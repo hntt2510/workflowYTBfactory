@@ -93,9 +93,10 @@ describe("prompt preparation service", () => {
     });
     expect(result.output.prompts[0]?.positivePrompt).toContain("milo-red-panda");
     expect(result.output.prompts[0]?.positivePrompt).toContain("Green satchel");
-    expect(result.output.prompts[0]?.promptContext).toEqual(metadata);
+    expect(result.output.prompts[0]?.promptContext).toMatchObject(metadata);
+    expect(result.output.prompts[0]?.promptContext?.summary).toMatchObject({ visualStyle: "cute-daily-life-cartoon", characters: ["Milo"], assets: ["Green satchel"] });
     expect(result.output.scenePrompts?.[0]?.promptText).toContain("channelId=milo-red-panda");
-    expect(result.output.scenePrompts?.[0]?.promptContext).toEqual(metadata);
+    expect(result.output.scenePrompts?.[0]?.promptContext).toMatchObject(metadata);
     db.close();
   });
 });
