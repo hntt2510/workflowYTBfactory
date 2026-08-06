@@ -169,7 +169,7 @@ export function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRef
             </div>
             {versions.map((version) => {
               const uploadReady = version.references.length >= 4 && version.references.every((reference) => Boolean(reference.relativeFilePath && reference.sha256));
-              return <SectionCard key={version.id} title={`${version.name} v${version.version}`} description={`${characterVersionIsApproved(version) ? "approved" : creatorStatusLabel(version.status)}${selected.activeCharacterVersionId === version.id ? " / active" : ""}`}>
+              return <SectionCard key={version.id} title={`${version.name} v${version.version}`} description={`${characterVersionIsApproved(version) ? creatorStatusLabel("approved") : creatorStatusLabel(version.status)}${selected.activeCharacterVersionId === version.id ? " / active" : ""}`}>
                 <div className="profile-grid">{version.references.map((reference) => {
                   const key = `${version.id}:${reference.view}`;
                   return <div className="profile-card" key={reference.id}>

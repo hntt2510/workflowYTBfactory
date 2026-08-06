@@ -83,13 +83,11 @@ export function AppRuntime() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  useEffect(() => {
-    const nextHash = `#${route}`;
-    if (window.location.hash !== nextHash) window.history.replaceState(null, "", nextHash);
-  }, [route]);
-
   function navigate(nextRoute: RouteId): void {
-    setRoute(canonicalRoute(nextRoute));
+    const canonical = canonicalRoute(nextRoute);
+    setRoute(canonical);
+    const nextHash = `#${canonical}`;
+    if (window.location.hash !== nextHash) window.history.replaceState(null, "", nextHash);
   }
 
   async function openProject(projectId: string) {
