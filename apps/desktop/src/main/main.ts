@@ -1906,22 +1906,30 @@ async function navigateToRoute(win: BrowserWindow, route: string): Promise<void>
 }
 
 async function clickProjectOpen(win: BrowserWindow, topic: string): Promise<void> {
-  const clicked = await win.webContents.executeJavaScript(
-    `(() => {
-      const rows = Array.from(document.querySelectorAll("tr"));
-      const textOf = (item) => [item.innerText, item.textContent].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim();
-      const row = rows.find((item) => textOf(item).includes(${JSON.stringify(topic)}));
-      const button = row && Array.from(row.querySelectorAll("button")).find((item) => textOf(item).includes("Open") || textOf(item).includes("Mở"));
-      if (!button || button.disabled) return false;
-      button.click();
-      return true;
-    })()`,
-    true
-  );
-  if (!clicked) {
-    throw new Error(`Could not open project row: ${topic}`);
+  const started = Date.now();
+  while (Date.now() - started < 5_000) {
+    const clicked = await win.webContents.executeJavaScript(
+      `(() => {
+        const candidates = Array.from(document.querySelectorAll("tr, [role=\\"row\\"], .home-project-card"));
+        const textOf = (item) => [item.innerText, item.textContent].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim();
+        const row = candidates.find((item) => textOf(item).includes(${JSON.stringify(topic)}));
+        const button = row && Array.from(row.querySelectorAll("button")).find((item) => {
+          const text = textOf(item);
+          return !item.disabled && (text.includes("Open") || text.includes("Mở"));
+        });
+        if (!button) return false;
+        button.click();
+        return true;
+      })()`,
+      true
+    );
+    if (clicked) {
+      await delay(700);
+      return;
+    }
+    await delay(250);
   }
-  await delay(700);
+  throw new Error(`Could not open project row: ${topic}`);
 }
 
 async function setInputValue(win: BrowserWindow, selector: string, value: string): Promise<void> {

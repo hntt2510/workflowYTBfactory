@@ -23,7 +23,11 @@ import type {
   ProviderModelConfigurationInput,
   ProviderCredentialSettings,
   ProviderPresence,
-  TextModelCertificationResponse
+  TextModelCertificationResponse,
+  AssetAcquisitionArtifact,
+  AssetConceptArtifact,
+  AssetReviewArtifact,
+  PromptPreparationArtifact
   , ImageModelCertificationResponse
 } from "../types";
 
@@ -44,8 +48,117 @@ const browserRuntime = {
   , devTestLabEnabled: false
 };
 
+function createBrowserAssetScreenshotFixture(): {
+  project: FactoryProject;
+  prompt: PromptPreparationArtifact;
+  acquisition: AssetAcquisitionArtifact;
+  review: AssetReviewArtifact;
+  previewUrls: Record<string, string>;
+} {
+  const project = createFixtureProject({
+    topic: "Dòng tiền trong 60 giây",
+    projectName: "Creator Studio asset intake fixture",
+    format: "short",
+    targetLanguage: "Vietnamese",
+    workflowMode: "guided",
+    visualWorkflow: "legacy",
+    aspectRatio: "9:16",
+    profiles: seedChannelProfiles
+  });
+  const sceneId = "scene-cash-flow";
+  const shots = Array.from({ length: 3 }, (_, index) => ({
+    id: `shot-cash-${index + 1}`,
+    sceneId,
+    order: index,
+    startFrame: index * 60,
+    durationFrames: 60,
+    fps: 30,
+    purpose: ["Mở vấn đề dòng tiền", "Minh họa tiền đi vào và đi ra", "Chốt nguyên tắc dòng tiền"][index]!,
+    visualMode: "manual_upload" as const,
+    framing: "Teacher half-body on the right; left safe zone for the diagram",
+    cameraAngle: "Eye level",
+    cameraMovement: index === 1 ? "Slide up" : "Slow zoom",
+    subjectAction: ["Teacher faces camera", "Teacher points to a rising cash-flow arrow", "Teacher points to the takeaway"][index]!,
+    startState: {},
+    endState: {},
+    continuityRefs: index === 0 ? [] : [`shot-cash-${index}`],
+    approvedAssetId: `asset-shot-cash-${index + 1}`,
+    motion: { effect: index === 1 ? "slide_up" as const : index === 2 ? "zoom_out" as const : "zoom_in" as const, intensity: "subtle" as const, rationale: "Keep the explainer readable." }
+  }));
+  const frameManifest = shots.map((shot, index) => ({
+    shotId: shot.id,
+    displayNumber: String(index + 1).padStart(3, "0"),
+    assetId: `asset-${shot.id}`,
+    role: index === 0 ? "BASE" as const : index === 1 ? "GRAPHIC" as const : "ACTION_KEYFRAME" as const,
+    assetStrategy: "NEW_BASE" as const,
+    purpose: shot.purpose,
+    durationFrames: shot.durationFrames,
+    delta: shot.subjectAction,
+    continuityRefs: shot.continuityRefs,
+    referenceInstructions: ["Keep the approved storyboard composition unchanged."],
+    expectedFilename: `${String(index + 1).padStart(3, "0")}.png`,
+    acceptanceChecklist: ["Separate image file", "Teacher remains in the right-side subject box", "Left safe zone remains available for the asset"]
+  }));
+  const prompt: PromptPreparationArtifact = {
+    id: "artifact-browser-fixture-prompt",
+    stageRunId: "run-browser-fixture-prompt",
+    status: "approved",
+    payloadJson: {
+      prompts: shots.map((shot) => ({ shotId: shot.id, promptVersionId: `prompt-${shot.id}`, positivePrompt: shot.subjectAction, negativePrompt: "No watermark", aspectRatio: "9:16" as const, continuityConstraints: ["Keep the approved teacher framing."], prohibitedElements: ["watermark"] })),
+      scenePrompts: [{ sceneId, promptVersionId: "scene-prompt-cash-flow-v1", targetTool: "GG Lab", compilationMode: "scene_prompt", promptText: "Create the three approved cash-flow frames as separate images.", frameNumbers: frameManifest.map((frame) => frame.displayNumber), generatedFrameNumbers: frameManifest.map((frame) => frame.displayNumber), referenceInstructions: ["Use the previous frame for continuity."], continuityLocks: ["Teacher stays on the right; assets stay on the left."], expectedAspectRatio: "9:16", frameManifest }]
+    },
+    createdAt: "2026-08-06T00:00:00.000Z",
+    updatedAt: "2026-08-06T00:00:00.000Z"
+  };
+  const assets = shots.map((shot, index) => ({
+    shotId: shot.id,
+    promptVersionId: `prompt-${shot.id}`,
+    relativeFilePath: `fixtures/creator-studio-v1/frames/${String(index + 1).padStart(3, "0")}.png`,
+    sha256: String(index + 1).padStart(2, "0").repeat(32),
+    mimeType: "image/png" as const,
+    byteLength: 10_391,
+    width: 1080,
+    height: 1920
+  }));
+  const acquisition: AssetAcquisitionArtifact = {
+    id: "artifact-browser-fixture-acquisition",
+    stageRunId: "run-browser-fixture-acquisition",
+    status: "approved",
+    payloadJson: { assets },
+    createdAt: "2026-08-06T00:00:00.000Z",
+    updatedAt: "2026-08-06T00:00:00.000Z"
+  };
+  const review: AssetReviewArtifact = {
+    id: "artifact-browser-fixture-review",
+    stageRunId: "run-browser-fixture-review",
+    status: "approved",
+    payloadJson: { acquisitionArtifactId: acquisition.id, assets: assets.map((asset) => ({ asset, reviewStatus: "approved" as const, assignedShotId: asset.shotId })) },
+    createdAt: "2026-08-06T00:00:00.000Z",
+    updatedAt: "2026-08-06T00:00:00.000Z"
+  };
+  const stages = project.stages.map((stage) => ({ ...stage, status: "approved" as const }));
+  const screenshotProject: FactoryProject = {
+    ...project,
+    scenes: [{ id: sceneId, scriptSectionId: "section-cash-flow", narration: "Dòng tiền đi vào và đi ra.", purpose: "Giải thích dòng tiền", startFrame: 0, durationFrames: 180, visualMode: "manual_upload", emotionalState: "clear", requiredAssets: [], continuityRefs: [] }],
+    shots,
+    stages,
+    assetConcepts: []
+  };
+  return {
+    project: screenshotProject,
+    prompt,
+    acquisition,
+    review,
+    previewUrls: Object.fromEntries(assets.map((asset) => [asset.sha256, `/${asset.relativeFilePath}`]))
+  };
+}
+
 function webFallback(): LongShortFactoryApi {
   let projects: FactoryProject[] = [];
+  const screenshotFixture = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("creator-studio-fixture") === "asset-intake-complete"
+    ? createBrowserAssetScreenshotFixture()
+    : undefined;
+  if (screenshotFixture) projects = [screenshotFixture.project];
   let providerSettings: ProviderCredentialSettings = {
     providerId: "9router",
     baseUrl: "Electron main process unavailable",
@@ -362,17 +475,17 @@ function webFallback(): LongShortFactoryApi {
     async approveVisualRouting(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async rejectVisualRouting(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async runAssetConcepts(): Promise<FactoryProject> { throw new Error("Asset Concepts requires Electron main process."); },
-    async listAssetConceptsArtifacts() { return []; },
+    async listAssetConceptsArtifacts({ projectId }: { projectId: string }) { return screenshotFixture && projectId === screenshotFixture.project.id ? [({ id: "artifact-browser-fixture-concepts", status: "approved", payloadJson: { concepts: [] }, createdAt: "2026-08-06T00:00:00.000Z", updatedAt: "2026-08-06T00:00:00.000Z" } satisfies AssetConceptArtifact)] : []; },
     async runPromptPreparation(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
-    async listPromptPreparationArtifacts() { return []; },
+    async listPromptPreparationArtifacts({ projectId }: { projectId: string }) { return screenshotFixture && projectId === screenshotFixture.project.id ? [screenshotFixture.prompt] : []; },
     async approvePromptPreparation(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async rejectPromptPreparation(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async runAssetAcquisition(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
-    async listAssetAcquisitionArtifacts() { return []; },
+    async listAssetAcquisitionArtifacts({ projectId }: { projectId: string }) { return screenshotFixture && projectId === screenshotFixture.project.id ? [screenshotFixture.acquisition] : []; },
     async approveAssetAcquisition(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async rejectAssetAcquisition(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async runAssetReview(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
-    async listAssetReviewArtifacts() { return []; },
+    async listAssetReviewArtifacts({ projectId }: { projectId: string }) { return screenshotFixture && projectId === screenshotFixture.project.id ? [screenshotFixture.review] : []; },
     async reviseAssetReview(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async selectManualAssetUpload(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     getDroppedFilePath(): string { throw new Error("Electron main process unavailable."); },
@@ -395,7 +508,11 @@ function webFallback(): LongShortFactoryApi {
     async listPreviewRenderArtifacts() { return []; },
     async getPreviewVideoUrl(): Promise<{ url: string }> { throw new Error("Electron main process unavailable."); },
     async downloadPreviewVideo(): Promise<{ canceled: boolean; fileName?: string; savedPath?: string }> { throw new Error("Electron main process unavailable."); },
-    async getAssetPreviewUrl(): Promise<{ url: string }> { throw new Error("Electron main process unavailable."); },
+    async getAssetPreviewUrl(input: { assetSha256: string }): Promise<{ url: string }> {
+      const url = screenshotFixture?.previewUrls[input.assetSha256];
+      if (!url) throw new Error("Electron main process unavailable.");
+      return { url };
+    },
     async approvePreviewRender(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async rejectPreviewRender(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async runQa(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },

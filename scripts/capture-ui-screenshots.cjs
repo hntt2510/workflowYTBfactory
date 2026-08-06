@@ -17,12 +17,28 @@ const shots = {
   director: path.join(screenshotDir, "director-storyboard.png"),
   "prompt-studio": path.join(screenshotDir, "scene-prompt-studio.png"),
   "asset-intake": path.join(screenshotDir, "asset-intake-missing.png"),
+  "asset-intake-complete": path.join(screenshotDir, "asset-intake-complete.png"),
   build: path.join(screenshotDir, "build-render.png"),
   "final-export": path.join(screenshotDir, "final-export.png"),
   shots: path.join(screenshotDir, "shot-board.png"),
   "production-queue": path.join(screenshotDir, "production-queue.png"),
   providers: path.join(screenshotDir, "provider-settings.png")
 };
+
+function screenshotViewports() {
+  const configured = process.env.UI_SCREENSHOT_VIEWPORTS;
+  if (!configured) return [{ width: 1280, height: 720 }, { width: 1440, height: 900 }, { width: 1920, height: 1080 }];
+  return configured.split(",").map((value) => {
+    const [width, height] = value.trim().split("x").map(Number);
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 320 || height < 240) throw new Error(`Invalid screenshot viewport: ${value}`);
+    return { width, height };
+  });
+}
+
+function viewportOutputDir(viewport) {
+  const label = `${viewport.width}x${viewport.height}`;
+  return label === "1440x900" ? screenshotDir : path.join(screenshotDir, label);
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -121,6 +137,15 @@ async function screenshot(send, outputPath) {
   await fs.writeFile(outputPath, Buffer.from(result.data, "base64"));
 }
 
+async function assertNoHorizontalOverflow(send, route) {
+  const result = await send("Runtime.evaluate", {
+    expression: "({ route: location.hash, width: window.innerWidth, scrollWidth: document.documentElement.scrollWidth })",
+    returnByValue: true
+  });
+  const metrics = result.result.value;
+  if (metrics.scrollWidth > metrics.width + 1) throw new Error(`Horizontal overflow at ${route}: ${metrics.scrollWidth}px > ${metrics.width}px`);
+}
+
 async function removeTempDir(dir) {
   try {
     await fs.rm(dir, { recursive: true, force: true });
@@ -148,6 +173,23 @@ async function clickText(send, text) {
   await sleep(450);
 }
 
+async function clickProject(send, projectName) {
+  const result = await send("Runtime.evaluate", {
+    expression: `(() => {
+      const rows = Array.from(document.querySelectorAll("tr, [role=\\"row\\"], .home-project-card"));
+      const textOf = (item) => [item.innerText, item.textContent].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim();
+      const row = rows.find((item) => textOf(item).includes(${JSON.stringify(projectName)}));
+      const button = row && Array.from(row.querySelectorAll("button")).find((item) => !item.disabled && textOf(item).includes("Mở"));
+      if (!button) return { clicked: false, rows: rows.map(textOf).slice(0, 10) };
+      button.click();
+      return { clicked: true, rows: [] };
+    })()`,
+    returnByValue: true
+  });
+  if (!result.result.value?.clicked) throw new Error(`Could not open screenshot fixture project: ${JSON.stringify(result.result.value)}`);
+  await sleep(700);
+}
+
 async function setInputValue(send, selector, value) {
   const expression = `(() => {
     const element = document.querySelector(${JSON.stringify(selector)});
@@ -169,6 +211,7 @@ async function navigateAndScreenshot(send, route, outputPath) {
   await send("Page.navigate", { url: `${baseUrl}/#${route}` });
   await sleep(750);
   await send("Runtime.evaluate", { expression: "window.scrollTo(0, 0); document.querySelector('.content-scroll')?.scrollTo(0, 0)" });
+  await assertNoHorizontalOverflow(send, route);
   await screenshot(send, outputPath);
 }
 
@@ -189,16 +232,15 @@ async function waitForChromePage(port, chrome) {
   throw new Error(`Chrome debugging page not available. Output: ${chrome.output}`);
 }
 
-async function main() {
-  await fs.mkdir(screenshotDir, { recursive: true });
-  const vite = await ensureViteServer();
+async function captureViewport(viewport, outputDir) {
+  await fs.mkdir(outputDir, { recursive: true });
   const chromeDebugPort = process.env.CHROME_DEBUG_PORT ? Number(process.env.CHROME_DEBUG_PORT) : await getAvailablePort();
   const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "lsf-chrome-ui-shots-"));
   const chrome = spawn(chromePath, [
     "--headless=new",
     "--disable-gpu",
     "--hide-scrollbars",
-    "--window-size=1440,920",
+    `--window-size=${viewport.width},${viewport.height}`,
     `--remote-debugging-port=${chromeDebugPort}`,
     `--user-data-dir=${userDataDir}`,
     `${baseUrl}/#dashboard`
@@ -217,28 +259,54 @@ async function main() {
     await send("Page.enable");
     await send("Runtime.enable");
     await sleep(900);
-    await screenshot(send, shots.dashboard);
+    const output = (name) => path.join(outputDir, path.basename(shots[name]));
+    await assertNoHorizontalOverflow(send, "dashboard");
+    await screenshot(send, output("dashboard"));
 
-    await navigateAndScreenshot(send, "create", shots["new-project"]);
+    await navigateAndScreenshot(send, "create", output("new-project"));
     await setInputValue(send, "#simple-topic", "Creator Studio screenshot project");
     await clickText(send, "Tiếp tục: định dạng");
     await clickText(send, "Tiếp tục: xác nhận");
     await clickText(send, "Tạo dự án");
     await sleep(900);
-    await screenshot(send, shots["project-overview"]);
-    await navigateAndScreenshot(send, "script", shots["story-editor"]);
-    await navigateAndScreenshot(send, "scenes", shots.director);
-    await navigateAndScreenshot(send, "visuals", shots["prompt-studio"]);
-    await navigateAndScreenshot(send, "assets", shots["asset-intake"]);
-    await navigateAndScreenshot(send, "timeline", shots.build);
-    await navigateAndScreenshot(send, "export", shots["final-export"]);
-    await navigateAndScreenshot(send, "shots", shots.shots);
-    await navigateAndScreenshot(send, "production-queue", shots["production-queue"]);
-    await navigateAndScreenshot(send, "providers", shots.providers);
+    await assertNoHorizontalOverflow(send, "project-overview");
+    await screenshot(send, output("project-overview"));
+    await navigateAndScreenshot(send, "script", output("story-editor"));
+    await navigateAndScreenshot(send, "scenes", output("director"));
+    await navigateAndScreenshot(send, "visuals", output("prompt-studio"));
+    await navigateAndScreenshot(send, "assets", output("asset-intake"));
+    await navigateAndScreenshot(send, "timeline", output("build"));
+    await navigateAndScreenshot(send, "export", output("final-export"));
+    await navigateAndScreenshot(send, "shots", output("shots"));
+    await navigateAndScreenshot(send, "production-queue", output("production-queue"));
+    await navigateAndScreenshot(send, "providers", output("providers"));
+    await send("Page.navigate", { url: `${baseUrl}/?creator-studio-fixture=asset-intake-complete#projects` });
+    await sleep(1_000);
+    const fixtureText = await send("Runtime.evaluate", { expression: "document.body.innerText", returnByValue: true });
+    if (!fixtureText.result.value.includes("Creator Studio asset intake fixture")) throw new Error(`Asset intake screenshot fixture did not load: ${fixtureText.result.value.slice(0, 500)}`);
+    await clickProject(send, "Creator Studio asset intake fixture");
+    const openedText = await send("Runtime.evaluate", { expression: "document.body.innerText", returnByValue: true });
+    if (openedText.result.value.includes("Chọn một dự án để bắt đầu")) throw new Error(`Asset intake screenshot fixture did not open: ${openedText.result.value.slice(0, 500)}`);
+    await send("Runtime.evaluate", { expression: "window.location.hash = '#assets'" });
+    await sleep(2_500);
+    const assetText = await send("Runtime.evaluate", { expression: "document.body.innerText", returnByValue: true });
+    if (assetText.result.value.includes("Chọn một dự án để bắt đầu")) throw new Error(`Asset intake screenshot fixture lost selection: ${assetText.result.value.slice(0, 500)}`);
+    await assertNoHorizontalOverflow(send, "asset-intake-complete");
+    await send("Runtime.evaluate", { expression: "document.querySelector('.content-scroll')?.scrollTo(0, 650)" });
+    await screenshot(send, output("asset-intake-complete"));
   } finally {
     chrome.kill();
     await sleep(250);
     await removeTempDir(userDataDir);
+  }
+}
+
+async function main() {
+  await fs.mkdir(screenshotDir, { recursive: true });
+  const vite = await ensureViteServer();
+  try {
+    for (const viewport of screenshotViewports()) await captureViewport(viewport, viewportOutputDir(viewport));
+  } finally {
     if (vite) vite.kill();
   }
 }

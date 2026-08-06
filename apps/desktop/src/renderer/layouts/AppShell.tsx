@@ -23,7 +23,7 @@ import type { LucideIcon } from "lucide-react";
 import { useRef, type ReactNode } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import type { ChannelProfile, FactoryProject } from "@lsf/domain";
+import { resolveWorkflowProgress, type ChannelProfile, type FactoryProject } from "@lsf/domain";
 import { creatorPhaseDefinitions, creatorRouteLabel, creatorStageLabel, creatorStatusLabel } from "../creatorStudioCopy";
 import { type RouteId, workspaceRoutes } from "../navigation";
 import type { ProjectSummary, QueueSnapshot } from "../types";
@@ -174,15 +174,20 @@ function ProjectPhaseStepper(props: { project: FactoryProject; route: RouteId; s
 type CreatorPhaseState = "complete" | "current" | "attention" | "locked" | "ready";
 
 function phaseState(project: FactoryProject, stageIds: readonly string[], index: number): Exclude<CreatorPhaseState, "current"> {
-  const statuses = stageIds.map((stageId) => project.stages.find((stage) => stage.id === stageId)?.status ?? "not_started");
-  if (statuses.some((status) => ["needs_attention", "failed", "rejected", "stale"].includes(status))) return "attention";
-  const applicable = statuses;
-  if (applicable.length > 0 && applicable.every((status) => status === "approved")) return "complete";
-  if (statuses.some((status) => ["running", "queued", "needs_review"].includes(status))) return "ready";
+  const progress = resolveWorkflowProgress(project);
+  const phaseStages = stageIds
+    .map((stageId) => progress.stages.find((stage) => stage.stageId === stageId))
+    .filter((stage): stage is NonNullable<typeof stage> => Boolean(stage));
+  if (phaseStages.some((stage) => ["needs_attention", "failed", "rejected", "stale"].includes(stage.state))) return "attention";
+  const applicable = phaseStages.filter((stage) => stage.applicable && !stage.optional);
+  if (applicable.length > 0 && applicable.every((stage) => stage.state === "complete")) return "complete";
+  if (phaseStages.some((stage) => ["current", "ready", "running", "queued", "needs_review"].includes(stage.state))) return "ready";
   const priorPhasesComplete = creatorPhaseDefinitions.slice(0, index).every((phase) => {
-    const priorStatuses = phase.stageIds.map((stageId) => project.stages.find((stage) => stage.id === stageId)?.status ?? "not_started");
-    const priorApplicable = priorStatuses;
-    return priorApplicable.length > 0 && priorApplicable.every((status) => status === "approved");
+    const priorStages = phase.stageIds
+      .map((stageId) => progress.stages.find((stage) => stage.stageId === stageId))
+      .filter((stage): stage is NonNullable<typeof stage> => Boolean(stage))
+      .filter((stage) => stage.applicable && !stage.optional);
+    return priorStages.length > 0 && priorStages.every((stage) => stage.state === "complete");
   });
   return priorPhasesComplete ? "ready" : "locked";
 }
