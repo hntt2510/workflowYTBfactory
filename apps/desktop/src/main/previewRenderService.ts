@@ -35,8 +35,8 @@ export async function renderPreview(input: {
   if (!existsSync(input.outputPath)) throw new PreviewRenderError("invalid_preview", "FFmpeg completed without creating a preview.");
   const ffprobePath = input.ffprobePath ?? "ffprobe";
   try {
-    const { stdout } = await execFileAsync(ffprobePath, ["-v", "error", "-show_entries", "stream=codec_type,width,height,r_frame_rate:format=duration", "-of", "json", input.outputPath], { encoding: "utf8", timeout: 30_000, windowsHide: true });
-    const payload = JSON.parse(stdout) as { streams?: Array<{ codec_type?: string; width?: number; height?: number; r_frame_rate?: string }>; format?: { duration?: string } };
+    const { stdout } = await execFileAsync(ffprobePath, ["-v", "error", "-show_entries", "stream=codec_type,codec_name,pix_fmt,width,height,r_frame_rate:format=duration", "-of", "json", input.outputPath], { encoding: "utf8", timeout: 30_000, windowsHide: true });
+    const payload = JSON.parse(stdout) as { streams?: Array<{ codec_type?: string; codec_name?: string; pix_fmt?: string; width?: number; height?: number; r_frame_rate?: string }>; format?: { duration?: string } };
     const video = payload.streams?.find((stream) => stream.codec_type === "video"); const audio = payload.streams?.find((stream) => stream.codec_type === "audio"); const duration = Number(payload.format?.duration);
     const [numerator, denominator] = video?.r_frame_rate?.split("/").map(Number) ?? [];
     const fps = numerator && denominator ? numerator / denominator : Number.NaN;
@@ -48,7 +48,7 @@ export async function renderPreview(input: {
               : [720, 720];
     const outputEndFrame = input.timeline.items.filter((item) => item.track !== "markers").reduce((end, item) => Math.max(end, item.startFrame + item.durationFrames), 0);
     const expectedDuration = outputEndFrame / input.timeline.fps;
-    if (!video?.width || !video.height || video.width !== expectedSize[0] || video.height !== expectedSize[1] || !audio || !Number.isFinite(fps) || Math.abs(fps - input.timeline.fps) > 0.01 || !Number.isFinite(duration) || duration <= 0 || !expectedDuration || Math.abs(duration - expectedDuration) > 0.5) throw new Error("invalid media");
+    if (video?.codec_name !== "h264" || video.pix_fmt !== "yuv420p" || !video.width || !video.height || video.width !== expectedSize[0] || video.height !== expectedSize[1] || !audio || !Number.isFinite(fps) || Math.abs(fps - input.timeline.fps) > 0.01 || !Number.isFinite(duration) || duration <= 0 || !expectedDuration || Math.abs(duration - expectedDuration) > 0.5) throw new Error("invalid media");
     return { outputPath: input.outputPath, durationSeconds: duration, width: video.width, height: video.height, sha256: await getPreviewFileSha256(input.outputPath) };
   } catch { throw new PreviewRenderError("invalid_preview", "Rendered preview failed FFprobe validation."); }
 }

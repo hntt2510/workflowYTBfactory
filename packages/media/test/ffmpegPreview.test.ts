@@ -11,6 +11,7 @@ describe("FFmpeg preview planning", () => {
     expect(plan.join(" ")).toContain("adelay=1000:all=1");
     expect(plan.join(" ")).toContain("amix=inputs=1:duration=longest");
     expect(plan.join(" ")).toContain("apad=whole_dur=1.000000");
+    expect(plan.join(" ")).toContain("-c:v libx264 -pix_fmt yuv420p");
   });
   it("rejects missing or non-contiguous media", () => {
     expect(() => planFfmpegPreviewCommand({ timeline, outputPath: "preview.mp4", resolution: "1080p-vertical", visualInputs: [], audioInputs: [{ filePath: "voice.wav" }] })).toThrow();

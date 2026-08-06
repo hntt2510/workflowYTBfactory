@@ -2,35 +2,38 @@
 
 ## Current flow
 
-New character-first projects currently move through project setup, story/review stages, scene and shot planning, character preparation, visual routing, asset concepts, prompt preparation, manual asset intake/review, voice, subtitles, timeline, preview, QA, and export. Legacy projects retain the provider-oriented visual stages. The renderer already exposes a five-item phase stepper, but most detailed stages remain visible as an admin-style route registry.
+New semi-automatic projects follow `Brief -> Story -> Director -> Assets -> Build`. The manual-first path prepares an approved character, scene-level GG Lab prompts, manual multi-image intake, voice/subtitles/audio, FFmpeg preview, QA, MP4 export, and optional CapCut handoff. Legacy projects retain their provider-based visual pipeline.
 
-## Architectural bottlenecks
+## Current architecture
 
-- `apps/desktop/src/renderer/App.tsx` now contains bootstrap state, app orchestration, and route dispatch in a 385-line module; project creation, Story, production/scene review, and voice screens are feature-owned modules.
-- `AppShell` and `styles.css` provide a dark foundation, but permanent navigation and copy still expose technical routes/statuses instead of a creator journey.
-- Manual asset intake exists and preserves scene assets, but the normal path still shares eligibility and orchestration assumptions with automatic image acquisition.
-- Prompt preparation already compiles scene-level GG Lab prompts and numeric frame manifests, but the creator-facing flow needs a single scene prompt surface and explicit upload gate.
-- FFmpeg command planning and preview validation exist; the repository lacks a deterministic real-media fixture proving the full image/voice/subtitle/audio/output contract.
-- CapCut packaging has a typed adapter and render-safe media preparation, but must remain optional after a valid MP4.
+- `apps/desktop/src/renderer/features/studio` owns the creator shell and phase workspaces; renderer code reaches main only through typed preload APIs.
+- `packages/domain` owns project, character, scene, shot, asset, timeline, eligibility, and backward-compatible parsing rules.
+- `apps/desktop/src/main` owns orchestration, SQLite artifact persistence, safe workspace paths, FFmpeg/FFprobe validation, and optional CapCut preparation.
+- `packages/media` plans contiguous visual/audio timelines, motion approximation, subtitle burn-in, H.264 encoding, and `yuv420p` output.
+- `fixtures/creator-studio-v1` proves three scenes, ten storyboard frames, character continuity metadata, motion, voice, subtitles, optional audio, and a real playable MP4.
 
-## Dead or duplicated paths
+## Verified hardening
 
-- Detailed internal routes are duplicated by the phase stepper and the project overview; they should remain available under an advanced surface without competing with the five phases.
-- Manual and provider asset acquisition share the same stage id; the domain must choose the runner/eligibility by visual workflow without changing legacy behavior.
-- Renderer status labels and action copy are repeated in multiple components and currently leak raw internal vocabulary.
+- FFmpeg preview output explicitly requests `libx264` and `yuv420p`.
+- FFprobe rejects preview artifacts unless they contain the expected canvas/FPS/duration, an audio stream, H.264 video, and `yuv420p` pixels.
+- Prompt Preparation uses the selected project vertical ratio when supported and keeps the legacy long-form default for existing projects.
+- CapCut receives validated intermediate MP4 clips rather than source PNGs.
 
-## Migration risks
+## Known limitations
 
-- Existing SQLite projects may lack newer character, composition, prompt-manifest, or audio metadata; parsing must stay backward-compatible and derive defaults.
-- Stage invalidation is artifact-aware but is still easy to broaden accidentally when replacing a single frame.
-- FFmpeg availability varies by Windows installation; tests must use deterministic probes and report a clear setup action without inventing media.
-- User-uploaded assets must never be overwritten or deleted during normalization, replacement, or render retries.
+- Face-level identity consistency still depends on the image provider; V1 uses approved prompt locks and reference metadata rather than a provider-specific binary identity API.
+- The browser screenshot fallback is presentation-only; real filesystem intake and final media actions require Electron main.
+- CapCut export remains a manual action inside CapCut after the app creates a render-safe draft.
 
-## Implementation phases
+## Verification evidence
 
-1. Normalize manual-first eligibility/orchestration and creator-facing state labels.
-2. Split route-level renderer modules around a shared studio shell and phase model.
-3. Build Director, Prompt Studio, and Asset Intake surfaces on existing typed APIs.
-4. Harden deterministic FFmpeg timeline/audio/asset validation and add the 3-scene fixture.
-5. Preserve optional CapCut handoff, legacy routing, and dependency-aware invalidation.
-6. Run full unit, lint, typecheck, desktop build, Electron/screenshot, and FFprobe verification; then perform read-only review and independent QA.
+```powershell
+corepack pnpm exec vitest run packages/media/test apps/desktop/src/main/previewRenderService.test.ts apps/desktop/src/main/promptPreparationService.test.ts
+corepack pnpm typecheck
+node scripts/verify-electron-ui.cjs
+node fixtures/creator-studio-v1/verify.mjs
+node scripts/capture-ui-screenshots.cjs
+git diff --check
+```
+
+The committed fixture verifies a 1080x1920, 30 FPS H.264/yuv420p video with AAC audio and ten seconds of duration. Screenshot artifacts are under `docs/screenshots`.

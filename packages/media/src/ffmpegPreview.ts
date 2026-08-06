@@ -68,7 +68,7 @@ export function planFfmpegPreviewCommand(input: {
     ? `[v]subtitles='${escapeSubtitlePath(input.subtitleFilePath)}':charenc=UTF-8:force_style='${subtitleStyle(input.subtitlePreset ?? "vox-clean")}'[vs]`
     : "";
   const filters = [videoFilters, videoConcat, subtitleFilter, ...filterParts].filter(Boolean).join(";");
-  return [...args, "-filter_complex", filters, "-map", `[${outputVideoLabel}]`, "-map", "[a]", "-shortest", "-c:v", "libx264", "-c:a", "aac", "-movflags", "+faststart", input.outputPath];
+  return [...args, "-filter_complex", filters, "-map", `[${outputVideoLabel}]`, "-map", "[a]", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", input.outputPath];
 }
 
 function motionFilter(motion: ShotMotionPlan | undefined, width: number, height: number, size: string, fps: number): string {
