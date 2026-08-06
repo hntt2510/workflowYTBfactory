@@ -2,7 +2,7 @@
   "jobId": "JOB-CREATOR-STUDIO-V1",
   "type": "long",
   "title": "Premium creator studio and manual-first video factory",
-  "status": "changes_requested",
+  "status": "active",
   "targetBranch": "chore/setup-agent-harness",
   "assignedRole": "builder",
   "description": "Complete the repository-wide manual-first YouTube creator workflow: five-phase creator UI, scene prompt studio, deterministic asset intake, FFmpeg build output, optional CapCut handoff, modular renderer boundaries, and an executable fixture.",
