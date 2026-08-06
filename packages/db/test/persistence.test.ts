@@ -215,6 +215,26 @@ describe("project persistence", () => {
     db.close();
   });
 
+  it("records system automatic approval metadata for valid Reference Validation", () => {
+    const { db, repo } = openTemp();
+    const project = createFixtureProject({ topic: "reference validation approval", format: "short", targetLanguage: "English", workflowMode: "semi_automatic" });
+    repo.saveProject(project);
+    const store = new WorkflowRunStore(db);
+    const now = "2026-07-30T00:00:00.000Z";
+    store.completeRun({
+      id: "run-reference-validation-automatic", projectId: project.id, stageId: "reference-validation", status: "needs_review",
+      runnerId: "reference-validation-local", runnerVersion: "v1", inputArtifactIds: [], inputFingerprint: "r".repeat(64), outputArtifactIds: ["artifact-reference-validation-automatic"], startedAt: now, finishedAt: now
+    }, {
+      id: "artifact-reference-validation-automatic", projectId: project.id, stageId: "reference-validation", stageRunId: "run-reference-validation-automatic",
+      type: "reference-set.validated", version: 1, status: "needs_review", payloadJson: {}, createdAt: now, updatedAt: now
+    });
+    store.approveReviewRun("run-reference-validation-automatic");
+    expect(store.listRuns(project.id, "reference-validation")[0]?.payloadJson?.approval).toMatchObject({
+      approvedBy: "system", approvalMode: "automatic", actor: "system", mode: "automatic", isUserApproval: false
+    });
+    db.close();
+  });
+
   it("allows Topic Mode Idea Lab approval without reference input artifacts", () => {
     const { db, repo } = openTemp();
     const topicProject = createFixtureProject({ topic: "topic idea approval", format: "short", targetLanguage: "Vietnamese", inputMode: "topic" });
@@ -246,6 +266,63 @@ describe("project persistence", () => {
     db.close();
   });
 
+  it("scopes project row ids while preserving domain ids in payloads", () => {
+    const { db, repo } = openTemp();
+    const scriptSection = {
+      id: "section-hook",
+      purpose: "Open the topic",
+      narration: "Narration",
+      estimatedWords: 1,
+      estimatedSeconds: 1,
+      dramaticFunction: "Create curiosity",
+      linkedClaimIds: [],
+      visualOpportunities: [],
+      proofObjects: [],
+      retentionRisk: "low" as const
+    };
+    const scene = {
+      id: "scene-hook",
+      scriptSectionId: scriptSection.id,
+      narration: scriptSection.narration,
+      purpose: "Open the topic",
+      startFrame: 0,
+      durationFrames: 30,
+      visualMode: "document" as const,
+      emotionalState: "curious",
+      requiredAssets: [],
+      continuityRefs: []
+    };
+    const shot = {
+      id: "shot-hook",
+      sceneId: scene.id,
+      order: 0,
+      startFrame: 0,
+      durationFrames: 30,
+      fps: 30,
+      purpose: "Open the topic",
+      visualMode: "document" as const,
+      framing: "wide",
+      cameraAngle: "front",
+      cameraMovement: "static",
+      subjectAction: "none",
+      startState: {},
+      endState: {},
+      continuityRefs: []
+    };
+    const first = { ...createFixtureProject({ topic: "first scoped project", format: "short", targetLanguage: "English" }), scriptSections: [scriptSection], scenes: [scene], shots: [shot] };
+    const second = { ...createFixtureProject({ topic: "second scoped project", format: "short", targetLanguage: "English" }), scriptSections: [scriptSection], scenes: [scene], shots: [shot] };
+
+    expect(() => {
+      repo.saveProject(first);
+      repo.saveProject(second);
+    }).not.toThrow();
+    expect(repo.loadProject(first.id)?.scenes.map((item) => item.id)).toEqual([scene.id]);
+    expect(repo.loadProject(second.id)?.shots.map((item) => item.id)).toEqual([shot.id]);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM scenes").get()).toEqual({ count: 2 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM shots").get()).toEqual({ count: 2 });
+    db.close();
+  });
+
   it("persists exact stage attention for a blocked automatic approval", () => {
     const { db, repo } = openTemp();
     const project = createFixtureProject({ topic: "automatic attention audit", format: "short", targetLanguage: "English", workflowMode: "semi_automatic" });
@@ -264,7 +341,18 @@ describe("project persistence", () => {
     expect(store.listArtifacts(project.id, "fact-review")[0]?.status).toBe("needs_attention");
     expect(repo.loadProject(project.id)?.stages.find((stage) => stage.id === "fact-review")).toMatchObject({
       status: "needs_attention",
-      attention: { code: "AUTO_APPROVAL_BLOCKED", message: "Blocked fact-review findings must be resolved." }
+      attention: {
+        code: "AUTO_APPROVAL_BLOCKED",
+        message: "Blocked fact-review findings must be resolved.",
+        phase: "Fact Review",
+        safeReason: "Blocked fact-review findings must be resolved.",
+        recommendedAction: "Review stage",
+        retryAction: "Retry stage",
+        actions: [
+          { label: "Review stage", route: "script" },
+          { label: "Retry stage", route: "script" }
+        ]
+      }
     });
     db.close();
   });
@@ -1000,6 +1088,37 @@ describe("project persistence", () => {
       status: "failed",
       payloadJson: { chunks: [{ chunkIndex: 0, status: "completed", chunkFingerprint: "b".repeat(64) }] }
     });
+    db.close();
+  });
+
+  it("round-trips channel character versions and the project character snapshot", () => {
+    const { db, repo } = openTemp();
+    const profile = repo.listChannelProfiles()[0]!;
+    const now = "2026-08-04T00:00:00.000Z";
+    const characterVersion = {
+      id: `${profile.id}-character-v1`,
+      version: 1,
+      status: "approved" as const,
+      name: "Mina",
+      persona: { role: "Finance teacher", ageRange: "30-40", appearance: "Short dark hair", wardrobe: "Navy blazer", palette: "Navy and amber", props: [], gestures: [], tone: "Clear" },
+      invariantTraits: ["round glasses"],
+      prohibitedChanges: ["identity"],
+      references: ["hero", "half_body", "full_body", "teaching_gesture", "three_quarter"].map((view, index) => ({ id: `character-reference-${index}`, view: view as "hero" | "half_body" | "full_body" | "teaching_gesture" | "three_quarter", status: "approved" as const, relativeFilePath: `characters/${view}.png` })),
+      createdAt: now,
+      updatedAt: now
+    };
+    const savedProfile = { ...profile, characterVersions: [characterVersion], activeCharacterVersionId: characterVersion.id };
+    repo.saveChannelProfile(savedProfile);
+    const project = createFixtureProject({ profiles: [savedProfile], selectedProfileId: profile.id, characterVersionId: characterVersion.id, topic: "Character snapshot", format: "short", targetLanguage: "Vietnamese" });
+    project.assetConcepts = [{ id: "asset-1", shotId: "shot-1", semanticBeat: "Cash rises", kind: "object", role: "Money", description: "A rising stack", visualConstraints: [], colorPalette: ["green"], motionIntent: "slide up", needsReferenceImage: false }];
+    repo.saveProject(project);
+
+    const loadedProfile = repo.loadChannelProfile(profile.id);
+    const loadedProject = repo.loadProject(project.id);
+    expect(loadedProfile?.activeCharacterVersionId).toBe(characterVersion.id);
+    expect(loadedProfile?.characterVersions?.[0]?.references).toHaveLength(5);
+    expect(loadedProject?.setup.characterVersionId).toBe(characterVersion.id);
+    expect(loadedProject?.assetConcepts?.[0]?.semanticBeat).toBe("Cash rises");
     db.close();
   });
 

@@ -1,45 +1,55 @@
 import {
-  Archive,
   Boxes,
   ChevronLeft,
   ChevronRight,
   FileText,
-  FlaskConical,
   FolderKanban,
   Gauge,
   HardDrive,
   Image,
   KeyRound,
-  Layers3,
   ListChecks,
   Mic2,
+  MonitorPlay,
   Play,
   Plus,
   Route,
-  Search,
   Settings,
   ShieldCheck,
   TerminalSquare,
   Video
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
-import { resolveStageEligibilities, workflowStageDefinitions } from "@lsf/domain";
-import type { ChannelProfile, FactoryProject, WorkflowStageStatus } from "@lsf/domain";
-import { projectRoutes, routeLabel, type RouteId, workspaceRoutes } from "../navigation";
+import { useRef, type ReactNode } from "react";
+import { useGSAP } from "@gsap/react";
+import gsap from "gsap";
+import type { ChannelProfile, FactoryProject } from "@lsf/domain";
+import { creatorPhaseDefinitions, creatorRouteLabel, creatorStageLabel, creatorStatusLabel } from "../creatorStudioCopy";
+import { type RouteId, workspaceRoutes } from "../navigation";
 import type { ProjectSummary, QueueSnapshot } from "../types";
 import { currentStage } from "../utils";
 
+gsap.registerPlugin(useGSAP);
+
 const routeIcons: Record<RouteId, LucideIcon> = {
+  content: FileText,
+  director: Video,
+  assets: Image,
+  build: MonitorPlay,
   dashboard: Gauge,
   projects: FolderKanban,
+  create: Plus,
+  production: Play,
+  "scene-review": Video,
+  "final-preview": MonitorPlay,
+  export: ListChecks,
+  "advanced-pipeline": ListChecks,
   "new-project": Plus,
-  "project-overview": Layers3,
+  "project-overview": FileText,
   "channel-profiles": Route,
   "reference-intake": FileText,
-  "competitor-dna": Search,
-  "idea-lab": FlaskConical,
-  "research-claims": ShieldCheck,
+  "competitor-dna": FileText,
+  "idea-lab": FileText,
   script: FileText,
   scenes: Video,
   shots: Boxes,
@@ -47,7 +57,6 @@ const routeIcons: Record<RouteId, LucideIcon> = {
   voice: Mic2,
   timeline: ListChecks,
   qa: ShieldCheck,
-  export: Archive,
   "production-queue": Play,
   "asset-library": HardDrive,
   providers: KeyRound,
@@ -68,7 +77,7 @@ export function AppShell(props: {
   setRoute: (route: RouteId) => void;
 }) {
   return (
-    <main className="admin-shell">
+    <main className="admin-shell studio-shell">
       <Sidebar collapsed={props.collapsed} route={props.route} setRoute={props.setRoute} selectedProject={props.selectedProject} />
       <section className="app-main">
         <TopBar
@@ -82,7 +91,8 @@ export function AppShell(props: {
           onOpenProject={props.onOpenProject}
           setRoute={props.setRoute}
         />
-        <section className="content-scroll">{props.children}</section>
+        {props.selectedProject ? <ProjectPhaseStepper project={props.selectedProject} route={props.route} setRoute={props.setRoute} /> : null}
+        <section className="content-scroll"><RouteTransition route={props.route}>{props.children}</RouteTransition></section>
       </section>
     </main>
   );
@@ -97,46 +107,63 @@ function Sidebar(props: {
   return (
     <aside className={`sidebar ${props.collapsed ? "collapsed" : ""}`}>
       <div className="brand">
-        <Boxes size={22} />
+        <span className="brand-mark"><Boxes size={19} /></span>
         <span>Long/Short Factory</span>
       </div>
-      <nav aria-label="Workspace navigation">
+      <nav aria-label="Điều hướng không gian làm việc">
+        <p className="nav-heading">Không gian</p>
         <NavGroup items={workspaceRoutes} route={props.route} setRoute={props.setRoute} collapsed={props.collapsed} />
-        {props.selectedProject ? (
-          <>
-            <div className="nav-heading">Project</div>
-            <NavGroup items={projectRoutes} route={props.route} setRoute={props.setRoute} collapsed={props.collapsed} selectedProject={props.selectedProject} />
-          </>
-        ) : null}
       </nav>
+      <div className="sidebar-footer">
+        <span className="sidebar-footer-dot" />
+        <span>{props.selectedProject ? "Bản nháp cục bộ" : "Chưa mở dự án"}</span>
+      </div>
     </aside>
   );
 }
 
-function NavGroup(props: {
-  items: Array<{ id: RouteId; label: string }>;
-  route: RouteId;
-  setRoute: (route: RouteId) => void;
-  collapsed: boolean;
-  selectedProject?: FactoryProject | null;
-}) {
-  const stageStatusByRoute = props.selectedProject ? routeStageStatuses(props.selectedProject) : new Map<RouteId, WorkflowStageStatus>();
+function RouteTransition(props: { route: RouteId; children: ReactNode }) {
+  const root = useRef<HTMLDivElement>(null);
+  useGSAP(() => {
+    const media = gsap.matchMedia();
+    media.add({ reduceMotion: "(prefers-reduced-motion: reduce)" }, (context) => {
+      const panel = root.current;
+      if (!panel) return;
+      gsap.set(panel, { autoAlpha: 1, y: 0 });
+      if (context.conditions?.reduceMotion) return;
+      gsap.timeline({ defaults: { duration: 0.2, ease: "power2.out" } })
+        .fromTo(panel, { autoAlpha: 0, y: 7 }, { autoAlpha: 1, y: 0 });
+    }, root);
+    return () => media.revert();
+  }, { scope: root, dependencies: [props.route], revertOnUpdate: true });
+  return <div ref={root} data-route={props.route}>{props.children}</div>;
+}
+
+function ProjectPhaseStepper(props: { project: FactoryProject; route: RouteId; setRoute: (route: RouteId) => void }) {
+  const root = useRef<HTMLDivElement>(null);
+  useGSAP(() => {
+    const media = gsap.matchMedia();
+    media.add({ reduceMotion: "(prefers-reduced-motion: reduce)" }, (context) => {
+      const items = gsap.utils.toArray<HTMLElement>(".phase-step", root.current ?? undefined);
+      gsap.set(items, { autoAlpha: 1, y: 0 });
+      if (context.conditions?.reduceMotion) return;
+      gsap.timeline({ defaults: { duration: 0.18, ease: "power2.out" } })
+        .fromTo(items, { autoAlpha: 0, y: -5 }, { autoAlpha: 1, y: 0, stagger: 0.035 });
+    }, root);
+    return () => media.revert();
+  }, { scope: root, dependencies: [props.route, props.project.id], revertOnUpdate: true });
+
   return (
-    <div className="nav-group">
-      {props.items.map((item) => {
-        const Icon = routeIcons[item.id];
-        const status = stageStatusByRoute.get(item.id);
+    <div className="phase-stepper" ref={root} aria-label="Lộ trình sản xuất">
+      {creatorPhaseDefinitions.map((phase, index) => {
+        const active = phaseRouteMatches(phase.id, props.route);
+        const rawState = phaseState(props.project, phase.stageIds, index);
+        const state = active && rawState === "ready" ? "current" : rawState;
         return (
-          <button
-            className={`nav-button ${props.route === item.id ? "active" : ""}`}
-            key={item.id}
-            title={props.collapsed ? item.label : undefined}
-            type="button"
-            onClick={() => props.setRoute(item.id)}
-          >
-            <Icon size={17} />
-            <span>{item.label}</span>
-            {status ? <small className={`nav-status tone-${statusTone(status)}`}>{status.replaceAll("_", " ")}</small> : null}
+          <button className={`phase-step phase-${state} ${active ? "active" : ""}`} key={phase.id} type="button" disabled={state === "locked"} aria-current={active ? "step" : undefined} onClick={() => props.setRoute(phase.route)}>
+            <span className="phase-number">{index + 1}</span>
+            <span className="phase-copy"><strong>{phase.label}</strong><small>{phase.description}</small></span>
+            <span className="phase-state">{creatorStatusLabel(state)}</span>
           </button>
         );
       })}
@@ -144,24 +171,49 @@ function NavGroup(props: {
   );
 }
 
-function routeStageStatuses(project: FactoryProject): Map<RouteId, WorkflowStageStatus> {
-  const statuses = new Map<RouteId, WorkflowStageStatus>();
-  const eligibilities = resolveStageEligibilities(project);
-  for (const route of projectRoutes) {
-    const stageIds: Set<string> = new Set(workflowStageDefinitions.filter((stage) => stage.screenRoute === route.id).map((stage) => stage.id));
-    const routeEligibilities = eligibilities.filter((eligibility) => stageIds.has(eligibility.stageId));
-    const status = routeEligibilities.find((eligibility) => eligibility.status !== "approved")?.status ?? routeEligibilities.at(-1)?.status;
-    if (status) statuses.set(route.id, status);
-  }
-  return statuses;
+type CreatorPhaseState = "complete" | "current" | "attention" | "locked" | "ready";
+
+function phaseState(project: FactoryProject, stageIds: readonly string[], index: number): Exclude<CreatorPhaseState, "current"> {
+  const statuses = stageIds.map((stageId) => project.stages.find((stage) => stage.id === stageId)?.status ?? "not_started");
+  if (statuses.some((status) => ["needs_attention", "failed", "rejected", "stale"].includes(status))) return "attention";
+  const applicable = statuses;
+  if (applicable.length > 0 && applicable.every((status) => status === "approved")) return "complete";
+  if (statuses.some((status) => ["running", "queued", "needs_review"].includes(status))) return "ready";
+  const priorPhasesComplete = creatorPhaseDefinitions.slice(0, index).every((phase) => {
+    const priorStatuses = phase.stageIds.map((stageId) => project.stages.find((stage) => stage.id === stageId)?.status ?? "not_started");
+    const priorApplicable = priorStatuses;
+    return priorApplicable.length > 0 && priorApplicable.every((status) => status === "approved");
+  });
+  return priorPhasesComplete ? "ready" : "locked";
 }
 
-function statusTone(status: WorkflowStageStatus): "success" | "warning" | "danger" | "info" | "default" {
-  if (status === "approved") return "success";
-  if (status === "blocked" || status === "not_started" || status === "stale") return "warning";
-  if (status === "failed" || status === "rejected") return "danger";
-  if (status === "running" || status === "queued" || status === "needs_review" || status === "ready") return "info";
-  return "default";
+function phaseRouteMatches(phaseId: string, route: RouteId): boolean {
+  if (phaseId === "brief") return ["content", "project-overview"].includes(route);
+  if (phaseId === "story") return ["script", "idea-lab", "reference-intake", "competitor-dna"].includes(route);
+  if (phaseId === "director") return ["director", "scenes", "shots", "visuals"].includes(route);
+  if (phaseId === "assets") return ["assets", "scene-review"].includes(route);
+  return ["build", "voice", "timeline", "qa", "final-preview", "export"].includes(route);
+}
+
+function NavGroup(props: {
+  items: Array<{ id: RouteId; label: string }>;
+  route: RouteId;
+  setRoute: (route: RouteId) => void;
+  collapsed: boolean;
+}) {
+  return (
+    <div className="nav-group">
+      {props.items.map((item) => {
+        const Icon = routeIcons[item.id];
+        return (
+          <button className={`nav-button ${props.route === item.id ? "active" : ""}`} key={item.id} title={props.collapsed ? item.label : undefined} type="button" onClick={() => props.setRoute(item.id)}>
+            <Icon size={17} />
+            <span>{item.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function TopBar(props: {
@@ -175,57 +227,34 @@ function TopBar(props: {
   onOpenProject: (projectId: string) => Promise<void>;
   setRoute: (route: RouteId) => void;
 }) {
-  const saveState = props.selectedProject ? "SQLite saved" : "No open save";
-  const status = props.selectedProject ? currentStage(props.selectedProject) : "Idle";
+  const saveState = props.selectedProject ? "Đã lưu cục bộ" : "Chưa mở dự án";
+  const stage = props.selectedProject ? creatorStageLabel(currentStage(props.selectedProject)) : "Chọn một dự án để bắt đầu";
+  const queueActive = props.queue.running > 0 || props.queue.jobs.length > 0;
   return (
     <header className="topbar">
-      <button className="icon-button" onClick={props.onToggle} type="button" aria-label="Toggle sidebar">
+      <button className="icon-button topbar-toggle" onClick={props.onToggle} type="button" aria-label="Thu gọn hoặc mở thanh điều hướng">
         {props.collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
       </button>
       <div className="topbar-project">
-        <strong>{props.selectedProject?.setup.projectName ?? props.selectedProject?.topic ?? "No project open"}</strong>
-        <span>
-          {routeLabel(props.route)} / {status} / {saveState}
-          {props.selectedProfile ? ` / ${props.selectedProfile.name}` : ""}
-        </span>
+        <span className="topbar-breadcrumb">{creatorRouteLabel(props.route)}</span>
+        <strong>{props.selectedProject?.setup.projectName ?? props.selectedProject?.topic ?? "Long/Short Factory"}</strong>
+        <span>{stage} · {saveState}{props.selectedProfile ? ` · ${props.selectedProfile.name}` : ""}</span>
       </div>
       <div className="topbar-actions">
         <label className="project-switcher">
-          <span>Project</span>
-          <select
-            value={props.selectedProject?.id ?? ""}
-            onChange={(event) => {
-              if (event.target.value) void props.onOpenProject(event.target.value);
-            }}
-          >
-            <option value="">No project open</option>
-            {props.projects.map((project) => (
-              <option key={project.id} value={project.id}>{project.projectName || project.topic}</option>
-            ))}
+          <span>Dự án</span>
+          <select value={props.selectedProject?.id ?? ""} onChange={(event) => { if (event.target.value) void props.onOpenProject(event.target.value); }}>
+            <option value="">Chọn dự án</option>
+            {props.projects.map((project) => <option key={project.id} value={project.id}>{project.projectName || project.topic}</option>)}
           </select>
         </label>
-        <div className="search-placeholder" aria-label="Search unavailable">
-          <Search size={15} />
-          <span>Search unavailable</span>
-        </div>
-        <button className="queue-chip" type="button" onClick={() => props.setRoute("production-queue")}>
-          <Play size={15} />
-          {props.queue.running} running / {props.queue.jobs.length} jobs
-        </button>
-        <button className="icon-button" type="button" aria-label="Open settings" onClick={() => props.setRoute("settings")}>
-          <Settings size={17} />
-        </button>
+        {queueActive ? <button className="queue-chip" type="button" onClick={() => props.setRoute("production-queue")}><Play size={15} /> {props.queue.running} đang chạy</button> : null}
+        <button className="icon-button" type="button" aria-label="Mở cài đặt" onClick={() => props.setRoute("settings")}><Settings size={17} /></button>
       </div>
     </header>
   );
 }
 
 export function LoadingScreen() {
-  return (
-    <div className="skeleton-stack" aria-label="Loading application state">
-      <div />
-      <div />
-      <div />
-    </div>
-  );
+  return <div className="skeleton-stack" aria-label="Đang tải trạng thái ứng dụng"><div /><div /><div /></div>;
 }

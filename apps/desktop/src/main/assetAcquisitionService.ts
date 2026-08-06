@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { safeAssetFilename } from "@lsf/media";
 import { NineRouterClient, NineRouterImageGenerationError } from "@lsf/providers";
 
@@ -46,6 +46,46 @@ export interface AssetAcquisitionPlan {
     aspectRatio: "16:9" | "9:16";
   }>;
   preservedAssets: AcquiredImageAsset[];
+}
+
+/** Maps GG Lab's numeric filename to the storyboard slot, including REUSE gaps. */
+export function mapNumericAssetFilename(input: {
+  sourcePath: string;
+  targetShotIds: string[];
+  frameToShotId?: ReadonlyMap<string, string>;
+}): string | undefined {
+  const match = basename(input.sourcePath).match(/(?:^|[^0-9])(\d{1,3})(?:[^0-9]|$)/);
+  if (!match?.[1]) return undefined;
+  const frameNumber = match[1].padStart(3, "0");
+  return input.frameToShotId?.get(frameNumber) ?? input.targetShotIds[Number(match[1]) - 1];
+}
+
+export function resolveReusableAssetAssignments(
+  shots: Array<{ id: string; visualMode: string; continuityRefs: string[]; order?: number | undefined; startFrame?: number | undefined; approvedAssetId?: string | undefined }>,
+  assignedAssetIds: ReadonlyMap<string, string>
+): Map<string, string> {
+  const resolved = new Map(assignedAssetIds);
+  for (const shot of shots) {
+    if (shot.approvedAssetId && !resolved.has(shot.id)) resolved.set(shot.id, shot.approvedAssetId);
+  }
+
+  const orderedShots = shots
+    .map((shot, index) => ({ shot, index }))
+    .sort((left, right) => (left.shot.startFrame ?? Number.POSITIVE_INFINITY) - (right.shot.startFrame ?? Number.POSITIVE_INFINITY)
+      || (left.shot.order ?? Number.POSITIVE_INFINITY) - (right.shot.order ?? Number.POSITIVE_INFINITY)
+      || left.index - right.index)
+    .map(({ shot }) => shot);
+  for (const shot of orderedShots) {
+    if (shot.visualMode !== "reuse" || resolved.has(shot.id)) continue;
+    const shotPosition = orderedShots.indexOf(shot);
+    const sourceShotId = shot.continuityRefs.find((reference) => {
+      const sourcePosition = orderedShots.findIndex((candidate) => candidate.id === reference);
+      return sourcePosition >= 0 && sourcePosition < shotPosition && resolved.has(reference);
+    });
+    const sourceAssetId = sourceShotId ? resolved.get(sourceShotId) : undefined;
+    if (sourceAssetId) resolved.set(shot.id, sourceAssetId);
+  }
+  return resolved;
 }
 
 export function planAssetAcquisition(input: {

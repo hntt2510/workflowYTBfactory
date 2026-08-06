@@ -6,9 +6,9 @@ const buckets = [
   { label: "stretch", researchRisk: "high", productionDifficulty: "high" }
 ] as const;
 
-export function generateIdeaLab(topic: string, profile: ChannelProfile, count = 12): IdeaCandidate[] {
+export function generateIdeaLab(topic: string, profile: ChannelProfile, count = 6): IdeaCandidate[] {
   return Array.from({ length: count }, (_, index) => {
-    const bucket = buckets[Math.floor(index / 4)] ?? buckets[2];
+    const bucket = buckets[Math.min(Math.floor(index / Math.ceil(count / buckets.length)), buckets.length - 1)] ?? buckets[2];
     const ordinal = index + 1;
     return {
       id: `idea-${ordinal.toString().padStart(2, "0")}`,
@@ -32,4 +32,3 @@ export function generateIdeaLab(topic: string, profile: ChannelProfile, count = 
     };
   });
 }
-

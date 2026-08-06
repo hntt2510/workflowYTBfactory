@@ -1,5 +1,6 @@
-import type { FactoryProject } from "@lsf/domain";
-import { normalizeProjectStages, seedChannelProfiles } from "@lsf/domain";
+import type { ChannelProfile, FactoryProject } from "@lsf/domain";
+import { normalizeProjectStages, resolveWorkflowProgress, seedChannelProfiles } from "@lsf/domain";
+import type { WorkflowStageStatus } from "@lsf/domain";
 import type { FactoryDatabase } from "./connection";
 
 export interface ProjectSummary {
@@ -11,6 +12,9 @@ export interface ProjectSummary {
   targetLanguage: string;
   targetDuration: string;
   updatedAt: string;
+  currentStageId?: string;
+  currentStageStatus?: WorkflowStageStatus;
+  progressPercent: number;
 }
 
 interface ProjectRow {
@@ -36,6 +40,10 @@ interface ProjectSummaryRow {
   target_language: string;
   payload_json: string;
   updated_at: string;
+}
+
+function projectRowId(projectId: string, rowId: string): string {
+  return `${projectId}:${rowId}`;
 }
 
 export class ProjectRepository {
@@ -75,9 +83,11 @@ export class ProjectRepository {
           JSON.stringify({
             stages: project.stages,
             timelineFps: project.timeline.fps,
-            setup: project.setup,
+           setup: project.setup,
+            synthetic: project.synthetic === true,
             referenceSet: project.referenceSet,
-            competitorReferences: project.competitorReferences
+            competitorReferences: project.competitorReferences,
+            assetConcepts: project.assetConcepts
           })
         );
 
@@ -100,12 +110,15 @@ export class ProjectRepository {
     const payload = JSON.parse(projectRow.payload_json) as {
       stages: FactoryProject["stages"];
       timelineFps: number;
+	      synthetic?: boolean;
 	      setup?: FactoryProject["setup"];
-	      referenceSet?: FactoryProject["referenceSet"];
-	      competitorReferences?: FactoryProject["competitorReferences"];
+      referenceSet?: FactoryProject["referenceSet"];
+      competitorReferences?: FactoryProject["competitorReferences"];
+      assetConcepts?: FactoryProject["assetConcepts"];
 	    };
     return {
       id: projectRow.id,
+      ...(payload.synthetic ? { synthetic: true } : {}),
       topic: projectRow.topic,
       format: projectRow.format as FactoryProject["format"],
       targetLanguage: projectRow.target_language,
@@ -118,7 +131,7 @@ export class ProjectRepository {
         },
       profileId: projectRow.profile_id,
       routeDecision: JSON.parse(projectRow.route_decision_json) as FactoryProject["routeDecision"],
-      stages: normalizeProjectStages(payload.stages ?? []),
+      stages: normalizeProjectStages(payload.stages ?? [], payload.setup?.visualWorkflow),
       referenceSet: payload.referenceSet ?? { status: payload.competitorReferences?.length ? "needs_validation" : "not_started" },
       ideas: this.loadPayloadRows("ideas", projectId),
       ...(projectRow.approved_idea_id ? { approvedIdeaId: projectRow.approved_idea_id } : {}),
@@ -127,6 +140,7 @@ export class ProjectRepository {
 	      scriptSections: this.loadPayloadRows("script_sections", projectId),
       scenes: this.loadPayloadRows("scenes", projectId),
       shots: this.loadPayloadRows("shots", projectId),
+      ...(payload.assetConcepts ? { assetConcepts: payload.assetConcepts } : {}),
       timeline: {
         fps: payload.timelineFps,
         items: this.loadPayloadRows("timeline_items", projectId)
@@ -147,6 +161,11 @@ export class ProjectRepository {
           language: item.target_language,
           workflowMode: "guided" as const
         };
+        const project = this.loadProject(item.id);
+        const progress = project ? resolveWorkflowProgress(project) : undefined;
+        const currentStage = progress?.currentStageId
+          ? progress.stages.find((stage) => stage.stageId === progress.currentStageId)
+          : undefined;
         return {
           id: item.id,
           topic: item.topic,
@@ -155,7 +174,9 @@ export class ProjectRepository {
           projectName: setup.projectName,
           targetLanguage: setup.language,
           targetDuration: setup.targetDuration,
-          updatedAt: item.updated_at
+          updatedAt: item.updated_at,
+          progressPercent: progress?.percent ?? 0,
+          ...(currentStage ? { currentStageId: currentStage.stageId, currentStageStatus: currentStage.internalStatus } : {})
         };
       });
   }
@@ -172,18 +193,35 @@ export class ProjectRepository {
     const statement = this.db.prepare(
       `INSERT INTO channel_profiles (id, name, payload_json, updated_at)
        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(id) DO UPDATE SET name = excluded.name, payload_json = excluded.payload_json, updated_at = CURRENT_TIMESTAMP`
+       ON CONFLICT(id) DO NOTHING`
     );
     for (const profile of seedChannelProfiles) {
       statement.run(profile.id, profile.name, JSON.stringify(profile));
     }
   }
 
+  listChannelProfiles(): ChannelProfile[] {
+    this.seedProfiles();
+    return (this.db.prepare("SELECT payload_json FROM channel_profiles ORDER BY name").all() as Array<{ payload_json: string }>).map((row) => JSON.parse(row.payload_json) as ChannelProfile);
+  }
+
+  saveChannelProfile(profile: ChannelProfile): void {
+    this.db.prepare(
+      `INSERT INTO channel_profiles (id, name, payload_json, updated_at)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(id) DO UPDATE SET name = excluded.name, payload_json = excluded.payload_json, updated_at = CURRENT_TIMESTAMP`
+    ).run(profile.id, profile.name, JSON.stringify(profile));
+  }
+
+  loadChannelProfile(profileId: string): ChannelProfile | undefined {
+    return this.listChannelProfiles().find((profile) => profile.id === profileId);
+  }
+
   private replaceRows(table: string, projectId: string, rows: Array<{ id: string }>): void {
     this.db.prepare(`DELETE FROM ${table} WHERE project_id = ?`).run(projectId);
     const statement = this.db.prepare(`INSERT INTO ${table} (id, project_id, payload_json) VALUES (?, ?, ?)`);
     for (const row of rows) {
-      statement.run(row.id, projectId, JSON.stringify(row));
+      statement.run(projectRowId(projectId, row.id), projectId, JSON.stringify(row));
     }
   }
 
@@ -197,7 +235,7 @@ export class ProjectRepository {
       "INSERT INTO script_sections (id, project_id, script_version_id, section_order, payload_json) VALUES (?, ?, ?, ?, ?)"
     );
     project.scriptSections.forEach((section, index) =>
-      statement.run(section.id, project.id, versionId, index, JSON.stringify(section))
+      statement.run(projectRowId(project.id, section.id), project.id, versionId, index, JSON.stringify(section))
     );
   }
 
@@ -207,7 +245,14 @@ export class ProjectRepository {
       "INSERT INTO scenes (id, project_id, script_section_id, start_frame, duration_frames, payload_json) VALUES (?, ?, ?, ?, ?, ?)"
     );
     for (const scene of project.scenes) {
-      statement.run(scene.id, project.id, scene.scriptSectionId, scene.startFrame, scene.durationFrames, JSON.stringify(scene));
+      statement.run(
+        projectRowId(project.id, scene.id),
+        project.id,
+        projectRowId(project.id, scene.scriptSectionId),
+        scene.startFrame,
+        scene.durationFrames,
+        JSON.stringify(scene)
+      );
     }
   }
 
@@ -218,9 +263,9 @@ export class ProjectRepository {
     );
     for (const shot of project.shots) {
       statement.run(
-        shot.id,
+        projectRowId(project.id, shot.id),
         project.id,
-        shot.sceneId,
+        projectRowId(project.id, shot.sceneId),
         shot.order,
         shot.startFrame,
         shot.durationFrames,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createFixtureProject, type FactoryProject } from "@lsf/domain";
-import { hasSemiAutomaticAttention, nextSemiAutomaticChain, runAssetChain, runIdeaChain, runPreviewChain, runReferenceChain, type SemiAutomaticClient } from "./semiAutomaticWorkflow";
+import { characterReferenceViewsForCount, createFixtureProject, seedChannelProfiles, type FactoryProject } from "@lsf/domain";
+import { characterVersionNeedsSetup, hasSemiAutomaticAttention, nextSemiAutomaticChain, runAssetChain, runIdeaChain, runPreviewChain, runReferenceChain, type SemiAutomaticClient } from "./semiAutomaticWorkflow";
 
 function projectWithApprovedReferences(): FactoryProject {
   const project = createFixtureProject({
@@ -8,6 +8,7 @@ function projectWithApprovedReferences(): FactoryProject {
     format: "short",
     targetLanguage: "English",
     workflowMode: "semi_automatic",
+    visualWorkflow: "legacy",
     competitorReference: { pastedTranscript: "First transcript" }
   });
   return {
@@ -69,7 +70,9 @@ function referenceClient(project: FactoryProject, events: string[], failAt?: str
     runRetentionReview: runWhole("retention-review"), approveRetentionReview: approveWhole("retention-review"),
     runScenePlan: runWhole("scene-plan"), approveScenePlan: approveWhole("scene-plan"),
     runShotPlan: runWhole("shot-plan"), approveShotPlan: approveWhole("shot-plan"),
+    runCharacterPreparation: runWhole("character-preparation"),
     runVisualRouting: runWhole("visual-routing"), approveVisualRouting: approveWhole("visual-routing"),
+    runAssetConcepts: async ({ projectId }: { projectId: string }) => { events.push("run:asset-concepts"); project = setStatus(project, "asset-concepts", "approved"); return project; },
     runPromptPreparation: runWhole("prompt-preparation"), approvePromptPreparation: approveWhole("prompt-preparation"),
     runAssetAcquisition: runWhole("asset-acquisition"), approveAssetAcquisition: approveWhole("asset-acquisition"),
     runAssetReview: runWhole("asset-review"),
@@ -84,6 +87,39 @@ function referenceClient(project: FactoryProject, events: string[], failAt?: str
 }
 
 describe("semi-automatic reference chain", () => {
+  it("requires channel character setup for unbound character-first projects", () => {
+    const characterFirst = createFixtureProject({ topic: "Character setup", format: "short", targetLanguage: "English", workflowMode: "semi_automatic", visualWorkflow: "character_first" });
+    const legacy = createFixtureProject({ topic: "Legacy setup", format: "short", targetLanguage: "English", workflowMode: "semi_automatic", visualWorkflow: "legacy" });
+    expect(characterVersionNeedsSetup(characterFirst, undefined)).toBe(true);
+    expect(characterVersionNeedsSetup(legacy, undefined)).toBe(false);
+
+    const activeProfile = {
+      ...seedChannelProfiles[0]!,
+      activeCharacterVersionId: "character-active",
+      characterVersions: [{
+        id: "character-active",
+        version: 1,
+        status: "approved" as const,
+        name: "Teacher",
+        persona: { role: "Teacher", ageRange: "30-45", appearance: "Clear", wardrobe: "Blazer", palette: "Navy", props: [], gestures: [], tone: "Calm" },
+        invariantTraits: ["Same face"],
+        prohibitedChanges: ["No identity changes"],
+        references: characterReferenceViewsForCount(4).map((view, index) => ({
+          id: `reference-${index}`,
+          view,
+          status: "approved" as const,
+          relativeFilePath: `assets/character-${index}.png`,
+          sha256: "a".repeat(64),
+          mimeType: "image/png" as const
+        })),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z"
+      }]
+    };
+    expect(characterVersionNeedsSetup(characterFirst, activeProfile)).toBe(false);
+    expect(characterVersionNeedsSetup({ ...characterFirst, setup: { ...characterFirst.setup, characterVersionId: "stale-character" } }, activeProfile)).toBe(false);
+  });
+
   it("selects the next chain after restart without crossing checkpoints", () => {
     const project = projectWithApprovedReferences();
     expect(nextSemiAutomaticChain(project)).toBe("reference");
@@ -94,9 +130,19 @@ describe("semi-automatic reference chain", () => {
     const assetReview = setStatus(ideaApproved, "asset-review", "needs_review");
     expect(nextSemiAutomaticChain(assetReview)).toBeUndefined();
     const assetsApproved = setStatus(ideaApproved, "asset-review", "approved");
-    expect(nextSemiAutomaticChain(assetsApproved)).toBe("assets");
-    const previewApproved = setStatus(assetsApproved, "preview-render", "approved");
+    expect(nextSemiAutomaticChain(assetsApproved)).toBeUndefined();
+    const voiceApproved = setStatus(assetsApproved, "voice-generation", "approved");
+    expect(nextSemiAutomaticChain(voiceApproved)).toBe("assets");
+    const previewApproved = setStatus(voiceApproved, "preview-render", "approved");
     expect(nextSemiAutomaticChain(previewApproved)).toBe("preview");
+  });
+
+  it("does not auto-resume character-first production before the character checkpoint", () => {
+    const characterFirst = createFixtureProject({ topic: "Character checkpoint", format: "short", targetLanguage: "English", workflowMode: "semi_automatic", visualWorkflow: "character_first" });
+    const ideaApproved = setStatus(characterFirst, "idea-lab", "approved");
+    expect(nextSemiAutomaticChain(ideaApproved)).toBeUndefined();
+    const characterApproved = setStatus(ideaApproved, "character-preparation", "approved");
+    expect(nextSemiAutomaticChain(characterApproved)).toBe("idea");
   });
 
   it("does not treat an automatic stage failure as a human checkpoint", () => {
@@ -114,21 +160,24 @@ describe("semi-automatic reference chain", () => {
     expect(result.stages.find((stage) => stage.id === "idea-lab")?.status).toBe("needs_review");
   });
 
-  it("keeps the reference validation checkpoint human-actionable", () => {
+  it("keeps invalid reference validation blocking while valid validation is automatic", () => {
     const project = setStatus(projectWithApprovedReferences(), "reference-validation", "needs_attention");
     expect(hasSemiAutomaticAttention(project)).toBe(true);
     expect(nextSemiAutomaticChain(project)).toBeUndefined();
+    const valid = projectWithApprovedReferences();
+    expect(hasSemiAutomaticAttention(valid)).toBe(false);
   });
 
   it("resumes the correct automatic chain for failures in every segment", () => {
     const base = projectWithApprovedReferences();
     const ideaApproved = setStatus(base, "idea-lab", "approved");
     const assetsApproved = setStatus(ideaApproved, "asset-review", "approved");
-    const previewApproved = setStatus(assetsApproved, "preview-render", "approved");
+    const voiceApproved = setStatus(assetsApproved, "voice-generation", "approved");
+    const previewApproved = setStatus(voiceApproved, "preview-render", "approved");
     const cases: Array<[FactoryProject, "reference" | "idea" | "assets" | "preview"]> = [
       [setStatus(base, "transcript-cleaning", "needs_attention"), "reference"],
       [setStatus(ideaApproved, "outline", "needs_attention"), "idea"],
-      [setStatus(assetsApproved, "scene-plan", "needs_attention"), "assets"],
+      [setStatus(voiceApproved, "scene-plan", "needs_attention"), "assets"],
       [setStatus(previewApproved, "qa", "needs_attention"), "preview"]
     ];
     for (const [project, chain] of cases) {
@@ -164,19 +213,24 @@ describe("semi-automatic reference chain", () => {
     expect(events.some((event) => event.startsWith("attention:"))).toBe(true);
   });
 
-  it("pauses at the final preview checkpoint before QA", async () => {
+  it("pauses at Voice before generating audio", async () => {
     const project = projectWithApprovedReferences();
     const ideaApproved = setStatus(project, "idea-lab", "approved");
     const assetReviewApproved = setStatus(ideaApproved, "asset-review", "approved");
     const events: string[] = [];
     const result = await runAssetChain(referenceClient(assetReviewApproved, events), { project: assetReviewApproved });
-    expect(events).toEqual([
-      "run:voice-generation", "approve:voice-generation",
+    expect(events).toEqual([]);
+    expect(result.stages.find((stage) => stage.id === "voice-generation")?.status).not.toBe("approved");
+
+    const voiceApproved = setStatus(assetReviewApproved, "voice-generation", "approved");
+    const resumedEvents: string[] = [];
+    const resumed = await runAssetChain(referenceClient(voiceApproved, resumedEvents), { project: voiceApproved });
+    expect(resumedEvents).toEqual([
       "run:subtitle-preparation", "approve:subtitle-preparation",
       "run:timeline-assembly", "approve:timeline-assembly",
       "run:preview-render"
     ]);
-    expect(result.stages.find((stage) => stage.id === "preview-render")?.status).toBe("needs_review");
+    expect(resumed.stages.find((stage) => stage.id === "preview-render")?.status).toBe("needs_review");
   });
 
   it("runs packaging directly after QA without invoking CapCut", async () => {
@@ -209,14 +263,14 @@ describe("semi-automatic reference chain", () => {
     await expect(runReferenceChain(referenceClient(full, []), { project: full })).rejects.toThrow("Full Automatic mode is not implemented");
   });
 
-  it("runs Outline directly after Originality Review without research or claim stages", async () => {
+  it("keeps the internal research and claim stages in project state", async () => {
     const project = setStatus(projectWithApprovedReferences(), "originality-review", "approved");
     const events: string[] = [];
     const result = await runIdeaChain(referenceClient(project, events), { project });
     expect(events.some((event) => event.includes("research-source"))).toBe(false);
     expect(events).toContain("run:outline");
     expect(events).toContain("approve:outline");
-    expect(result.stages.find((stage) => stage.id === "claim-map")).toBeUndefined();
+    expect(result.stages.find((stage) => stage.id === "claim-map")?.status).toBe("not_started");
   });
 
 });

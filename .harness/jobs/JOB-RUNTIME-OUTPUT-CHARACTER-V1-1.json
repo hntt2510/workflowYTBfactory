@@ -1,0 +1,71 @@
+{
+  "jobId": "JOB-RUNTIME-OUTPUT-CHARACTER-V1-1",
+  "type": "long",
+  "title": "Runtime output and character consistency hardening V1.1",
+  "status": "planned",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Make CapCut visual media render-safe, add explicit MP4 download, lock character composition, and improve character-first recovery without changing legacy projects.",
+  "businessContext": "Character-first projects can produce structurally valid output that is unreliable in CapCut, downloads without a usable MP4 filename, and do not constrain teacher framing consistently across generated shots.",
+  "allowedPaths": [
+    "packages/domain/src/character.ts",
+    "packages/domain/src/ipcSchemas.ts",
+    "packages/domain/src/types.ts",
+    "packages/domain/test/character.test.ts",
+    "packages/domain/test/ipcSchemas.test.ts",
+    "packages/media/src/capcutVisual.ts",
+    "packages/media/src/index.ts",
+    "packages/media/test/capcutVisual.test.ts",
+    "apps/desktop/src/main/main.ts",
+    "apps/desktop/src/main/characterService.ts",
+    "apps/desktop/src/main/characterService.test.ts",
+    "apps/desktop/src/main/promptPreparationService.ts",
+    "apps/desktop/src/main/promptPreparationService.test.ts",
+    "apps/desktop/src/main/shotPlanService.ts",
+    "apps/desktop/src/main/shotPlanService.test.ts",
+    "apps/desktop/src/main/capcutDraftService.ts",
+    "apps/desktop/src/main/capcutDraftService.test.ts",
+    "apps/desktop/src/preload/preload.cjs",
+    "apps/desktop/src/renderer/App.tsx",
+    "apps/desktop/src/renderer/semiAutomaticWorkflow.ts",
+    "apps/desktop/src/renderer/semiAutomaticWorkflow.test.ts",
+    "apps/desktop/src/renderer/services/factoryClient.ts",
+    "apps/desktop/src/renderer/types.ts",
+    "python/capcut_bridge/bridge.py",
+    ".harness/jobs/JOB-RUNTIME-OUTPUT-CHARACTER-V1-1.json"
+  ],
+  "forbiddenPaths": [
+    "packages/providers/**",
+    "packages/generation-queue/**",
+    "packages/db/**",
+    "docs/product/acceptance-criteria.md",
+    "docs/product/open-questions.md"
+  ],
+  "dependencies": [
+    "approved Character-first V1 domain and orchestration",
+    "existing preview IPC",
+    "existing FFmpeg runtime",
+    "existing pycapcut bridge"
+  ],
+  "acceptanceCriteria": [
+    "CapCut receives validated H.264 visual clips with the project canvas, FPS, and shot duration instead of raw image files.",
+    "CapCut motion metadata maps to supported pycapcut animations without overwriting existing drafts.",
+    "Final Preview offers a typed Save As MP4 flow that always writes a playable .mp4 file after artifact and hash validation.",
+    "Character versions support an optional backward-compatible composition lock and prompts include the default half-body-right framing contract.",
+    "Character-first recovery binds an active approved version or exposes an actionable character checkpoint; legacy projects remain unchanged.",
+    "Shot Plan normalizes provider state metadata before schema validation and preserves safe needs_attention/retry behavior.",
+    "Focused tests, typecheck, and diff check pass."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run packages/domain/test/character.test.ts packages/domain/test/ipcSchemas.test.ts packages/media/test/capcutVisual.test.ts apps/desktop/src/main/characterService.test.ts apps/desktop/src/main/shotPlanService.test.ts apps/desktop/src/main/capcutDraftService.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": [
+    "The installed CapCut version cannot render the generated validated MP4 visual clips.",
+    "The current FFmpeg or pycapcut installation lacks the required codec or animation support.",
+    "Existing dirty changes make a bounded edit unsafe."
+  ]
+}

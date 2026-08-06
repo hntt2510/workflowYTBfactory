@@ -288,3 +288,108 @@ Restore or reinstall OmniVoice in its own checkout, configure the exact local ex
 - `omnivoice-infer --help` runs from the configured path.
 - A manually initiated voice run produces FFprobe-valid audio inside the workspace.
 - No alternate voice provider is used.
+
+## ISSUE-007 - Competitor DNA provider output failed strict schema validation
+
+- Severity: P1
+- Status: Fixed
+- Detected at: 2026-08-01T10:17:44Z
+- Checkpoint: competitor-dna
+- Project ID: `project-ae9df5f8-5d1c-426d-8bca-bd5957ff78cf`
+- Stage ID: `competitor-dna`
+- StageRun ID: `stage-run-41f8fb68-30a8-4148-b0b9-3c54f2bc640e`
+- Component: Competitor DNA provider response validation
+- Related files: `apps/desktop/src/main/competitorDnaService.ts`, `apps/desktop/src/main/main.ts`
+- Reproducible: Yes
+- Blocks downstream: Yes
+- Safe independent work remains: Yes
+
+### Reproduction
+
+1. Use the approved synthetic runtime project with approved Transcript Cleaning and Reference Segmentation artifacts.
+2. Invoke `window.longShortFactory.runCompetitorDna({ projectId, referenceId })` through the Electron IPC bridge.
+3. Observe the provider response is rejected as invalid structured output.
+
+### Expected
+
+Competitor DNA returns the strict evidence-backed schema and enters `needs_review`.
+
+### Actual
+
+The configured 9Router model response did not match the Competitor DNA schema. The run was persisted as `failed` with safe error category `invalid_output`; Opportunity Map remains blocked.
+
+### Evidence
+
+- SQLite: `workflow_stage_runs` row `stage-run-41f8fb68-30a8-4148-b0b9-3c54f2bc640e`.
+- Runtime error: `Competitor DNA returned an invalid structured output.`
+- Reference Segmentation was approved before this run and remains approved.
+
+### Root-cause analysis
+
+Confirmed response-contract failure; the exact rejected provider payload is intentionally not written to the audit report.
+
+### Safety action taken
+
+The failed artifacts were not approved, no downstream stage was run during the failed attempts, and no retry reused an identical provider fingerprint.
+
+### Fixed
+
+- Fixed by: current worktree change (`competitor-dna-v5` prompt and validation contract).
+- Verification: real Electron IPC/9Router run `stage-run-10de6c42-c715-4a33-9587-a2e4feea70a8` reached `needs_review`; sponsor exclusion and evidence checks passed; restart preserved the artifact.
+
+### Suggested fix batch
+
+Capture a redacted schema-diagnostic summary in a local development log, tighten the Competitor DNA prompt or parser only with evidence, then rerun once with a new implementation fingerprint.
+
+### Acceptance criteria
+
+- A real provider response passes the Competitor DNA schema and evidence checks.
+- Every cited segment is included for DNA and excluded-content summary matches segmentation.
+- The output reaches `needs_review` before explicit approval.
+
+## ISSUE-008 - Asset Acquisition has no applicable AI-image input
+
+- Severity: P1
+- Status: Open
+- Detected at: 2026-08-02T02:00:29+07:00
+- Checkpoint: asset-acquisition
+- Project ID: `project-09d4fcb0-0637-4bc3-95fe-1c83f19c6e9d`
+- Stage ID: asset-acquisition
+- StageRun ID: None; the handler failed before creating a run.
+- Component: Visual Routing / Prompt Preparation / Asset Acquisition
+- Related files: `apps/desktop/src/main/main.ts`, `apps/desktop/src/main/assetAcquisitionService.ts`
+- Reproducible: Yes
+- Blocks downstream: Yes
+- Safe independent work remains: Yes
+
+### Reproduction
+
+1. Use the isolated project after approved Visual Routing and Prompt Preparation.
+2. Inspect the seven routed shots: all are `stock_video` or `document`.
+3. Invoke `window.longShortFactory.runAssetAcquisition({ projectId })`.
+
+### Expected
+
+The selected visual route has an applicable, reviewable asset acquisition path.
+
+### Actual
+
+The approved Prompt Preparation artifact contains zero AI-image prompts, so the handler fails closed with `Asset Acquisition requires at least one approved AI image prompt.` No run, artifact, or placeholder asset is created.
+
+### Evidence
+
+- SQLite: project shots and approved prompt artifact in `.tmp-main-flow-runtime/full-path-20260802/long-short-factory.sqlite`.
+- Runtime error: `Asset Acquisition requires at least one approved AI image prompt.`
+- Image certification table has no verified record.
+
+### Root-cause analysis
+
+Confirmed fixture/workflow coverage gap: Visual Routing can select `stock_video` or `document`, but the production Asset Acquisition handler only accepts `ai_image` prompts and no stock/document asset acquisition artifact exists.
+
+### Safety action taken
+
+The failed precondition was preserved; no synthetic image, raw placeholder, or unapproved artifact was inserted.
+
+### Suggested fix batch
+
+Provide a real AI-image route and verified image certification for this fixture, or implement a separate trusted stock/document acquisition path before Asset Review.

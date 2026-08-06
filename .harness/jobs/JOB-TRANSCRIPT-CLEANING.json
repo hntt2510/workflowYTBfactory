@@ -1,0 +1,46 @@
+{
+  "jobId": "JOB-TRANSCRIPT-CLEANING",
+  "type": "short",
+  "title": "Reliable Transcript Cleaning workflow",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Make Transcript Cleaning provider-backed, chunked, resumable, fail-closed, idempotent, and review-gated without changing downstream workflow behavior.",
+  "businessContext": "Long ASR transcripts currently time out or are persisted as misleading clean output, which blocks approved downstream segmentation.",
+  "allowedPaths": [
+    "apps/desktop/src/main/transcriptCleaningService.ts",
+    "apps/desktop/src/main/transcriptCleaningService.test.ts",
+    "apps/desktop/src/main/main.ts",
+    "apps/desktop/src/renderer/App.tsx",
+    "packages/providers/src/nineRouter.ts",
+    "packages/providers/test/nineRouter.test.ts",
+    "packages/domain/src/ipcSchemas.ts",
+    "packages/domain/test/ipcSchemas.test.ts",
+    "packages/db/test/persistence.test.ts",
+    ".harness/jobs/JOB-TRANSCRIPT-CLEANING.json",
+    ".harness/locks/JOB-TRANSCRIPT-CLEANING.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": [
+    "apps/desktop/src/main/competitorDnaService.ts",
+    "apps/desktop/src/main/referenceSegmentationService.ts",
+    "packages/domain/src/workflowRegistry.ts"
+  ],
+  "dependencies": ["approved reference-validation artifact"],
+  "acceptanceCriteria": [
+    "Transcript Cleaning sends the cleaning prompt with bounded chunk requests and stores the model output; provider failure never creates a cleaning artifact.",
+    "Empty, malformed, wrapped-invalid, identical, or insufficiently changed model output fails with a safe error and preserves raw input only as run metadata.",
+    "Each reference has at most one active cleaning run for an input fingerprint; retries are bounded, exponential, idempotent, and resumable from the failed chunk.",
+    "Persisted run progress exposes completed/total chunks and the review artifact contains raw transcript, cleaned transcript, removed segments, flagged/sponsor terms, and execution metadata.",
+    "Reference Segmentation remains runnable only after all included references have approved cleaning artifacts.",
+    "Focused tests cover output validation, timeout, retry, duplicate run, empty output, unchanged output, parser errors, and ordered merge."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run apps/desktop/src/main/transcriptCleaningService.test.ts packages/providers/test/nineRouter.test.ts packages/domain/test/ipcSchemas.test.ts packages/db/test/persistence.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["The provider cannot support bounded/idempotent text requests without changing external configuration.", "A fix would require changing Reference Segmentation or another downstream workflow." ]
+}

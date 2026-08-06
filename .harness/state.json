@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-03T19:07:00.000+07:00",
-  "activeJobs": [],
-  "notes": "JOB-VOX-TOPIC-IDEA-ELIGIBILITY-V1, JOB-VOX-TOPIC-APPROVAL-RUNTIME-V1, JOB-VOX-ASSET-PREFLIGHT-ATTENTION-V1, JOB-VOX-CAPABILITY-ROUTING-V1, JOB-VOX-SMOKE-RESUME-V1, JOB-VOX-SCENE-APPROVAL-CSP-V1, JOB-VOX-FINAL-PREVIEW-CHECKPOINT-V1, JOB-VOX-FINAL-EXPORT-SMOKE-V1, JOB-VOX-RESUME-FINAL-EXPORT-V1, and JOB-VOX-REPORT-UPDATE-V1 are review_required after focused verification. Prior review-required jobs and unrelated dirty changes are preserved."
+  "updatedAt": "2026-08-05T21:50:48.159+07:00",
+  "activeJobs": ["JOB-CREATOR-STUDIO-V1"],
+  "notes": "JOB-CHARACTER-FIRST-VISUALS-V1 is review_required after builder commit 5fe6666f. JOB-CREATOR-STUDIO-V1 is changes_requested after the read-only review recorded in .harness/reviews/JOB-CREATOR-STUDIO-V1.md; targeted renderer tests pass, but ignored workspace modules, nested route-tab synchronization, the four-item stepper, and hard-coded Home next actions require builder fixes before QA. Prior review-required VOX jobs and unrelated dirty changes are preserved."
 }

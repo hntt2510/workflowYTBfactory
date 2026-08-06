@@ -1,0 +1,43 @@
+{
+  "jobId": "JOB-SEMI-AUTOMATIC-STAGES",
+  "type": "short",
+  "title": "Run eligible Semi-automatic stages automatically",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Start eligible Semi-automatic stage chains without requiring per-stage clicks, preserve fail-closed retry behavior, and repair the Competitor DNA response contract that currently stops the chain.",
+  "businessContext": "Editors should not have to approve every valid internal stage, while invalid outputs must still stop safely with an explicit retry path.",
+  "allowedPaths": [
+    "apps/desktop/src/renderer/App.tsx",
+    "apps/desktop/src/renderer/semiAutomaticWorkflow.ts",
+    "apps/desktop/src/renderer/semiAutomaticWorkflow.test.ts",
+    "apps/desktop/src/main/competitorDnaService.ts",
+    "apps/desktop/src/main/competitorDnaService.test.ts",
+    "apps/desktop/src/main/main.ts",
+    "apps/desktop/src/main/referenceSegmentationService.ts",
+    "apps/desktop/src/main/referenceSegmentationService.test.ts",
+    "packages/domain/src/referenceSegmentation.ts",
+    "packages/domain/test/referenceSegmentation.test.ts",
+    ".harness/jobs/JOB-SEMI-AUTOMATIC-STAGES.json"
+  ],
+  "forbiddenPaths": [
+    "packages/db/**",
+    "packages/providers/**",
+    "packages/domain/src/workflowRegistry.ts"
+  ],
+  "dependencies": ["Existing Semi-automatic workflow chains"],
+  "acceptanceCriteria": [
+    "Eligible Semi-automatic chains start automatically after project load or a successful stage recovery, with no duplicate active run.",
+    "Automatic execution stops only for an actual failed or needs_attention stage and leaves an explicit retry path.",
+    "Competitor DNA accepts the documented uncertainty response shape without weakening evidence validation and uses a new prompt fingerprint.",
+    "Guided mode behavior remains manual."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run apps/desktop/src/renderer/semiAutomaticWorkflow.test.ts apps/desktop/src/main/competitorDnaService.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": []
+}

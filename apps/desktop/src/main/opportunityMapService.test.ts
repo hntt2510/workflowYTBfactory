@@ -10,4 +10,25 @@ async function setup() { const db = openFactoryDatabase(join(mkdtempSync(join(tm
 const artifact = { id: "artifact-1", payload: { referenceId: "ref-1" } };
 const entry = { text: "Explore unanswered viewer questions", sourceReferenceIds: ["ref-1"], sourceArtifactIds: ["artifact-1"], confidence: "low" as const };
 const output = { sharedPatterns: [], overusedPatterns: [], underservedViewerQuestions: [entry], evidenceGaps: [], differentiationDirections: [], riskyDirections: [], recommendedContentSpaces: [] };
-describe("opportunity map service", () => { it("requires low confidence for a single approved DNA artifact", async () => { const { db, credentialStore, certificationStore } = await setup(); const result = await runOpportunityMap({ dnaArtifacts: [artifact], credentialStore, certificationStore, createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify(output) }) }) }); expect(result.output.underservedViewerQuestions[0]?.confidence).toBe("low"); db.close(); }); it("fails when a single-source response claims high confidence", async () => { const { db, credentialStore, certificationStore } = await setup(); await expect(runOpportunityMap({ dnaArtifacts: [artifact], credentialStore, certificationStore, createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify({ ...output, underservedViewerQuestions: [{ ...entry, confidence: "high" }] }) }) }) })).rejects.toMatchObject({ category: "invalid_output" }); db.close(); }); });
+describe("opportunity map service", () => {
+  it("requires low confidence for a single approved DNA artifact", async () => {
+    const { db, credentialStore, certificationStore } = await setup();
+    const result = await runOpportunityMap({ dnaArtifacts: [artifact], credentialStore, certificationStore, createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify(output) }) }) });
+    expect(result.output.underservedViewerQuestions[0]?.confidence).toBe("low");
+    db.close();
+  });
+
+  it("normalizes category-specific item labels from the provider", async () => {
+    const { db, credentialStore, certificationStore } = await setup();
+    const aliased = { ...output, sharedPatterns: [{ pattern: "A repeated hook", sourceReferenceIds: ["ref-1"], sourceArtifactIds: ["artifact-1"], confidence: "low" }] };
+    const result = await runOpportunityMap({ dnaArtifacts: [artifact], credentialStore, certificationStore, createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify(aliased) }) }) });
+    expect(result.output.sharedPatterns[0]?.text).toBe("A repeated hook");
+    db.close();
+  });
+
+  it("fails when a single-source response claims high confidence", async () => {
+    const { db, credentialStore, certificationStore } = await setup();
+    await expect(runOpportunityMap({ dnaArtifacts: [artifact], credentialStore, certificationStore, createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify({ ...output, underservedViewerQuestions: [{ ...entry, confidence: "high" }] }) }) }) })).rejects.toMatchObject({ category: "invalid_output" });
+    db.close();
+  });
+});

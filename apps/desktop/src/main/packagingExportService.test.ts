@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PackagingExportError, packagingExportRequiredStageIds, verifyPackagingManifest } from "./packagingExportService";
+import { PackagingExportError, packagingExportRequiredStageIds, verifyFinalMp4, verifyPackagingManifest } from "./packagingExportService";
 
 describe("packaging export review gate", () => {
   it("accepts the reviewed package manifest only when the file hash still matches", async () => {
@@ -138,6 +138,42 @@ describe("packaging export review gate", () => {
       reviewedArtifactIds: ["a1", "a2", "a3", "a4", "a5", "a6"],
       reviewedProjectId: "project-1"
     })).toThrowError(PackagingExportError);
+  });
+
+  it("verifies an MP4-only export when the manifest is disabled", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "lsf-package-mp4-"));
+    const relativeFilePath = "exports/project-1/final.mp4";
+    const content = "real mp4 bytes";
+    await mkdir(join(workspaceRoot, "exports", "project-1"), { recursive: true });
+    await writeFile(join(workspaceRoot, relativeFilePath), content, "utf8");
+
+    expect(() => verifyFinalMp4({
+      workspaceRoot,
+      artifactRelativeFilePath: relativeFilePath,
+      reviewedRelativeFilePath: relativeFilePath,
+      reviewedSha256: createHash("sha256").update(content).digest("hex"),
+      reviewedMp4RelativeFilePath: relativeFilePath
+    })).not.toThrow();
+  });
+
+  it("validates an optional subtitle file referenced by the manifest", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "lsf-package-subtitles-"));
+    const manifestPath = "exports/project-1/package.json";
+    const subtitlePath = "exports/project-1/final.srt";
+    const text = JSON.stringify({ schemaVersion: 1, project: { id: "project-1" }, artifactIds: ["a1", "a2", "a3", "a4", "a5", "a6"], media: { subtitleRelativeFilePath: subtitlePath } });
+    await mkdir(join(workspaceRoot, "exports", "project-1"), { recursive: true });
+    await writeFile(join(workspaceRoot, manifestPath), text, "utf8");
+    await writeFile(join(workspaceRoot, subtitlePath), "1\n00:00:00,000 --> 00:00:01,000\nXin chao\n", "utf8");
+
+    expect(() => verifyPackagingManifest({
+      workspaceRoot,
+      artifactRelativeFilePath: manifestPath,
+      reviewedRelativeFilePath: manifestPath,
+      reviewedSha256: createHash("sha256").update(text).digest("hex"),
+      reviewedArtifactIds: ["a1", "a2", "a3", "a4", "a5", "a6"],
+      reviewedProjectId: "project-1",
+      reviewedSubtitleRelativeFilePath: subtitlePath
+    })).not.toThrow();
   });
 
   it("requires the full reviewed handoff artifact set", () => {

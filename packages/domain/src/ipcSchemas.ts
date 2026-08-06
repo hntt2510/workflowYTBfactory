@@ -37,6 +37,7 @@ const characterReferenceSchema = z.object({
   id: idSchema,
   view: characterReferenceViewSchema,
   status: z.enum(["needs_review", "approved", "rejected"]),
+  promptText: z.string().min(1).max(20000).optional(),
   relativeFilePath: safePathSchema.optional(),
   sha256: z.string().length(64).optional(),
   mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]).optional(),
@@ -78,6 +79,7 @@ export const characterPackRequestSchema = z.object({
 export const characterVersionRequestSchema = z.object({ profileId: idSchema, versionId: idSchema }).strict();
 export const characterReferenceRetryRequestSchema = characterVersionRequestSchema.extend({ view: characterReferenceViewSchema }).strict();
 export const characterPreviewRequestSchema = characterVersionRequestSchema.extend({ view: characterReferenceViewSchema }).strict();
+export const characterReferenceUploadRequestSchema = characterVersionRequestSchema.extend({ view: characterReferenceViewSchema }).strict();
 const motionEffectSchema = z.enum(["none", "slide_up", "slide_down", "pan_left", "pan_right", "zoom_in", "zoom_out", "pop", "dissolve"]);
 const motionPlanSchema = z.object({ effect: motionEffectSchema, intensity: z.enum(["subtle", "standard", "strong"]), rationale: z.string().min(1).max(1000), userOverride: z.boolean().optional() }).strict();
 
@@ -797,7 +799,36 @@ export const visualRoutingArtifactResponseSchema = z.object({ id: idSchema, stag
 export const visualRoutingArtifactsResponseSchema = z.array(visualRoutingArtifactResponseSchema);
 export const editVisualRoutingRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema, shotId: idSchema, visualMode: shotPlanShotSchema.shape.visualMode, motionEffect: motionPlanSchema.shape.effect.optional() }).strict();
 export const visualPromptSchema = z.object({ shotId: idSchema, promptVersionId: idSchema, positivePrompt: z.string().min(1).max(10000), negativePrompt: z.string().min(1).max(5000), aspectRatio: z.enum(["16:9", "9:16"]), continuityConstraints: z.array(z.string().min(1).max(1000)).max(50), prohibitedElements: z.array(z.string().min(1).max(1000)).max(50), semanticBeat: z.string().min(1).max(2000).optional(), assetConceptIds: z.array(idSchema).max(20).optional(), motion: motionPlanSchema.optional() }).strict();
-export const promptPreparationOutputSchema = z.object({ prompts: z.array(visualPromptSchema).max(500) }).strict();
+const storyboardFrameSpecSchema = z.object({
+  shotId: idSchema,
+  displayNumber: z.string().regex(/^\d{3}$/),
+  assetId: idSchema.optional(),
+  role: z.enum(["BASE", "EXPRESSION_CHANGE", "POSE_CHANGE", "ACTION_KEYFRAME", "CUTAWAY", "INSERT", "ENVIRONMENT", "GRAPHIC", "REUSE"]),
+  assetStrategy: z.enum(["NEW_BASE", "REFERENCE_VARIATION", "EXPRESSION_VARIATION", "POSE_VARIATION", "BACKGROUND_VARIATION", "INSERT_DETAIL", "GRAPHIC_ASSET", "REUSE_EXISTING", "NO_NEW_ASSET"]).optional(),
+  purpose: z.string().min(1).max(2000),
+  durationFrames: z.number().int().positive(),
+  delta: z.string().min(1).max(2000),
+  continuityRefs: z.array(z.string().min(1).max(1000)).max(50),
+  referenceInstructions: z.array(z.string().min(1).max(2000)).max(20).optional(),
+  prohibitedChanges: z.array(z.string().min(1).max(1000)).max(30).optional(),
+  expectedFilename: z.string().regex(/^\d{3}\.(png|jpg|jpeg|webp)$/).optional(),
+  acceptanceChecklist: z.array(z.string().min(1).max(1000)).max(20).optional()
+}).strict();
+const scenePromptPackageSchema = z.object({
+  sceneId: idSchema,
+  promptVersionId: idSchema,
+  targetTool: z.literal("GG Lab").optional(),
+  compilationMode: z.literal("scene_prompt").optional(),
+  promptText: z.string().min(1).max(30000),
+  frameNumbers: z.array(z.string().regex(/^\d{3}$/)).min(1).max(20),
+  generatedFrameNumbers: z.array(z.string().regex(/^\d{3}$/)).max(20).optional(),
+  referenceInstructions: z.array(z.string().min(1).max(2000)).max(20),
+  continuityLocks: z.array(z.string().min(1).max(2000)).max(50),
+  prohibitedChanges: z.array(z.string().min(1).max(1000)).max(30).optional(),
+  expectedAspectRatio: z.enum(["16:9", "9:16"]),
+  frameManifest: z.array(storyboardFrameSpecSchema).min(1).max(20)
+}).strict();
+export const promptPreparationOutputSchema = z.object({ prompts: z.array(visualPromptSchema).max(500), scenePrompts: z.array(scenePromptPackageSchema).max(200).optional() }).strict();
 export const promptPreparationRequestSchema = z.object({ projectId: idSchema }).strict();
 export const promptPreparationArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: promptPreparationOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const promptPreparationArtifactsResponseSchema = z.array(promptPreparationArtifactResponseSchema);
@@ -824,8 +855,7 @@ export const assetAcquisitionOutputSchema = z.object({ assets: z.array(acquiredI
 export const assetAcquisitionRequestSchema = z.object({ projectId: idSchema, sceneId: idSchema.optional() }).strict();
 export const assetAcquisitionArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: assetAcquisitionOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const assetAcquisitionArtifactsResponseSchema = z.array(assetAcquisitionArtifactResponseSchema);
-export const assetReviewItemSchema = z.object({ asset: acquiredImageAssetSchema, reviewStatus: z.enum(["needs_review", "approved", "rejected"]), assignedShotId: idSchema.optional() }).strict()
-  .refine((item) => item.assignedShotId === undefined || item.assignedShotId === item.asset.shotId, { message: "Assigned shot must match the reviewed asset shot." });
+export const assetReviewItemSchema = z.object({ asset: acquiredImageAssetSchema, reviewStatus: z.enum(["needs_review", "approved", "rejected"]), assignedShotId: idSchema.optional(), warnings: z.array(z.string().min(1).max(500)).max(10).optional() }).strict();
 export const assetReviewOutputSchema = z.object({ acquisitionArtifactId: idSchema, assets: z.array(assetReviewItemSchema).min(1).max(500) }).strict()
   .refine((output) => {
     const assignedShotIds = output.assets.flatMap((item) => item.assignedShotId ? [item.assignedShotId] : []);
@@ -835,7 +865,7 @@ export const assetReviewRequestSchema = z.object({ projectId: idSchema, sceneId:
 export const assetReviewArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: assetReviewOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const assetReviewArtifactsResponseSchema = z.array(assetReviewArtifactResponseSchema);
 export const reviseAssetReviewRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema, assetSha256: z.string().length(64), action: z.enum(["approve", "reject", "assign", "unassign"]), shotId: idSchema.optional() }).strict();
-export const manualAssetUploadRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema, shotId: idSchema }).strict();
+export const manualAssetUploadRequestSchema = z.object({ projectId: idSchema, artifactId: idSchema.optional(), shotId: idSchema.optional(), sourcePaths: z.array(z.string().min(1).max(4000)).min(1).max(200).optional() }).strict();
 export const sceneReviewRevisionRequestSchema = z.discriminatedUnion("action", [
   z.object({ projectId: idSchema, artifactId: idSchema, action: z.literal("edit_prompt"), shotId: idSchema, positivePrompt: z.string().trim().min(1).max(10000), negativePrompt: z.string().trim().min(1).max(5000) }).strict(),
   z.object({ projectId: idSchema, artifactId: idSchema, action: z.literal("edit_direction"), shotId: idSchema, framing: z.string().trim().min(1).max(1000), cameraAngle: z.string().trim().min(1).max(1000), cameraMovement: z.string().trim().min(1).max(1000), subjectAction: z.string().trim().min(1).max(2000) }).strict(),
@@ -875,9 +905,11 @@ export const subtitlePreparationOutputSchema = z.object({ fps: z.number().int().
 export const subtitlePreparationRequestSchema = z.object({ projectId: idSchema }).strict();
 export const subtitlePreparationArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: subtitlePreparationOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const subtitlePreparationArtifactsResponseSchema = z.array(subtitlePreparationArtifactResponseSchema);
-export const timelineItemOutputSchema = z.object({ id: idSchema, track: z.enum(["primary_visual", "overlay_visual", "narration", "music", "sfx", "subtitles", "text", "markers"]), sourceId: z.string().min(1).max(1000), startFrame: z.number().int().nonnegative(), durationFrames: z.number().int().positive(), fps: z.number().int().positive().max(120), motion: motionPlanSchema.optional() }).strict();
+export const timelineItemOutputSchema = z.object({ id: idSchema, track: z.enum(["primary_visual", "overlay_visual", "narration", "music", "ambience", "sfx", "subtitles", "text", "markers"]), sourceId: z.string().min(1).max(1000), startFrame: z.number().int().nonnegative(), durationFrames: z.number().int().positive(), fps: z.number().int().positive().max(120), motion: motionPlanSchema.optional() }).strict();
 export const timelineAssemblyOutputSchema = z.object({ fps: z.number().int().positive().max(120), items: z.array(timelineItemOutputSchema).min(1).max(2000) }).strict();
 export const timelineAssemblyRequestSchema = z.object({ projectId: idSchema }).strict();
+export const projectAudioKindSchema = z.enum(["music", "ambient", "sfx"]);
+export const selectProjectAudioRequestSchema = z.object({ projectId: idSchema, kind: projectAudioKindSchema }).strict();
 export const timelineAssemblyArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: timelineAssemblyOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const timelineAssemblyArtifactsResponseSchema = z.array(timelineAssemblyArtifactResponseSchema);
 
@@ -968,7 +1000,10 @@ export const projectSummaryResponseSchema = z.object({
   projectName: z.string(),
   targetLanguage: z.string(),
   targetDuration: z.string(),
-  updatedAt: z.string()
+  updatedAt: z.string(),
+  currentStageId: idSchema.optional(),
+  currentStageStatus: z.string().optional(),
+  progressPercent: z.number().int().min(0).max(100).optional()
 });
 
 const timelineItemResponseSchema = timelineItemOutputSchema;

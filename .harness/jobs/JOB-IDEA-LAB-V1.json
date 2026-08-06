@@ -1,0 +1,36 @@
+{
+  "jobId": "JOB-IDEA-LAB-V1",
+  "type": "short",
+  "title": "Align Idea Lab with Main Happy Path V1",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Make Idea Lab generate the six candidates required by Main Happy Path V1 and keep validation, prompt, and UI copy aligned.",
+  "businessContext": "The current Idea Lab still enforces the deferred twelve-candidate 4/4/4 contract, which contradicts the accepted V1 path and can block the next stage contract.",
+  "allowedPaths": [
+    "apps/desktop/src/main/ideaLabService.ts",
+    "apps/desktop/src/main/ideaLabService.test.ts",
+    "apps/desktop/src/renderer/App.tsx",
+    "packages/domain/src/ideaLab.ts",
+    "packages/domain/src/ipcSchemas.ts",
+    ".harness/jobs/JOB-IDEA-LAB-V1.json",
+    ".harness/locks/JOB-IDEA-LAB-V1.lock",
+    ".harness/state.json"
+  ],
+  "forbiddenPaths": ["apps/desktop/src/main/main.ts", "packages/db/**", "packages/providers/**", "packages/domain/src/workflowRegistry.ts"],
+  "dependencies": ["approved Opportunity Map"],
+  "acceptanceCriteria": [
+    "Idea Lab requests and validates exactly six candidates.",
+    "The six candidates include two low-risk, two medium-risk, and two high-risk candidates with unique IDs.",
+    "The local candidate generator, provider adapter prompt, tests, and UI copy use the same six-candidate contract.",
+    "No downstream stage behavior or automatic approval is changed."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run apps/desktop/src/main/ideaLabService.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["The accepted Main Happy Path specification changes the candidate count or distribution."]
+}

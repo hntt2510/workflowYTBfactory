@@ -7,14 +7,21 @@ const path = require("node:path");
 const chromePath = process.env.CHROME_PATH || "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const baseUrl = process.env.UI_SCREENSHOT_URL || "http://127.0.0.1:5173";
 const shouldManageVite = !process.env.UI_SCREENSHOT_URL;
+const screenshotDir = path.resolve(process.env.UI_SCREENSHOT_DIR || "docs/screenshots");
 
 const shots = {
-  dashboard: "docs/screenshots/dashboard.png",
-  "new-project": "docs/screenshots/new-project-wizard.png",
-  "project-overview": "docs/screenshots/project-overview.png",
-  shots: "docs/screenshots/shot-board.png",
-  "production-queue": "docs/screenshots/production-queue.png",
-  providers: "docs/screenshots/provider-settings.png"
+  dashboard: path.join(screenshotDir, "dashboard.png"),
+  "new-project": path.join(screenshotDir, "new-project-wizard.png"),
+  "project-overview": path.join(screenshotDir, "project-overview.png"),
+  "story-editor": path.join(screenshotDir, "story-editor.png"),
+  director: path.join(screenshotDir, "director-storyboard.png"),
+  "prompt-studio": path.join(screenshotDir, "scene-prompt-studio.png"),
+  "asset-intake": path.join(screenshotDir, "asset-intake-missing.png"),
+  build: path.join(screenshotDir, "build-render.png"),
+  "final-export": path.join(screenshotDir, "final-export.png"),
+  shots: path.join(screenshotDir, "shot-board.png"),
+  "production-queue": path.join(screenshotDir, "production-queue.png"),
+  providers: path.join(screenshotDir, "provider-settings.png")
 };
 
 function sleep(ms) {
@@ -141,6 +148,30 @@ async function clickText(send, text) {
   await sleep(450);
 }
 
+async function setInputValue(send, selector, value) {
+  const expression = `(() => {
+    const element = document.querySelector(${JSON.stringify(selector)});
+    if (!element) return false;
+    const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
+    if (!setter) return false;
+    setter.call(element, ${JSON.stringify(value)});
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  })()`;
+  const result = await send("Runtime.evaluate", { expression, awaitPromise: true });
+  if (!result.result.value) throw new Error(`Could not set ${selector}`);
+  await sleep(250);
+}
+
+async function navigateAndScreenshot(send, route, outputPath) {
+  await send("Page.navigate", { url: `${baseUrl}/#${route}` });
+  await sleep(750);
+  await send("Runtime.evaluate", { expression: "window.scrollTo(0, 0); document.querySelector('.content-scroll')?.scrollTo(0, 0)" });
+  await screenshot(send, outputPath);
+}
+
 async function waitForChromePage(port, chrome) {
   for (let index = 0; index < 80; index += 1) {
     try {
@@ -159,7 +190,7 @@ async function waitForChromePage(port, chrome) {
 }
 
 async function main() {
-  await fs.mkdir("docs/screenshots", { recursive: true });
+  await fs.mkdir(screenshotDir, { recursive: true });
   const vite = await ensureViteServer();
   const chromeDebugPort = process.env.CHROME_DEBUG_PORT ? Number(process.env.CHROME_DEBUG_PORT) : await getAvailablePort();
   const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "lsf-chrome-ui-shots-"));
@@ -188,24 +219,22 @@ async function main() {
     await sleep(900);
     await screenshot(send, shots.dashboard);
 
-    await send("Page.navigate", { url: `${baseUrl}/#new-project` });
-    await sleep(900);
-    await screenshot(send, shots["new-project"]);
-
-    await clickText(send, "Route channel profile");
-    await clickText(send, "Continue");
-    await clickText(send, "Continue");
-    await clickText(send, "Review");
-    await clickText(send, "Create Demo Project");
+    await navigateAndScreenshot(send, "create", shots["new-project"]);
+    await setInputValue(send, "#simple-topic", "Creator Studio screenshot project");
+    await clickText(send, "Tiếp tục: định dạng");
+    await clickText(send, "Tiếp tục: xác nhận");
+    await clickText(send, "Tạo dự án");
     await sleep(900);
     await screenshot(send, shots["project-overview"]);
-
-    await clickText(send, "Shots");
-    await screenshot(send, shots.shots);
-    await clickText(send, "Production Queue");
-    await screenshot(send, shots["production-queue"]);
-    await clickText(send, "Providers");
-    await screenshot(send, shots.providers);
+    await navigateAndScreenshot(send, "script", shots["story-editor"]);
+    await navigateAndScreenshot(send, "scenes", shots.director);
+    await navigateAndScreenshot(send, "visuals", shots["prompt-studio"]);
+    await navigateAndScreenshot(send, "assets", shots["asset-intake"]);
+    await navigateAndScreenshot(send, "timeline", shots.build);
+    await navigateAndScreenshot(send, "export", shots["final-export"]);
+    await navigateAndScreenshot(send, "shots", shots.shots);
+    await navigateAndScreenshot(send, "production-queue", shots["production-queue"]);
+    await navigateAndScreenshot(send, "providers", shots.providers);
   } finally {
     chrome.kill();
     await sleep(250);

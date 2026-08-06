@@ -1,10 +1,13 @@
 import {
   createFixtureProject,
+  createStageAttention,
   routeChannelProfile,
+  resolveWorkflowProgress,
   seedChannelProfiles,
   type ChannelRouteDecision,
   type FactoryProject
 } from "@lsf/domain";
+import type { ChannelProfile } from "@lsf/domain";
 import type {
   BootstrapData,
   GenerateLocalTtsInput,
@@ -60,6 +63,15 @@ function webFallback(): LongShortFactoryApi {
         runtime: browserRuntime
       };
     },
+    async listChannelProfiles() { return seedChannelProfiles; },
+    async generateCharacterPack(): Promise<ChannelProfile> { throw new Error("Character generation requires Electron main process."); },
+    async retryCharacterReference(): Promise<ChannelProfile> { throw new Error("Character generation requires Electron main process."); },
+    async uploadCharacterReference(): Promise<ChannelProfile> { throw new Error("Character reference upload requires Electron main process."); },
+    async approveCharacterVersion(): Promise<ChannelProfile> { throw new Error("Character approval requires Electron main process."); },
+    async setActiveCharacterVersion(): Promise<ChannelProfile> { throw new Error("Character selection requires Electron main process."); },
+    async getCharacterPreviewUrl(): Promise<{ url: string }> { throw new Error("Character preview requires Electron main process."); },
+    async runCharacterPreparation(): Promise<FactoryProject> { throw new Error("Character preparation requires Electron main process."); },
+    async approveCharacterPreparation(): Promise<FactoryProject> { throw new Error("Character preparation requires Electron main process."); },
     async startProductionPreparation(): Promise<FactoryProject> { throw new Error("Production orchestration requires Electron main process."); },
     async continueAfterIdeaSelection(): Promise<FactoryProject> { throw new Error("Production orchestration requires Electron main process."); },
     async startMediaGeneration(): Promise<FactoryProject> { throw new Error("Production orchestration requires Electron main process."); },
@@ -234,7 +246,7 @@ function webFallback(): LongShortFactoryApi {
         stages: project.stages.map((stage) => stage.id === input.stageId ? {
           ...stage,
           status: "needs_attention" as const,
-          attention: { code: input.code, message: input.message, actions: [] }
+          attention: createStageAttention(input.stageId, input.code, input.message)
         } : stage)
       };
       projects = projects.map((item) => item.id === updated.id ? updated : item);
@@ -291,6 +303,9 @@ function webFallback(): LongShortFactoryApi {
     async approveIdea(): Promise<FactoryProject> {
       throw new Error("Electron main process unavailable.");
     },
+    async editIdea(): Promise<FactoryProject> {
+      throw new Error("Electron main process unavailable.");
+    },
     async rejectIdeaLab(): Promise<FactoryProject> {
       throw new Error("Electron main process unavailable.");
     },
@@ -320,6 +335,8 @@ function webFallback(): LongShortFactoryApi {
     async approveOutline(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async rejectOutline(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async runScript(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async regenerateScript(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async editScript(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async listScriptArtifacts() { return []; },
     async approveScript(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async rejectScript(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
@@ -344,6 +361,8 @@ function webFallback(): LongShortFactoryApi {
     async editVisualRouting(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async approveVisualRouting(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async rejectVisualRouting(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async runAssetConcepts(): Promise<FactoryProject> { throw new Error("Asset Concepts requires Electron main process."); },
+    async listAssetConceptsArtifacts() { return []; },
     async runPromptPreparation(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async listPromptPreparationArtifacts() { return []; },
     async approvePromptPreparation(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
@@ -356,9 +375,10 @@ function webFallback(): LongShortFactoryApi {
     async listAssetReviewArtifacts() { return []; },
     async reviseAssetReview(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async selectManualAssetUpload(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    getDroppedFilePath(): string { throw new Error("Electron main process unavailable."); },
     async approveAssetReview(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async rejectAssetReview(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
-    async runVoiceGeneration(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async runVoiceGeneration(_input: { projectId: string; voiceId: string; force?: boolean }): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async listVoiceGenerationArtifacts() { return []; },
     async approveVoiceGeneration(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async rejectVoiceGeneration(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
@@ -366,6 +386,7 @@ function webFallback(): LongShortFactoryApi {
     async listSubtitlePreparationArtifacts() { return []; },
     async approveSubtitlePreparation(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async rejectSubtitlePreparation(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
+    async selectProjectAudio(): Promise<FactoryProject> { throw new Error("Project audio selection requires Electron main process."); },
     async runTimelineAssembly(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async listTimelineAssemblyArtifacts() { return []; },
     async approveTimelineAssembly(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
@@ -373,6 +394,7 @@ function webFallback(): LongShortFactoryApi {
     async runPreviewRender(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async listPreviewRenderArtifacts() { return []; },
     async getPreviewVideoUrl(): Promise<{ url: string }> { throw new Error("Electron main process unavailable."); },
+    async downloadPreviewVideo(): Promise<{ canceled: boolean; fileName?: string; savedPath?: string }> { throw new Error("Electron main process unavailable."); },
     async getAssetPreviewUrl(): Promise<{ url: string }> { throw new Error("Electron main process unavailable."); },
     async approvePreviewRender(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
     async rejectPreviewRender(): Promise<FactoryProject> { throw new Error("Electron main process unavailable."); },
@@ -395,6 +417,10 @@ function webFallback(): LongShortFactoryApi {
 }
 
 function toSummary(project: FactoryProject): ProjectSummary {
+  const progress = resolveWorkflowProgress(project);
+  const currentStage = progress.currentStageId
+    ? progress.stages.find((stage) => stage.stageId === progress.currentStageId)
+    : undefined;
   return {
     id: project.id,
     topic: project.topic,
@@ -403,7 +429,9 @@ function toSummary(project: FactoryProject): ProjectSummary {
     projectName: project.setup.projectName,
     targetLanguage: project.setup.language,
     targetDuration: project.setup.targetDuration,
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    progressPercent: progress.percent,
+    ...(currentStage ? { currentStageId: currentStage.stageId, currentStageStatus: currentStage.internalStatus } : {})
   };
 }
 

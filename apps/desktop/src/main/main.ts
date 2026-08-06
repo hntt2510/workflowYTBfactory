@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain as electronIpcMain, protocol } from
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import {
@@ -23,6 +23,7 @@ import {
   createProjectRequestSchema,
   createFixtureProject,
   characterVersionIsApproved,
+  resolveApprovedCharacterVersion,
   createStageAttention,
   addCompetitorReferenceRequestSchema,
   addCompetitorReferenceResponseSchema,
@@ -161,6 +162,7 @@ import {
   subtitlePreparationOutputSchema,
   subtitlePreparationArtifactsResponseSchema,
   timelineAssemblyRequestSchema,
+  selectProjectAudioRequestSchema,
   timelineAssemblyOutputSchema,
   timelineAssemblyArtifactsResponseSchema,
   previewRenderRequestSchema,
@@ -207,6 +209,7 @@ import {
   characterVersionRequestSchema,
   characterReferenceRetryRequestSchema,
   characterPreviewRequestSchema,
+  characterReferenceUploadRequestSchema,
   assetConceptsRequestSchema,
   assetConceptsArtifactsResponseSchema,
   assetConceptsArtifactResponseSchema,
@@ -231,9 +234,9 @@ import { runRetentionReview, RetentionReviewError } from "./retentionReviewServi
 import { runScenePlan, ScenePlanError } from "./scenePlanService";
 import { runPromptPreparation, PromptPreparationError } from "./promptPreparationService";
 import { runShotPlan, ShotPlanError } from "./shotPlanService";
-import { generateCharacterVersion, retryCharacterReference, CharacterGenerationError } from "./characterService";
+import { createManualCharacterPromptPack, retryManualCharacterReference } from "./characterService";
 import { runAssetConcepts, AssetConceptError } from "./assetConceptService";
-import { acquireImageAsset, AssetAcquisitionError, importLocalImageAsset, planAssetAcquisition, type AcquiredImageAsset, type ImageReferenceInput } from "./assetAcquisitionService";
+import { acquireImageAsset, AssetAcquisitionError, importLocalImageAsset, mapNumericAssetFilename, planAssetAcquisition, resolveReusableAssetAssignments, type AcquiredImageAsset, type ImageReferenceInput } from "./assetAcquisitionService";
 import { loadNineRouterImageCertification, runNineRouterImageCertification } from "./nineRouterImageCertificationService";
 import { buildResearchSearchQuery, ResearchSourceSearchError, runResearchSourceSearch } from "./researchSourceSearchService";
 import { getPreviewFileSha256, PreviewRenderError, renderPreview } from "./previewRenderService";
@@ -838,6 +841,21 @@ app.whenReady().then(async () => {
         topic,
         format: "long",
         targetLanguage: "English",
+        workflowMode: "guided",
+        visualWorkflow: "legacy",
+        projectName: topic,
+        profiles: seedChannelProfiles
+      }));
+    }
+  } else if (process.env.LSF_E2E_UI_MODE === "verify") {
+    const topic = "Why did oil matter so much in World War II?";
+    if (!projectRepository.listProjects().some((project) => project.topic === topic)) {
+      projectRepository.createProject(createFixtureProject({
+        topic,
+        format: "long",
+        targetLanguage: "English",
+        workflowMode: "guided",
+        visualWorkflow: "legacy",
         projectName: topic,
         profiles: seedChannelProfiles
       }));
@@ -850,6 +868,7 @@ app.whenReady().then(async () => {
         format: "long",
         targetLanguage: "English",
         workflowMode: "semi_automatic",
+        visualWorkflow: "legacy",
         projectName: topic,
         competitorReference: { pastedTranscript: "A persisted reference used to verify automatic resume after a stage attention state." },
         profiles: seedChannelProfiles
@@ -859,7 +878,7 @@ app.whenReady().then(async () => {
         referenceSet: { status: "approved" },
         competitorReferences: fixture.competitorReferences.map((reference) => ({ ...reference, status: "approved" as const })),
         stages: normalizeProjectStages(fixture.stages).map((stage) => stage.id === "reference-validation"
-          ? { ...stage, status: "approved" as const }
+          ? { ...stage, status: "not_started" as const }
           : stage.id === "transcript-cleaning"
             ? { ...stage, status: "needs_attention" as const, attention: createStageAttention("transcript-cleaning", "E2E_PROVIDER_FAILURE", "Provider is unavailable for this verification run.", { retryAction: "Retry automatic workflow", retryRoute: "project-overview" }) }
             : stage)
@@ -883,104 +902,109 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
     writeUiVerificationReport(reportPath, { ok: false, mode, phase: "renderer_loaded", workspaceRoot, databasePath });
     if (mode === "workflow-contract") {
       await assertText(win, "Long/Short Factory");
-      await clickText(win, "Projects");
+      await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
-      await assertText(win, "Project command center");
-      await clickText(win, "Reference Intake");
-      await assertText(win, "Reference Validation");
+      await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
+      await navigateToRoute(win, "project-overview");
+      await clickText(win, "Mở tài liệu tham khảo");
+      await assertText(win, "Kiểm tra tài liệu");
       await setInputValue(win, "#idea-competitor-url", "https://www.youtube.com/watch?v=3GKC4kC3iQ0");
       await setInputValue(win, "#idea-competitor-script", "This is a long enough competitor transcript for local reference validation.");
-      await clickText(win, "Save competitor reference");
+      await clickText(win, "Lưu tài liệu tham khảo");
       await assertText(win, "Competitor reference saved as Draft.");
-      await clickText(win, "View");
+      await clickText(win, "Xem");
       await assertText(win, "This is a long enough competitor transcript for local reference validation.");
-      await clickText(win, "Hide");
-      await clickText(win, "Versions");
+      await clickText(win, "Ẩn");
+      await clickText(win, "Phiên bản");
       await assertText(win, "v1");
-      await clickText(win, "Hide versions");
-      await clickText(win, "Replace transcript");
+      await clickText(win, "Ẩn phiên bản");
+      await clickText(win, "Thay transcript");
       await setInputValue(win, "#idea-competitor-script", "Replacement transcript saved as a new immutable version for this source.");
-      await clickText(win, "Create transcript version");
-      await assertText(win, "Transcript version created. Validate the reference set again.");
+      await clickText(win, "Tạo phiên bản transcript");
+      await assertText(win, "Đã tạo phiên bản transcript. Hãy kiểm tra lại bộ tài liệu.");
       await setInputValue(win, "#idea-competitor-url", "http://youtube.com/watch?v=3GKC4kC3iQ0");
       await setInputValue(win, "#idea-competitor-script", "Replacement transcript for the same normalized YouTube source.");
-      await clickText(win, "Save competitor reference");
+      await clickText(win, "Lưu tài liệu tham khảo");
       await assertText(win, "This video already exists in the project.");
-      await clickText(win, "Open existing");
-      await assertText(win, "Current transcript");
-      await clickText(win, "Hide");
-      await clickText(win, "Validate reference set");
-      await assertText(win, "Reference set validated. Review and approve it to continue.");
-      await clickText(win, "Approve reference set");
-      await assertText(win, "Reference set approved. Competitor Workflow is now available.");
-      await clickText(win, "Continue to Competitor Workflow");
-      await assertText(win, "Transcript Cleaning");
-      await assertText(win, "eligible chain starts automatically");
+      await clickText(win, "Mở tài liệu hiện có");
+      await assertText(win, "Transcript hiện tại");
+      await clickText(win, "Ẩn");
+      await clickText(win, "Kiểm tra bộ tài liệu");
+      await assertText(win, "Bộ tài liệu đã hợp lệ. Hãy duyệt để tiếp tục.");
+      await clickText(win, "Duyệt bộ tài liệu");
+      await assertText(win, "Đã duyệt bộ tài liệu. Có thể tiếp tục phân tích tham khảo.");
+      await clickText(win, "Tiếp tục phân tích tham khảo");
+      await assertText(win, "Làm sạch transcript");
+      await assertText(win, "Các bước phân tích");
     } else if (mode === "reference-restart") {
-      await clickText(win, "Projects");
+      await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
-      await assertText(win, "Project command center");
-      await clickText(win, "Reference Intake");
-      await assertText(win, "approved");
-      await clickText(win, "Versions");
+      await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
+      await navigateToRoute(win, "project-overview");
+      await clickText(win, "Mở tài liệu tham khảo");
+      await assertText(win, "Đã duyệt");
+      await clickText(win, "Phiên bản");
       await assertText(win, "v2");
     } else if (mode === "reference-invalidation") {
-      await clickText(win, "Projects");
+      await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
-      await assertText(win, "Project command center");
-      await clickText(win, "Reference Intake");
-      await clickText(win, "Edit");
+      await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
+      await navigateToRoute(win, "project-overview");
+      await clickText(win, "Mở tài liệu tham khảo");
+      await clickText(win, "Sửa");
       await setInputValue(win, "#idea-competitor-script", "Approved reference edited to verify trusted downstream stale invalidation.");
-      await clickText(win, "Save reference edits");
-      await assertText(win, "Reference edited. Validate the reference set again.");
-      await assertText(win, "stale");
+      await clickText(win, "Lưu chỉnh sửa tài liệu");
+      await assertText(win, "Đã chỉnh sửa tài liệu. Hãy kiểm tra lại bộ tài liệu.");
+      await assertText(win, "Cần cập nhật");
     } else if (mode === "semi-automatic-resume") {
-      await clickText(win, "Projects");
+      await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
-      await assertText(win, "Project command center");
-      await assertText(win, "Retry automatic workflow");
+      await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
+      await navigateToRoute(win, "project-overview");
+      await assertText(win, "Thử lại quy trình tự động");
     } else if (mode === "vox-simple-flow") {
       const evidence = await runVoxSimpleFlowVerification(win, topic);
       writeUiVerificationReport(reportPath, { ok: true, mode, workspaceRoot, databasePath, ...evidence });
       app.quit();
       return;
     } else if (mode === "verify") {
-      await clickText(win, "Projects");
+      await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
-      await assertText(win, "Project command center");
-      await clickText(win, "Idea Lab");
-      await assertText(win, "Idea Lab");
-      await clickText(win, "Script");
-      await assertText(win, "Narration editor");
-      await clickText(win, "Settings");
+      await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
+      await navigateToRoute(win, "idea-lab");
+      await assertText(win, "Phòng ý tưởng");
+      await navigateToRoute(win, "script");
+      await assertText(win, "Biên tập lời dẫn");
+      await navigateToRoute(win, "settings");
       await assertText(win, workspaceRoot);
-      await assertText(win, "Security");
-      await assertText(win, "Generation");
+      await assertText(win, "Bảo mật");
+      await assertText(win, "Sản xuất");
     } else {
       await assertText(win, "Long/Short Factory");
-      await clickText(win, "Create");
-      await assertText(win, "Create Video Project");
-      await assertText(win, "VOX Documentary");
+      await navigateToRoute(win, "dashboard");
+      await clickText(win, "Tạo dự án video");
+      await assertText(win, "Tạo dự án video");
       await setInputValue(win, "#simple-topic", topic);
-      await clickText(win, "Create Video Project");
-      await assertText(win, "Preparing your video");
-      await clickText(win, "Projects");
+      await clickText(win, "Tiếp tục: định dạng");
+      await clickText(win, "Tiếp tục: xác nhận");
+      await clickText(win, "Tạo dự án");
+      await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
+      await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
-      await assertOneOfText(win, ["Preparing your video", "Project command center"]);
-      await clickText(win, "Scene Review");
-      await assertText(win, "Scenes are not ready yet");
-      await clickText(win, "Final Preview");
-      await assertText(win, "No reviewable preview yet");
-      await clickText(win, "Settings");
-      await assertText(win, "Generation");
-      await clickText(win, "Diagnostics");
-      await assertText(win, "Diagnostics");
+      await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
+      await navigateToRoute(win, "scenes");
+      await assertOneOfText(win, ["Cảnh", "Scene Plan"]);
+      await navigateToRoute(win, "final-preview");
+      await assertText(win, "Chưa có bản xem trước để duyệt");
+      await navigateToRoute(win, "settings");
+      await assertText(win, "Sản xuất");
+      await assertText(win, "Chẩn đoán");
     }
     writeUiVerificationReport(reportPath, { ok: true, mode, workspaceRoot, databasePath });
     app.quit();
@@ -1019,7 +1043,7 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
   let summary: ReturnType<ProjectRepository["listProjects"]>[number];
   let selectedVoice = "";
   if (resumeProject) {
-    await clickText(win, "Projects");
+      await navigateToRoute(win, "projects");
     await assertText(win, topic);
     await clickProjectOpen(win, topic);
     summary = await waitForPersistedProject(topic);
@@ -1028,20 +1052,22 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
     selectedVoice = existingProject.setup.voiceId ?? "";
     phases.createScreen = "resumed";
   } else {
-    await clickText(win, "Create");
-    await assertText(win, "Create Video Project");
+    await navigateToRoute(win, "dashboard");
+      await clickText(win, "Tạo dự án video");
+    await assertText(win, "Tạo dự án video");
     phases.createScreen = "reached";
     await setInputValue(win, "#simple-topic", topic);
+    await clickText(win, "Tiếp tục: định dạng");
     await setSelectValue(win, "#simple-language", "Vietnamese");
     await setSelectValue(win, "#simple-duration", "45-60 seconds");
     await setSelectValue(win, "#simple-aspect-ratio", "16:9");
+    await clickText(win, "Tuỳ chọn nâng cao");
     await setSelectValue(win, "#simple-resolution", "1080p");
     selectedVoice = await selectFirstAvailableOption(win, "#simple-voice") ?? "";
     if (!selectedVoice) throw new Error("The simplified Create screen did not expose an available voice.");
-    const selectedStyle = await readSelectValue(win, "#simple-visual-style");
-    if (selectedStyle !== "vox-documentary") throw new Error(`Unexpected visual style: ${selectedStyle}`);
-    await clickText(win, "Create Video Project");
-    await assertText(win, "Preparing your video");
+    await clickText(win, "Tiếp tục: xác nhận");
+    await clickText(win, "Tạo dự án");
+    await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
     summary = await waitForPersistedProject(topic);
   }
   const persisted = projectRepository.loadProject(summary.id);
@@ -1078,62 +1104,69 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
   const resumeFromPreview = resumeProject && process.env.LSF_UI_RESUME_FROM_PREVIEW === "1" && (persistedPreviewStatus === "approved" || persistedPreviewStatus === "needs_review");
   let resumedPreviewCompleted = false;
   if (resumeFromPreview) {
-    await clickText(win, "Final Preview");
-    await waitForText(win, "Final Preview", 30_000);
+    await navigateToRoute(win, "final-preview");
+    await waitForText(win, "Bản xem trước", 30_000);
     if (persistedPreviewStatus === "approved") {
-      await waitForEnabledControl(win, "Render Again", 30_000);
-      await clickText(win, "Render Again");
-      await waitForText(win, "Preview rendered again; approval is still required.", 900_000);
+      await waitForEnabledControl(win, "Dựng lại", 30_000);
+      await clickText(win, "Dựng lại");
+      await waitForText(win, "Đã dựng lại bản xem trước; bạn vẫn cần duyệt.", 900_000);
       await waitForProjectStageStatus(summary.id, "preview-render", ["needs_review"], 900_000);
     }
     phases.sceneReview = "persisted_approved";
     phases.voiceGeneration = persisted.stages.find((stage) => stage.id === "voice-generation")?.status === "approved" ? "approved" : "not_approved";
     phases.subtitles = persisted.stages.find((stage) => stage.id === "subtitle-preparation")?.status === "approved" ? "approved" : "not_approved";
     phases.finalPreview = "real_preview_visible";
-    await waitForEnabledControl(win, "Approve Final Video", 30_000);
-    await clickText(win, "Approve Final Video");
+    await waitForEnabledControl(win, "Duyệt video", 30_000);
+    await clickText(win, "Duyệt video");
     await waitForProjectStageStatus(summary.id, "packaging-export", ["approved"], 900_000);
     phases.previewApproval = "approved";
     phases.packagingExport = "approved";
-    await clickText(win, "Export");
-    await waitForText(win, "Final MP4", 30_000);
+    await navigateToRoute(win, "export");
+    await waitForText(win, "Xuất video", 30_000);
+    await waitForText(win, "MP4 cuối", 30_000);
     phases.export = "verified";
     resumedPreviewCompleted = true;
   }
 
   if (!resumedPreviewCompleted) {
     try {
-    await clickText(win, "Projects");
+      await navigateToRoute(win, "projects");
     await assertText(win, topic);
     await clickProjectOpen(win, topic);
+    const ideaCheckpointLabels = ["Idea candidates", "Các ứng viên ý tưởng", "Idea Lab", "Phòng ý tưởng", "Open next step", "Mở bước tiếp theo", "Retry automatic workflow", "Thử lại quy trình", "needs attention", "Cần xử lý"];
     let checkpointText = await waitForOneOfPageText(
       win,
       requireFullFlow
-        ? ["Idea candidates", "Idea Lab", "Open next step", "Retry automatic workflow", "needs attention"]
-        : ["Idea candidates", "Project command center", "Retry automatic workflow", "Preparing your video"],
+        ? ideaCheckpointLabels
+        : [...ideaCheckpointLabels, "Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"],
       requireFullFlow ? 900_000 : 20_000
     );
-    if (checkpointText.includes("Open next step")) {
-      await clickText(win, "Open next step");
-      checkpointText = await waitForOneOfPageText(win, ["Idea candidates", "Idea Lab", "Retry automatic workflow", "needs attention"], requireFullFlow ? 900_000 : 20_000);
+    if (checkpointText.includes("Open next step") || checkpointText.includes("Mở bước tiếp theo")) {
+      const nextStepLabel = checkpointText.includes("Mở bước tiếp theo") ? "Mở bước tiếp theo" : "Open next step";
+      await clickText(win, nextStepLabel);
+      checkpointText = await waitForOneOfPageText(win, ideaCheckpointLabels, requireFullFlow ? 900_000 : 20_000);
     }
     if (resumeProject && persisted.approvedIdeaId) {
-      if (checkpointText.includes("Retry automatic workflow")) {
-        await waitForEnabledControl(win, "Retry automatic workflow", 30_000);
-        await clickText(win, "Retry automatic workflow");
+      if (checkpointText.includes("Retry automatic workflow") || checkpointText.includes("Thử lại quy trình")) {
+        const retryLabel = checkpointText.includes("Thử lại quy trình") ? "Thử lại quy trình" : "Retry automatic workflow";
+        await waitForEnabledControl(win, retryLabel, 30_000);
+        await clickText(win, retryLabel);
         await waitForProjectStageStatus(summary.id, "asset-review", ["needs_review"], 900_000);
       }
       phases.ideaSelection = "approved";
-    } else if (checkpointText.includes("Idea candidates")) {
+    } else if (checkpointText.includes("Idea candidates") || checkpointText.includes("Các ứng viên ý tưởng")) {
       phases.ideaSelection = "reached";
-      if (checkpointText.includes("Approve this idea") || checkpointText.includes("Choose Idea")) {
-        await clickText(win, checkpointText.includes("Choose Idea") ? "Choose Idea" : "Approve this idea");
+      if (checkpointText.includes("Chọn ý tưởng") || checkpointText.includes("Approve this idea") || checkpointText.includes("Choose Idea")) {
+        const approveIdeaLabel = checkpointText.includes("Chọn ý tưởng") ? "Chọn ý tưởng" : checkpointText.includes("Choose Idea") ? "Choose Idea" : "Approve this idea";
+        await clickText(win, approveIdeaLabel);
         phases.ideaSelection = "approved";
-      } else if (checkpointText.includes("Generate ideas")) {
-        await clickText(win, "Generate ideas");
-        const generatedText = await waitForOneOfPageText(win, ["Approve this idea", "Choose Idea", "Idea generation failed", "needs attention"], 900_000);
-        if (generatedText.includes("Approve this idea") || generatedText.includes("Choose Idea")) {
-          await clickText(win, generatedText.includes("Choose Idea") ? "Choose Idea" : "Approve this idea");
+      } else if (checkpointText.includes("Tạo ý tưởng") || checkpointText.includes("Generate ideas")) {
+        const generateIdeasLabel = checkpointText.includes("Tạo ý tưởng") ? "Tạo ý tưởng" : "Generate ideas";
+        await clickText(win, generateIdeasLabel);
+        const generatedText = await waitForOneOfPageText(win, ["Chọn ý tưởng", "Approve this idea", "Choose Idea", "Phòng ý tưởng thất bại", "Idea generation failed", "Cần xử lý", "needs attention"], requireFullFlow ? 900_000 : 20_000);
+        if (generatedText.includes("Chọn ý tưởng") || generatedText.includes("Approve this idea") || generatedText.includes("Choose Idea")) {
+          const approveGeneratedLabel = generatedText.includes("Chọn ý tưởng") ? "Chọn ý tưởng" : generatedText.includes("Choose Idea") ? "Choose Idea" : "Approve this idea";
+          await clickText(win, approveGeneratedLabel);
           phases.ideaSelection = "approved";
         } else {
           runtimeNotes.push(`Idea checkpoint was reached but generation did not produce a selectable candidate: ${generatedText.slice(0, 300)}`);
@@ -1154,7 +1187,7 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
       const retryScene = prepared.scenes[0]!;
       const acquisitionRunsBefore = workflowRunStore.listRuns(summary.id, "asset-acquisition").length;
 
-      await clickText(win, "Scene Review");
+      await navigateToRoute(win, "scene-review");
       await waitForText(win, "Scene Review", 15_000);
       await waitForEnabledControl(win, "Regenerate Scene", 30_000);
       await clickText(win, "Regenerate Scene");
@@ -1193,11 +1226,11 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
       await waitForProjectStageStatus(summary.id, "asset-review", ["approved"], 60_000);
       phases.sceneReview = `approved:scene-review-checkpoint:${retryScene.id}`;
 
-      await clickText(win, "Voice");
-      await waitForText(win, "Choose voice for this project", 30_000);
+      await navigateToRoute(win, "voice");
+      await waitForText(win, "Giọng đọc", 30_000);
       const selectedProjectVoice = await selectFirstAvailableOption(win, "#project-voice");
       if (!selectedProjectVoice) throw new Error("Voice screen did not expose a matching project voice.");
-      await clickText(win, "Generate voice");
+      await clickText(win, "Tạo giọng đọc");
       const approvedVoice = await waitForProjectStageStatus(summary.id, "voice-generation", ["approved"], 900_000);
       phases.voiceGeneration = approvedVoice.stages.find((stage) => stage.id === "voice-generation")?.status === "approved" ? "approved" : "not_approved";
       const mediaProject = await waitForProjectStageStatus(summary.id, "preview-render", ["needs_review"], 900_000);
@@ -1206,17 +1239,19 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
         throw new Error(`Automatic media generation did not approve Voice and Subtitles (${phases.voiceGeneration}, ${phases.subtitles}).`);
       }
 
-      await waitForText(win, "Final Preview", 900_000);
-      await waitForText(win, "Approve Final Video", 900_000);
+      await navigateToRoute(win, "final-preview");
+      await waitForText(win, "Bản xem trước", 900_000);
+      await waitForText(win, "Duyệt video", 900_000);
       const previewText = await pageText(win);
-      phases.finalPreview = previewText.includes("No reviewable preview yet") ? "screen_reached_empty" : "real_preview_visible";
+      phases.finalPreview = previewText.includes("Chưa có bản xem trước để duyệt") ? "screen_reached_empty" : "real_preview_visible";
       if (requireFullFlow && phases.finalPreview !== "real_preview_visible") throw new Error("Final Preview did not contain a real reviewable video.");
-      await clickText(win, "Approve Final Video");
+      await clickText(win, "Duyệt video");
       await waitForProjectStageStatus(summary.id, "packaging-export", ["approved"], 900_000);
       phases.previewApproval = "approved";
       phases.packagingExport = "approved";
-      await clickText(win, "Export");
-      await waitForText(win, "Final MP4", 30_000);
+      await navigateToRoute(win, "export");
+      await waitForText(win, "Xuất video", 30_000);
+      await waitForText(win, "MP4 cuối", 30_000);
       phases.export = "verified";
     }
   } catch (error) {
@@ -1227,16 +1262,20 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
   }
 
   if (phases.export !== "verified") {
-    for (const route of ["Scene Review", "Final Preview", "Export"] as const) {
+    for (const route of [
+      { id: "scene-review", expected: "Scene Review" },
+      { id: "final-preview", expected: "Bản xem trước" },
+      { id: "export", expected: "Xuất video" }
+    ] as const) {
       try {
-        await clickText(win, route);
-        await assertText(win, route);
+        await navigateToRoute(win, route.id);
+        await assertText(win, route.expected);
         const routeText = await pageText(win);
-        if (route === "Scene Review") phases.sceneReview = routeText.includes("Scenes are not ready yet") ? "screen_reached_empty" : "reviewable_assets_visible";
-        if (route === "Final Preview") phases.finalPreview = routeText.includes("No reviewable preview yet") ? "screen_reached_empty" : "reviewable_preview_visible";
-        if (route === "Export") phases.export = "screen_reached";
+        if (route.id === "scene-review") phases.sceneReview = routeText.includes("Cảnh chưa sẵn sàng") ? "screen_reached_empty" : "reviewable_assets_visible";
+        if (route.id === "final-preview") phases.finalPreview = routeText.includes("Chưa có bản xem trước để duyệt") ? "screen_reached_empty" : "reviewable_preview_visible";
+        if (route.id === "export") phases.export = "screen_reached";
       } catch (error) {
-        runtimeNotes.push(`${route} screen unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        runtimeNotes.push(`${route.id} screen unavailable: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
@@ -1297,7 +1336,7 @@ async function waitForEnabledControl(win: BrowserWindow, label: string, timeoutM
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const count = await win.webContents.executeJavaScript(
-      `(() => Array.from(document.querySelectorAll("button,a")).filter((element) => {
+      `(() => Array.from(document.querySelectorAll("button,a,summary")).filter((element) => {
         const text = [element.innerText, element.textContent, element.getAttribute("aria-label"), element.getAttribute("title")].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim();
         return !element.disabled && (text === ${JSON.stringify(label)} || text.includes(${JSON.stringify(label)}));
       }).length)()`,
@@ -1460,18 +1499,16 @@ function stageDependencyChainApproved(
 function bindActiveApprovedCharacterVersion(project: FactoryProject): FactoryProject {
   if (project.setup.visualWorkflow !== "character_first") return project;
   const profile = projectRepository.loadChannelProfile(project.profileId);
-  const selected = profile?.characterVersions?.find((version) => version.id === project.setup.characterVersionId);
-  if (characterVersionIsApproved(selected)) return project;
-  const character = profile?.characterVersions?.find((version) => version.id === profile.activeCharacterVersionId);
-  if (!character || !characterVersionIsApproved(character)) return project;
+  const character = resolveApprovedCharacterVersion(profile, project.setup.characterVersionId);
+  if (!character || character.id === project.setup.characterVersionId) return project;
   return { ...project, setup: { ...project.setup, characterVersionId: character.id } };
 }
 
 function characterReferenceImagesForProject(project: FactoryProject): ImageReferenceInput[] {
   if (project.setup.visualWorkflow !== "character_first") return [];
   const profile = projectRepository.loadChannelProfile(project.profileId);
-  const character = profile?.characterVersions?.find((version) => version.id === project.setup.characterVersionId);
-  if (!character || !characterVersionIsApproved(character)) return [];
+  const character = resolveApprovedCharacterVersion(profile, project.setup.characterVersionId);
+  if (!character) return [];
   const preferredViews: CharacterReferenceView[] = ["hero", "half_body", "teaching_gesture", "three_quarter", "profile", "full_body"];
   return preferredViews
     .map((view) => character.references.find((reference) => reference.view === view && reference.status === "approved" && reference.relativeFilePath))
@@ -1481,9 +1518,13 @@ function characterReferenceImagesForProject(project: FactoryProject): ImageRefer
 }
 
 function currentApprovedArtifacts(project: FactoryProject, stageId: string): WorkflowArtifact[] {
+  if (project.setup.visualWorkflow === "character_first") {
+    const boundProject = bindActiveApprovedCharacterVersion(project);
+    if (boundProject !== project && boundProject.setup.characterVersionId) project.setup.characterVersionId = boundProject.setup.characterVersionId;
+  }
   if (stageId === "visual-routing" && project.setup.visualWorkflow === "character_first") {
-    const character = projectRepository.loadChannelProfile(project.profileId)?.characterVersions?.find((version) => version.id === project.setup.characterVersionId);
-    if (!character || !characterVersionIsApproved(character)) throw new Error("Visual Routing requires an approved character version.");
+    const character = resolveApprovedCharacterVersion(projectRepository.loadChannelProfile(project.profileId), project.setup.characterVersionId);
+    if (!character) throw new Error("Visual Routing requires an approved character version.");
   }
   const stages = normalizeProjectStages(project.stages, project.setup.visualWorkflow);
   const stage = stages.find((item) => item.id === stageId);
@@ -1582,6 +1623,7 @@ function registerPreviewMediaProtocol(): void {
       const asset = parsed?.success ? parsed.data.assets.find((item) => item.asset.sha256 === assetMedia.assetSha256) : undefined;
       if (!artifact || (artifact.status !== "needs_review" && artifact.status !== "approved") || !asset || asset.asset.relativeFilePath !== relative(workspaceRoot, assetMedia.outputPath)) return new Response("Not found", { status: 404 });
       const bytes = readFileSync(assetMedia.outputPath);
+      if (createHash("sha256").update(bytes).digest("hex") !== asset.asset.sha256) return new Response("Not found", { status: 404 });
       return new Response(request.method === "HEAD" ? null : bytes, { status: 200, headers: { "Cache-Control": "no-store", "Content-Length": String(bytes.length), "Content-Type": assetMedia.mimeType } });
     }
     const characterMedia = characterPreviewMediaFiles.get(token);
@@ -1825,9 +1867,10 @@ async function assertNoText(win: BrowserWindow, forbidden: string): Promise<void
 }
 
 async function clickText(win: BrowserWindow, label: string): Promise<void> {
+  await waitForEnabledControl(win, label, 15_000);
   const result = await win.webContents.executeJavaScript(
-    `(() => {
-      const elements = Array.from(document.querySelectorAll("button,a"));
+      `(() => {
+        const elements = Array.from(document.querySelectorAll("button,a,summary"));
       const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();
       const textOf = (el) => normalize([el.innerText, el.textContent, el.getAttribute("aria-label"), el.getAttribute("title")].filter(Boolean).join(" "));
       const exact = elements.filter((el) => textOf(el) === ${JSON.stringify(label)});
@@ -1847,13 +1890,24 @@ async function clickText(win: BrowserWindow, label: string): Promise<void> {
   await delay(500);
 }
 
+async function navigateToRoute(win: BrowserWindow, route: string): Promise<void> {
+  await win.webContents.executeJavaScript(
+    `(() => {
+      window.location.hash = ${JSON.stringify(`#${route}`)};
+      return window.location.hash;
+    })()`,
+    true
+  );
+  await delay(500);
+}
+
 async function clickProjectOpen(win: BrowserWindow, topic: string): Promise<void> {
   const clicked = await win.webContents.executeJavaScript(
     `(() => {
       const rows = Array.from(document.querySelectorAll("tr"));
       const textOf = (item) => [item.innerText, item.textContent].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim();
       const row = rows.find((item) => textOf(item).includes(${JSON.stringify(topic)}));
-      const button = row && Array.from(row.querySelectorAll("button")).find((item) => textOf(item).includes("Open"));
+      const button = row && Array.from(row.querySelectorAll("button")).find((item) => textOf(item).includes("Open") || textOf(item).includes("Mở"));
       if (!button || button.disabled) return false;
       button.click();
       return true;
@@ -1932,27 +1986,8 @@ async function selectFirstAvailableOption(win: BrowserWindow, selector: string):
   return "";
 }
 
-async function readSelectValue(win: BrowserWindow, selector: string): Promise<string> {
-  return await win.webContents.executeJavaScript(
-    `(() => {
-      const select = document.querySelector(${JSON.stringify(selector)});
-      return select instanceof HTMLSelectElement ? select.value : "";
-    })()`,
-    true
-  ) as string;
-}
-
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function verifiedCharacterImageConfig(): Promise<{ imageModel: string; apiKey: string; baseUrl: string; imageCapabilityVerified: true }> {
-  const certification = await loadNineRouterImageCertification({ credentialStore, certificationStore: imageCertificationStore });
-  if (certification.status !== "verified") throw new CharacterGenerationError("capability_not_verified", "A verified image-model certification is required before generating a character pack.");
-  const settings = credentialStore.loadProviderCredentialSettings("9router");
-  const apiKey = await credentialStore.resolveProviderSecret("9router");
-  if (!settings?.imageModel || !apiKey) throw new CharacterGenerationError("credential_missing", "The selected image model or credential is unavailable.");
-  return { imageModel: settings.imageModel, apiKey, baseUrl: settings.baseUrl, imageCapabilityVerified: true };
 }
 
 ipcMain.handle("bootstrap", async () => ({
@@ -1978,6 +2013,12 @@ ipcMain.handle("route-topic", (_event, input: unknown) => {
 ipcMain.handle("fixture-project", (_event, input: unknown) => {
   const parsed = typeof input === "string" ? { topic: input, format: "long", targetLanguage: "English" } : input;
   const request = createProjectRequestSchema.parse(parsed);
+  const requestedVisualWorkflow = request.visualWorkflow ?? (request.workflowMode === "semi_automatic" ? "character_first" : "legacy");
+  if (requestedVisualWorkflow === "character_first" && request.characterVersionId) {
+    const profile = projectRepository.listChannelProfiles().find((candidate) => candidate.id === request.selectedProfileId);
+    const character = profile?.characterVersions?.find((version) => version.id === request.characterVersionId);
+    if (!character || !characterVersionIsApproved(character)) throw new Error("Select an approved character version before creating a character-first project.");
+  }
   const competitorReference = request.competitorReference
     ? {
         ...(request.competitorReference.sourceUrl ? { sourceUrl: request.competitorReference.sourceUrl } : {}),
@@ -2202,30 +2243,53 @@ ipcMain.handle("generate-character-pack", async (_event, input: unknown) => {
   const profile = projectRepository.loadChannelProfile(request.profileId);
   if (!profile) throw new Error(`Channel profile not found: ${request.profileId}`);
   const versions = profile.characterVersions ?? [];
-  const config = await verifiedCharacterImageConfig();
-  const generated = await generateCharacterVersion({
+  const generated = createManualCharacterPromptPack({
     profileId: profile.id,
     version: Math.max(0, ...versions.map((version) => version.version)) + 1,
     name: request.name,
     persona: request.persona,
     invariantTraits: request.invariantTraits,
     prohibitedChanges: request.prohibitedChanges,
-    viewCount: request.viewCount,
-    workspaceRoot,
-    ...config
+    viewCount: request.viewCount
   });
   const nextProfile: ChannelProfile = { ...profile, characterVersions: [...versions, generated] };
   projectRepository.saveChannelProfile(nextProfile);
   return channelProfileResponseSchema.parse(nextProfile);
 });
 
-ipcMain.handle("retry-character-reference", async (_event, input: unknown) => {
+ipcMain.handle("retry-character-reference", (_event, input: unknown) => {
   const request = characterReferenceRetryRequestSchema.parse(input);
   const profile = projectRepository.loadChannelProfile(request.profileId);
   const version = profile?.characterVersions?.find((candidate) => candidate.id === request.versionId);
   if (!profile || !version) throw new Error("Character version was not found.");
-  const config = await verifiedCharacterImageConfig();
-  const nextVersion = await retryCharacterReference({ profileId: profile.id, version, view: request.view, workspaceRoot, ...config });
+  const nextVersion = retryManualCharacterReference({ version, view: request.view });
+  const nextProfile: ChannelProfile = { ...profile, characterVersions: profile.characterVersions!.map((candidate) => candidate.id === version.id ? nextVersion : candidate) };
+  projectRepository.saveChannelProfile(nextProfile);
+  return channelProfileResponseSchema.parse(nextProfile);
+});
+
+ipcMain.handle("upload-character-reference", async (_event, input: unknown) => {
+  const request = characterReferenceUploadRequestSchema.parse(input);
+  const profile = projectRepository.loadChannelProfile(request.profileId);
+  const version = profile?.characterVersions?.find((candidate) => candidate.id === request.versionId);
+  const reference = version?.references.find((candidate) => candidate.view === request.view);
+  if (!profile || !version || !reference) throw new Error("Character reference was not found.");
+  const selected = await dialog.showOpenDialog({ properties: ["openFile"], filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }] });
+  if (selected.canceled || !selected.filePaths[0]) return channelProfileResponseSchema.parse(profile);
+  const asset = await importLocalImageAsset({ projectId: `channel-${profile.id}`, shotId: `character-${version.id}-${request.view}`, workspaceRoot, sourcePath: selected.filePaths[0] });
+  const expectedRatio = version.composition?.aspectRatio ?? "9:16";
+  const actualRatio = asset.width / asset.height;
+  const targetRatio = expectedRatio === "16:9" ? 16 / 9 : expectedRatio === "1:1" ? 1 : 9 / 16;
+  if (Math.abs(actualRatio - targetRatio) / targetRatio > 0.12) throw new Error("Character reference aspect ratio does not match the composition lock.");
+  if (Math.min(asset.width, asset.height) < 512) throw new Error("Character reference resolution is too small; use at least 512px on the short side.");
+  const nextVersion: CharacterVersion = {
+    ...version,
+    status: "needs_review",
+    references: version.references.map((candidate) => candidate.view === request.view
+      ? { ...candidate, status: "needs_review" as const, relativeFilePath: asset.relativeFilePath, sha256: asset.sha256, mimeType: asset.mimeType, width: asset.width, height: asset.height }
+      : candidate),
+    updatedAt: new Date().toISOString()
+  };
   const nextProfile: ChannelProfile = { ...profile, characterVersions: profile.characterVersions!.map((candidate) => candidate.id === version.id ? nextVersion : candidate) };
   projectRepository.saveChannelProfile(nextProfile);
   return channelProfileResponseSchema.parse(nextProfile);
@@ -2236,7 +2300,14 @@ ipcMain.handle("approve-character-version", (_event, input: unknown) => {
   const profile = projectRepository.loadChannelProfile(request.profileId);
   const version = profile?.characterVersions?.find((candidate) => candidate.id === request.versionId);
   if (!profile || !version) throw new Error("Character version was not found.");
-  if (version.references.length < 4 || version.references.some((reference) => !reference.relativeFilePath || !existsSync(resolveWorkspaceArtifactPath(reference.relativeFilePath)))) throw new Error("Every character reference must be generated before approval.");
+  if (version.references.length < 4 || version.references.some((reference) => (
+    !["needs_review", "approved"].includes(reference.status)
+    || !reference.relativeFilePath
+    || !reference.sha256
+    || !reference.mimeType
+    || !existsSync(resolveWorkspaceArtifactPath(reference.relativeFilePath))
+    || createHash("sha256").update(readFileSync(resolveWorkspaceArtifactPath(reference.relativeFilePath))).digest("hex") !== reference.sha256
+  ))) throw new Error("Every character reference must include validated image metadata before approval.");
   const now = new Date().toISOString();
   const nextProfile: ChannelProfile = {
     ...profile,
@@ -2245,6 +2316,17 @@ ipcMain.handle("approve-character-version", (_event, input: unknown) => {
       ? { ...candidate, status: "approved" as const, references: candidate.references.map((reference) => ({ ...reference, status: "approved" as const })), updatedAt: now }
       : candidate)
   };
+  projectRepository.saveChannelProfile(nextProfile);
+  return channelProfileResponseSchema.parse(nextProfile);
+});
+
+ipcMain.handle("set-active-character-version", (_event, input: unknown) => {
+  const request = characterVersionRequestSchema.parse(input);
+  const profile = projectRepository.loadChannelProfile(request.profileId);
+  const version = profile?.characterVersions?.find((candidate) => candidate.id === request.versionId);
+  if (!profile || !version) throw new Error("Character version was not found.");
+  if (!characterVersionIsApproved(version)) throw new Error("Only an approved character version can be selected as active.");
+  const nextProfile: ChannelProfile = { ...profile, activeCharacterVersionId: version.id };
   projectRepository.saveChannelProfile(nextProfile);
   return channelProfileResponseSchema.parse(nextProfile);
 });
@@ -2272,10 +2354,10 @@ ipcMain.handle("run-character-preparation", (_event, input: unknown) => {
   const boundProject = bindActiveApprovedCharacterVersion(project);
   if (boundProject !== project) project = saveAndReturnProject(boundProject);
   const profile = projectRepository.loadChannelProfile(project.profileId);
-  const character = profile?.characterVersions?.find((version) => version.id === project.setup.characterVersionId);
+  const character = resolveApprovedCharacterVersion(profile, project.setup.characterVersionId);
   if (!character || !characterVersionIsApproved(character)) throw new Error("Select and approve a channel character before continuing visual production.");
   if (project.stages.find((stage) => stage.id === "character-preparation")?.status === "approved") return factoryProjectResponseSchema.parse(project);
-  const approved = transitionProjectStage(project, "character-preparation", "approved");
+  const approved = moveManualStageToApproved(project, "character-preparation");
   projectRepository.saveProject(approved);
   return factoryProjectResponseSchema.parse(approved);
 });
@@ -2288,9 +2370,9 @@ ipcMain.handle("approve-character-preparation", (_event, input: unknown) => {
   const boundProject = bindActiveApprovedCharacterVersion(project);
   if (boundProject !== project) project = saveAndReturnProject(boundProject);
   const profile = projectRepository.loadChannelProfile(project.profileId);
-  const character = profile?.characterVersions?.find((version) => version.id === project.setup.characterVersionId);
+  const character = resolveApprovedCharacterVersion(profile, project.setup.characterVersionId);
   if (!character || !characterVersionIsApproved(character)) throw new Error("Select and approve a channel character before continuing visual production.");
-  const approved = transitionProjectStage(project, "character-preparation", "approved");
+  const approved = moveManualStageToApproved(project, "character-preparation");
   projectRepository.saveProject(approved);
   return factoryProjectResponseSchema.parse(approved);
 });
@@ -3707,8 +3789,8 @@ ipcMain.handle("run-asset-concepts", async (_event, input: unknown) => {
   if (!project) throw new Error(`Project not found: ${projectId}`);
   if (project.setup.visualWorkflow !== "character_first") return factoryProjectResponseSchema.parse(project);
   const profile = projectRepository.loadChannelProfile(project.profileId);
-  const character = profile?.characterVersions?.find((version) => version.id === project.setup.characterVersionId);
-  if (!character || !characterVersionIsApproved(character)) throw new Error("Asset Concepts requires an approved character version.");
+  const character = resolveApprovedCharacterVersion(profile, project.setup.characterVersionId);
+  if (!character) throw new Error("Asset Concepts requires an approved character version.");
   const visualArtifact = currentApprovedArtifacts(project, "visual-routing").find((item) => item.payloadJson);
   if (!visualArtifact?.payloadJson) throw new Error("Asset Concepts requires approved Visual Routing.");
   const routing = visualRoutingOutputSchema.parse(visualArtifact.payloadJson);
@@ -3732,21 +3814,26 @@ ipcMain.handle("run-asset-concepts", async (_event, input: unknown) => {
     throw error;
   }
   try {
-    const result = await runAssetConcepts({
+      const result = await runAssetConcepts({
       shots: routing.shots.map((shot) => ({ id: shot.id, purpose: shot.purpose, visualMode: shot.visualMode, ...(shot.semanticBeat ? { semanticBeat: shot.semanticBeat } : {}), subjectAction: shot.subjectAction, startState: shot.startState, endState: shot.endState })),
       character,
+      manualMode: project.setup.visualWorkflow === "character_first",
       credentialStore,
       certificationStore: textCertificationStore
     });
     const output = assetConceptsOutputSchema.parse(result.output);
     const review = transitionProjectStage(running, "asset-concepts", "needs_review");
-    const approved = transitionProjectStage({ ...review, assetConcepts: output.concepts }, "asset-concepts", "approved");
+    const reviewed = { ...review, assetConcepts: output.concepts };
+    const automaticApproval = project.setup.workflowMode === "semi_automatic" && project.setup.visualWorkflow === "character_first";
+    const approved = automaticApproval ? transitionProjectStage(reviewed, "asset-concepts", "approved") : reviewed;
     db.exec("BEGIN IMMEDIATE;");
     try {
-      saveProjectWithWorkflowInvalidation(review, { withinTransaction: true });
+      saveProjectWithWorkflowInvalidation(reviewed, { withinTransaction: true });
       workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-concepts", status: "needs_review", runnerId: "asset-concepts-9router", runnerVersion: "asset-concepts-v1", providerId: "9router", inputArtifactIds: [visualArtifact.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now, ...(result.returnedModelId ? { returnedModelId: result.returnedModelId } : {}) }, { id: artifactId, projectId, stageId: "asset-concepts", stageRunId: runId, type: "asset-concepts", version: workflowRunStore.listArtifacts(projectId, "asset-concepts").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true });
-      workflowRunStore.approveReviewRun(runId, { withinTransaction: true, approvalMode: "automatic" });
-      saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true });
+      if (automaticApproval) {
+        workflowRunStore.approveReviewRun(runId, { withinTransaction: true, approvalMode: "automatic" });
+        saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true });
+      }
       db.exec("COMMIT;");
     } catch (error) {
       db.exec("ROLLBACK;");
@@ -3881,7 +3968,7 @@ ipcMain.handle("revise-scene-review", (_event, input: unknown) => {
 ipcMain.handle("approve-visual-routing", (_event, input: unknown) => { const { projectId } = visualRoutingRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "visual-routing").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Visual Routing exists."); const shots = visualRoutingOutputSchema.parse(artifact.payloadJson).shots; const approved = transitionProjectStage(markDownstreamStagesStale({ ...project, shots }, "visual-routing"), "visual-routing", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
 ipcMain.handle("reject-visual-routing", (_event, input: unknown) => { const { projectId } = visualRoutingRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "visual-routing").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId) throw new Error("No reviewable Visual Routing exists."); const rejected = transitionProjectStage(project, "visual-routing", "rejected"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(rejected, { withinTransaction: true }); workflowRunStore.rejectReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(rejected); });
 
-ipcMain.handle("run-prompt-preparation", async (_event, input: unknown) => { const { projectId } = promptPreparationRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const routingArtifact = currentApprovedArtifacts(project, "visual-routing").find((item) => item.payloadJson); if (!routingArtifact?.payloadJson) throw new Error("Prompt Preparation requires approved Visual Routing."); const routing = visualRoutingOutputSchema.parse(routingArtifact.payloadJson); const character = project.setup.visualWorkflow === "character_first" ? projectRepository.loadChannelProfile(project.profileId)?.characterVersions?.find((version) => version.id === project.setup.characterVersionId) : undefined; if (project.setup.visualWorkflow === "character_first" && (!character || character.status !== "approved")) throw new Error("Prompt Preparation requires an approved character version."); const assetConceptArtifact = project.setup.visualWorkflow === "character_first" ? currentApprovedArtifacts(project, "asset-concepts").find((item) => item.payloadJson) : undefined; if (project.setup.visualWorkflow === "character_first" && !assetConceptArtifact?.payloadJson) throw new Error("Prompt Preparation requires approved Asset Concepts."); const assetConcepts = assetConceptArtifact?.payloadJson ? assetConceptsOutputSchema.parse(assetConceptArtifact.payloadJson).concepts : undefined; const aspectRatio = project.format === "short" ? "9:16" : "16:9" as const; const fingerprint = canonicalSha256({ stageId: "prompt-preparation", visualRoutingArtifactId: routingArtifact.id, assetConceptArtifactId: assetConceptArtifact?.id, characterVersionId: character?.id, aspectRatio }); const existing = workflowRunStore.findLatestByInput(projectId, "prompt-preparation", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project); const runId = `stage-run-${randomUUID()}`; const running = transitionProjectStage(transitionProjectStage(project, "prompt-preparation", "queued"), "prompt-preparation", "running"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(running, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "prompt-preparation", status: "running", runnerId: "prompt-preparation-9router", runnerVersion: "prompt-preparation-v1", providerId: "9router", promptTemplateId: "visual-prompt-v1", promptVersion: "v1", inputArtifactIds: [routingArtifact.id, ...(assetConceptArtifact ? [assetConceptArtifact.id] : [])], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: new Date().toISOString() }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } try { const result = await runPromptPreparation({ shots: routing.shots, character, assetConcepts, aspectRatio, credentialStore, certificationStore: textCertificationStore }); const artifactId = `artifact-${randomUUID()}`; const finishedAt = new Date().toISOString(); const review = transitionProjectStage(running, "prompt-preparation", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "prompt-preparation", status: "needs_review", runnerId: "prompt-preparation-9router", runnerVersion: "prompt-preparation-v1", providerId: "9router", promptTemplateId: "visual-prompt-v1", promptVersion: "v1", inputArtifactIds: [routingArtifact.id, ...(assetConceptArtifact ? [assetConceptArtifact.id] : [])], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt, ...(result.returnedModelId ? { returnedModelId: result.returnedModelId } : {}) }, { id: artifactId, projectId, stageId: "prompt-preparation", stageRunId: runId, type: "visual-prompts", version: workflowRunStore.listArtifacts(projectId, "prompt-preparation").length + 1, status: "needs_review", payloadJson: result.output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review); } catch (error) { const failed = transitionProjectStage(running, "prompt-preparation", "failed"); const message = error instanceof PromptPreparationError ? error.message : "Prompt Preparation failed."; db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "prompt-preparation", status: "failed", runnerId: "prompt-preparation-9router", runnerVersion: "prompt-preparation-v1", providerId: "9router", inputArtifactIds: [routingArtifact.id, ...(assetConceptArtifact ? [assetConceptArtifact.id] : [])], inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof PromptPreparationError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; } throw new Error(message); } });
+ipcMain.handle("run-prompt-preparation", async (_event, input: unknown) => { const { projectId } = promptPreparationRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const routingArtifact = currentApprovedArtifacts(project, "visual-routing").find((item) => item.payloadJson); if (!routingArtifact?.payloadJson) throw new Error("Prompt Preparation requires approved Visual Routing."); const routing = visualRoutingOutputSchema.parse(routingArtifact.payloadJson); const profile = projectRepository.loadChannelProfile(project.profileId); const character = project.setup.visualWorkflow === "character_first" ? resolveApprovedCharacterVersion(profile, project.setup.characterVersionId) : undefined; if (project.setup.visualWorkflow === "character_first" && !character) throw new Error("Prompt Preparation requires an approved character version."); const assetConceptArtifact = project.setup.visualWorkflow === "character_first" ? currentApprovedArtifacts(project, "asset-concepts").find((item) => item.payloadJson) : undefined; if (project.setup.visualWorkflow === "character_first" && !assetConceptArtifact?.payloadJson) throw new Error("Prompt Preparation requires approved Asset Concepts."); const assetConcepts = assetConceptArtifact?.payloadJson ? assetConceptsOutputSchema.parse(assetConceptArtifact.payloadJson).concepts : undefined; const aspectRatio = project.format === "short" ? "9:16" : "16:9" as const; const fingerprint = canonicalSha256({ stageId: "prompt-preparation", visualRoutingArtifactId: routingArtifact.id, assetConceptArtifactId: assetConceptArtifact?.id, characterVersionId: character?.id, manualMode: project.setup.visualWorkflow === "character_first", aspectRatio }); const existing = workflowRunStore.findLatestByInput(projectId, "prompt-preparation", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project); const runId = `stage-run-${randomUUID()}`; const running = transitionProjectStage(transitionProjectStage(project, "prompt-preparation", "queued"), "prompt-preparation", "running"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(running, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "prompt-preparation", status: "running", runnerId: "prompt-preparation-9router", runnerVersion: "prompt-preparation-v1", providerId: "9router", promptTemplateId: "visual-prompt-v1", promptVersion: "v1", inputArtifactIds: [routingArtifact.id, ...(assetConceptArtifact ? [assetConceptArtifact.id] : [])], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: new Date().toISOString() }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } try { const result = await runPromptPreparation({ shots: routing.shots, character, assetConcepts, manualMode: project.setup.visualWorkflow === "character_first", aspectRatio, credentialStore, certificationStore: textCertificationStore }); const artifactId = `artifact-${randomUUID()}`; const finishedAt = new Date().toISOString(); const review = transitionProjectStage(running, "prompt-preparation", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "prompt-preparation", status: "needs_review", runnerId: "prompt-preparation-9router", runnerVersion: "prompt-preparation-v1", providerId: "9router", promptTemplateId: "visual-prompt-v1", promptVersion: "v1", inputArtifactIds: [routingArtifact.id, ...(assetConceptArtifact ? [assetConceptArtifact.id] : [])], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt, ...(result.returnedModelId ? { returnedModelId: result.returnedModelId } : {}) }, { id: artifactId, projectId, stageId: "prompt-preparation", stageRunId: runId, type: "visual-prompts", version: workflowRunStore.listArtifacts(projectId, "prompt-preparation").length + 1, status: "needs_review", payloadJson: result.output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review); } catch (error) { const message = error instanceof PromptPreparationError ? error.message : "Prompt Preparation failed."; const attention = createStageAttention("prompt-preparation", error instanceof PromptPreparationError ? error.category : "unexpected_failure", message, { retryAction: "Retry Prompt Preparation" }); const failed = updateProjectStage(running, "prompt-preparation", "needs_attention", attention); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "prompt-preparation", status: "needs_attention", runnerId: "prompt-preparation-9router", runnerVersion: "prompt-preparation-v1", providerId: "9router", inputArtifactIds: [routingArtifact.id, ...(assetConceptArtifact ? [assetConceptArtifact.id] : [])], inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof PromptPreparationError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; } throw new Error(message); } });
 ipcMain.handle("list-prompt-preparation-artifacts", (_event, input: unknown) => { const { projectId } = promptPreparationRequestSchema.parse(input); return promptPreparationArtifactsResponseSchema.parse(workflowRunStore.listArtifacts(projectId, "prompt-preparation").map((artifact) => ({ id: artifact.id, ...(artifact.stageRunId ? { stageRunId: artifact.stageRunId } : {}), status: artifact.status, payloadJson: artifact.payloadJson, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt }))); });
 ipcMain.handle("approve-prompt-preparation", (_event, input: unknown) => { const { projectId } = promptPreparationRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "prompt-preparation").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Prompt Preparation exists."); const prompts = promptPreparationOutputSchema.parse(artifact.payloadJson).prompts; const promptVersions = new Map(prompts.map((prompt) => [prompt.shotId, prompt.promptVersionId])); const approved = transitionProjectStage(markDownstreamStagesStale({ ...project, shots: project.shots.map((shot) => promptVersions.has(shot.id) ? { ...shot, promptVersionId: promptVersions.get(shot.id)! } : shot) }, "prompt-preparation"), "prompt-preparation", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
 ipcMain.handle("reject-prompt-preparation", (_event, input: unknown) => { const { projectId } = promptPreparationRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "prompt-preparation").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId) throw new Error("No reviewable Prompt Preparation exists."); const rejected = transitionProjectStage(project, "prompt-preparation", "rejected"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(rejected, { withinTransaction: true }); workflowRunStore.rejectReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(rejected); });
@@ -3940,7 +4027,11 @@ ipcMain.handle("run-asset-acquisition", async (_event, input: unknown) => {
       throw new AssetAcquisitionError("unsafe_asset", "Approved character references are unavailable for image generation.");
     }
     for (const asset of routePlan.preservedAssets) {
-      if (!existsSync(resolveWorkspaceArtifactPath(asset.relativeFilePath))) throw new AssetAcquisitionError("unsafe_asset", `The approved local asset for shot ${asset.shotId} is missing from the workspace.`);
+      try {
+        assertCurrentApprovedAsset(asset, `shot ${asset.shotId}`);
+      } catch {
+        throw new AssetAcquisitionError("unsafe_asset", `The approved local asset for shot ${asset.shotId} is missing or changed in the workspace.`);
+      }
     }
     const certification = routePlan.imagePrompts.length
       ? await loadNineRouterImageCertification({ credentialStore, certificationStore: imageCertificationStore })
@@ -4000,7 +4091,7 @@ ipcMain.handle("run-asset-acquisition", async (_event, input: unknown) => {
         generationJobStore.finish(jobId, "failed", { ...jobPayload, errorCategory: error instanceof AssetAcquisitionError ? error.category : "unexpected_failure" }); throw error;
       }
     }
-    const output = assetAcquisitionOutputSchema.parse({ assets }); const artifactId = `artifact-${randomUUID()}`; const finishedAt = new Date().toISOString(); const review = transitionProjectStage(running, "asset-acquisition", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-acquisition", status: "needs_review", runnerId, runnerVersion: "asset-acquisition-v1", ...providerRunMetadata, inputArtifactIds: [promptArtifact!.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt }, { id: artifactId, projectId, stageId: "asset-acquisition", stageRunId: runId, type: "asset", version: workflowRunStore.listArtifacts(projectId, "asset-acquisition").length + 1, status: "needs_review", payloadJson: output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review); } catch (error) { const failed = transitionProjectStage(running, "asset-acquisition", "failed"); const message = error instanceof AssetAcquisitionError ? error.message : "Asset Acquisition failed."; db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-acquisition", status: "failed", runnerId, runnerVersion: "asset-acquisition-v1", ...providerRunMetadata, inputArtifactIds: [promptArtifact!.id], inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof AssetAcquisitionError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; } throw new Error(message); }
+    const output = assetAcquisitionOutputSchema.parse({ assets }); const artifactId = `artifact-${randomUUID()}`; const finishedAt = new Date().toISOString(); const review = transitionProjectStage(running, "asset-acquisition", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-acquisition", status: "needs_review", runnerId, runnerVersion: "asset-acquisition-v1", ...providerRunMetadata, inputArtifactIds: [promptArtifact!.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt }, { id: artifactId, projectId, stageId: "asset-acquisition", stageRunId: runId, type: "asset", version: workflowRunStore.listArtifacts(projectId, "asset-acquisition").length + 1, status: "needs_review", payloadJson: output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review); } catch (error) { const message = error instanceof AssetAcquisitionError ? error.message : "Asset Acquisition failed."; const attention = createStageAttention("asset-acquisition", error instanceof AssetAcquisitionError ? error.category : "unexpected_failure", message, { retryAction: "Retry Asset Acquisition" }); const failed = updateProjectStage(running, "asset-acquisition", "needs_attention", attention); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-acquisition", status: "needs_attention", runnerId, runnerVersion: "asset-acquisition-v1", ...providerRunMetadata, inputArtifactIds: [promptArtifact!.id], inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof AssetAcquisitionError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; } throw new Error(message); }
 });
 ipcMain.handle("list-asset-acquisition-artifacts", (_event, input: unknown) => { const { projectId } = assetAcquisitionRequestSchema.parse(input); return assetAcquisitionArtifactsResponseSchema.parse(workflowRunStore.listArtifacts(projectId, "asset-acquisition").map((artifact) => ({ id: artifact.id, ...(artifact.stageRunId ? { stageRunId: artifact.stageRunId } : {}), status: artifact.status, payloadJson: artifact.payloadJson, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt }))); });
 ipcMain.handle("approve-asset-acquisition", (_event, input: unknown) => { const { projectId } = assetAcquisitionRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "asset-acquisition").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Asset Acquisition output exists."); assetAcquisitionOutputSchema.parse(artifact.payloadJson); const approved = transitionProjectStage(markDownstreamStagesStale(project, "asset-acquisition"), "asset-acquisition", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
@@ -4030,45 +4121,267 @@ ipcMain.handle("run-asset-review", (_event, input: unknown) => {
   const artifactId = `artifact-${randomUUID()}`;
   const now = new Date().toISOString();
   const output = assetReviewOutputSchema.parse({ acquisitionArtifactId: acquisition.id, assets: reviewItems });
-  const automaticApproval = project.setup.visualWorkflow === "character_first";
-  const automaticOutput = automaticApproval
-    ? assetReviewOutputSchema.parse({ acquisitionArtifactId: acquisition.id, assets: reviewItems.map((item) => ({ ...item, reviewStatus: "approved" as const, assignedShotId: item.asset.shotId })) })
-    : output;
   const review = transitionProjectStage(transitionProjectStage(transitionProjectStage(project, "asset-review", "queued"), "asset-review", "running"), "asset-review", "needs_review");
-  const assignments = new Map(automaticOutput.assets.map((item) => [item.assignedShotId!, `asset-${item.asset.sha256}`]));
-  const approved = automaticApproval
-    ? transitionProjectStage({ ...review, shots: review.shots.map((shot) => assignments.has(shot.id) ? { ...shot, approvedAssetId: assignments.get(shot.id)! } : shot) }, "asset-review", "approved")
-    : undefined;
   db.exec("BEGIN IMMEDIATE;");
   try {
     saveProjectWithWorkflowInvalidation(review, { withinTransaction: true });
     workflowRunStore.createRun({ id: runId, projectId, stageId: "asset-review", status: "running", runnerId: "asset-review-local", runnerVersion: "asset-review-v1", inputArtifactIds: [acquisition.id], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now });
-    workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-review", status: "needs_review", runnerId: "asset-review-local", runnerVersion: "asset-review-v1", inputArtifactIds: [acquisition.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId, stageId: "asset-review", stageRunId: runId, type: "asset-review", version: workflowRunStore.listArtifacts(projectId, "asset-review").length + 1, status: "needs_review", payloadJson: automaticOutput, createdAt: now, updatedAt: now }, { withinTransaction: true });
-    if (automaticApproval && approved) { workflowRunStore.approveReviewRun(runId, { withinTransaction: true, approvalMode: "automatic" }); saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); }
+    workflowRunStore.finishRun({ id: runId, projectId, stageId: "asset-review", status: "needs_review", runnerId: "asset-review-local", runnerVersion: "asset-review-v1", inputArtifactIds: [acquisition.id], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId, stageId: "asset-review", stageRunId: runId, type: "asset-review", version: workflowRunStore.listArtifacts(projectId, "asset-review").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true });
     db.exec("COMMIT;");
   } catch (error) {
     db.exec("ROLLBACK;");
     throw error;
   }
-  return factoryProjectResponseSchema.parse(approved ?? review);
+  return factoryProjectResponseSchema.parse(review);
 });
 ipcMain.handle("list-asset-review-artifacts", (_event, input: unknown) => { const { projectId } = assetReviewRequestSchema.parse(input); return assetReviewArtifactsResponseSchema.parse(workflowRunStore.listArtifacts(projectId, "asset-review").map((artifact) => ({ id: artifact.id, ...(artifact.stageRunId ? { stageRunId: artifact.stageRunId } : {}), status: artifact.status, payloadJson: artifact.payloadJson, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt }))); });
-ipcMain.handle("revise-asset-review", (_event, input: unknown) => { const request = reviseAssetReviewRequestSchema.parse(input); const project = projectRepository.loadProject(request.projectId); if (!project) throw new Error(`Project not found: ${request.projectId}`); const source = workflowRunStore.listArtifacts(request.projectId, "asset-review").find((item) => item.id === request.artifactId && item.status === "needs_review"); if (!source?.stageRunId || !source.payloadJson) throw new Error("Asset Review revision must start from a reviewable artifact."); const current = assetReviewOutputSchema.parse(source.payloadJson); const inputArtifactIds = [current.acquisitionArtifactId]; const selected = current.assets.find((item) => item.asset.sha256 === request.assetSha256); if (!selected) throw new Error("Asset is not present in the review artifact."); if (request.action === "assign" && (!request.shotId || request.shotId !== selected.asset.shotId)) throw new Error("An asset can only be assigned to its explicitly mapped shot."); if (request.action === "assign" && selected.reviewStatus !== "approved") throw new Error("Approve an asset before assigning it."); const assets = current.assets.map((item) => { if (item.asset.sha256 !== request.assetSha256) return item; if (request.action === "approve") return { ...item, reviewStatus: "approved" as const }; if (request.action === "reject") return { ...item, reviewStatus: "rejected" as const, assignedShotId: undefined }; if (request.action === "assign") return { ...item, assignedShotId: request.shotId! }; return { ...item, assignedShotId: undefined }; }); const output = assetReviewOutputSchema.parse({ ...current, assets }); const fingerprint = canonicalSha256({ stageId: "asset-review", sourceArtifactId: source.id, assetSha256: request.assetSha256, action: request.action, ...(request.shotId ? { shotId: request.shotId } : {}) }); const runId = `stage-run-${randomUUID()}`; const artifactId = `artifact-${randomUUID()}`; const now = new Date().toISOString(); db.exec("BEGIN IMMEDIATE;"); try { workflowRunStore.rejectReviewRun(source.stageRunId, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId: request.projectId, stageId: "asset-review", status: "running", runnerId: "asset-review-user-action", runnerVersion: "asset-review-v1", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now }); workflowRunStore.finishRun({ id: runId, projectId: request.projectId, stageId: "asset-review", status: "needs_review", runnerId: "asset-review-user-action", runnerVersion: "asset-review-v1", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId: request.projectId, stageId: "asset-review", stageRunId: runId, type: "asset-review", version: workflowRunStore.listArtifacts(request.projectId, "asset-review").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(project); });
-ipcMain.handle("approve-asset-review", (_event, input: unknown) => { const { projectId } = assetReviewRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "asset-review").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Asset Review exists."); const output = assetReviewOutputSchema.parse(artifact.payloadJson); if (output.assets.some((item) => item.reviewStatus !== "approved" || !item.assignedShotId)) throw new Error("Approve and explicitly assign every generated asset before completing Asset Review."); const shotIds = new Set(project.shots.map((shot) => shot.id)); if (output.assets.some((item) => !shotIds.has(item.assignedShotId!))) throw new Error("Assigned asset shot does not exist in the current project."); const assignments = new Map(output.assets.map((item) => [item.assignedShotId!, `asset-${item.asset.sha256}`])); const approved = transitionProjectStage(markDownstreamStagesStale({ ...project, shots: project.shots.map((shot) => assignments.has(shot.id) ? { ...shot, approvedAssetId: assignments.get(shot.id)! } : shot) }, "asset-review"), "asset-review", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
+  ipcMain.handle("revise-asset-review", (_event, input: unknown) => {
+    const request = reviseAssetReviewRequestSchema.parse(input);
+    const project = projectRepository.loadProject(request.projectId);
+    if (!project) throw new Error(`Project not found: ${request.projectId}`);
+    const source = workflowRunStore.listArtifacts(request.projectId, "asset-review").find((item) => item.id === request.artifactId && item.status === "needs_review");
+    if (!source?.stageRunId || !source.payloadJson) throw new Error("Asset Review revision must start from a reviewable artifact.");
+    const current = assetReviewOutputSchema.parse(source.payloadJson);
+    const inputArtifactIds = [current.acquisitionArtifactId];
+    const selected = current.assets.find((item) => item.asset.sha256 === request.assetSha256);
+    if (!selected) throw new Error("Asset is not present in the review artifact.");
+    const touchedShotIds = new Set([selected.assignedShotId, selected.asset.shotId, request.shotId].filter((value): value is string => Boolean(value)));
+    if (request.action === "assign") {
+      if (!request.shotId || !project.shots.some((shot) => shot.id === request.shotId)) throw new Error("The target storyboard frame was not found.");
+      if (selected.reviewStatus !== "approved") throw new Error("Approve an asset before assigning it.");
+      if (current.assets.some((item) => item.asset.sha256 !== request.assetSha256 && item.reviewStatus !== "rejected" && item.assignedShotId === request.shotId)) {
+        throw new Error("Another asset is already assigned to that storyboard frame.");
+      }
+    }
+    const assets = current.assets.map((item) => {
+      if (item.asset.sha256 !== request.assetSha256) return item;
+      if (request.action === "approve") return { ...item, reviewStatus: "approved" as const };
+      if (request.action === "reject") return { ...item, reviewStatus: "rejected" as const, assignedShotId: undefined };
+      if (request.action === "assign") return { ...item, assignedShotId: request.shotId! };
+      return { ...item, assignedShotId: undefined };
+    });
+    const output = assetReviewOutputSchema.parse({ ...current, assets });
+    const nextProject = markDownstreamStagesStale({
+      ...project,
+      shots: project.shots.map((shot) => {
+        if (!touchedShotIds.has(shot.id)) return shot;
+        const { approvedAssetId: _approvedAssetId, ...withoutApprovedAsset } = shot;
+        return withoutApprovedAsset;
+      })
+    }, "asset-review");
+    const fingerprint = canonicalSha256({ stageId: "asset-review", sourceArtifactId: source.id, assetSha256: request.assetSha256, action: request.action, ...(request.shotId ? { shotId: request.shotId } : {}) });
+    const runId = `stage-run-${randomUUID()}`;
+    const artifactId = `artifact-${randomUUID()}`;
+    const now = new Date().toISOString();
+    db.exec("BEGIN IMMEDIATE;");
+    try {
+      workflowRunStore.rejectReviewRun(source.stageRunId, { withinTransaction: true });
+      saveProjectWithWorkflowInvalidation(nextProject, { withinTransaction: true });
+      workflowRunStore.createRun({ id: runId, projectId: request.projectId, stageId: "asset-review", status: "running", runnerId: "asset-review-user-action", runnerVersion: "asset-review-v1", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now });
+      workflowRunStore.finishRun({ id: runId, projectId: request.projectId, stageId: "asset-review", status: "needs_review", runnerId: "asset-review-user-action", runnerVersion: "asset-review-v1", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId: request.projectId, stageId: "asset-review", stageRunId: runId, type: "asset-review", version: workflowRunStore.listArtifacts(request.projectId, "asset-review").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true });
+      db.exec("COMMIT;");
+    } catch (error) {
+      db.exec("ROLLBACK;");
+      throw error;
+    }
+    return factoryProjectResponseSchema.parse(nextProject);
+  });
+ipcMain.handle("approve-asset-review", (_event, input: unknown) => {
+  const { projectId } = assetReviewRequestSchema.parse(input);
+  const project = projectRepository.loadProject(projectId);
+  if (!project) throw new Error(`Project not found: ${projectId}`);
+  const artifact = workflowRunStore.listArtifacts(projectId, "asset-review").find((item) => item.status === "needs_review");
+  if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Asset Review exists.");
+  const output = assetReviewOutputSchema.parse(artifact.payloadJson);
+  if (output.assets.some((item) => item.reviewStatus !== "approved" || !item.assignedShotId)) throw new Error("Approve and explicitly assign every generated asset before completing Asset Review.");
+  for (const item of output.assets) assertCurrentApprovedAsset(item.asset, item.assignedShotId ?? item.asset.shotId);
+  const shotIds = new Set(project.shots.map((shot) => shot.id));
+  if (output.assets.some((item) => !shotIds.has(item.assignedShotId!))) throw new Error("Assigned asset shot does not exist in the current project.");
+  const assignedShotIds = output.assets.map((item) => item.assignedShotId!);
+  if (new Set(assignedShotIds).size !== assignedShotIds.length) throw new Error("Only one asset may be assigned to each storyboard frame.");
+  const missingShotIds = [...requiredAssetShotIds(project)].filter((shotId) => !assignedShotIds.includes(shotId));
+  if (missingShotIds.length) throw new Error(`Asset Review is missing required storyboard frames: ${missingShotIds.join(", ")}.`);
+  const assignments = resolveProjectAssetAssignments(project, output.assets);
+  assertReusableAssetAssignments(project, assignments);
+  const approvedAssetIds = new Set(output.assets.map((item) => `asset-${item.asset.sha256}`));
+  if ([...assignments.values()].some((assetId) => !approvedAssetIds.has(assetId))) throw new Error("Every REUSE frame must resolve to an asset in the current approved Asset Review.");
+  const approved = transitionProjectStage(markDownstreamStagesStale({ ...project, shots: project.shots.map((shot) => assignments.has(shot.id) ? { ...shot, approvedAssetId: assignments.get(shot.id) } : shot) }, "asset-review"), "asset-review", "approved");
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true });
+    workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true });
+    db.exec("COMMIT;");
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
+  return factoryProjectResponseSchema.parse(approved);
+});
 ipcMain.handle("reject-asset-review", (_event, input: unknown) => { const { projectId } = assetReviewRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "asset-review").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId) throw new Error("No reviewable Asset Review exists."); const rejected = transitionProjectStage(project, "asset-review", "rejected"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(rejected, { withinTransaction: true }); workflowRunStore.rejectReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(rejected); });
 
+function moveManualStageToNeedsReview(project: FactoryProject, stageId: string): FactoryProject {
+  let next = project;
+  let status = next.stages.find((stage) => stage.id === stageId)?.status;
+  if (!status) throw new Error(`Unknown workflow stage: ${stageId}`);
+  if (status === "approved") { next = transitionProjectStage(next, stageId, "stale"); status = "stale"; }
+  if (status === "needs_review") return next;
+  if (status === "blocked") { next = transitionProjectStage(next, stageId, "ready"); status = "ready"; }
+  if (status === "not_started" || status === "ready" || status === "failed" || status === "rejected" || status === "stale" || status === "needs_attention") {
+    next = transitionProjectStage(next, stageId, "queued");
+    status = "queued";
+  }
+  if (status === "queued") { next = transitionProjectStage(next, stageId, "running"); status = "running"; }
+  if (status === "running") next = transitionProjectStage(next, stageId, "needs_review");
+  return next;
+}
+
+function moveManualStageToApproved(project: FactoryProject, stageId: string): FactoryProject {
+  return transitionProjectStage(moveManualStageToNeedsReview(project, stageId), stageId, "approved");
+}
+
+function requiredAssetShotIds(project: FactoryProject): Set<string> {
+  return new Set(project.shots.filter((shot) => shot.visualMode !== "reuse").map((shot) => shot.id));
+}
+
+function resolveProjectAssetAssignments(project: FactoryProject, assets: Array<{ asset: { sha256: string }; assignedShotId?: string | undefined }>): Map<string, string> {
+  return resolveReusableAssetAssignments(
+    project.shots,
+    new Map(assets.flatMap((item) => item.assignedShotId ? [[item.assignedShotId, `asset-${item.asset.sha256}`] as const] : []))
+  );
+}
+
+function assertReusableAssetAssignments(project: FactoryProject, assignments: ReadonlyMap<string, string>): void {
+  const unresolved = project.shots.filter((shot) => shot.visualMode === "reuse" && !assignments.has(shot.id)).map((shot) => shot.id);
+  if (unresolved.length) throw new Error(`REUSE storyboard frames must reference an earlier approved frame: ${unresolved.join(", ")}.`);
+}
+
+function assertCurrentApprovedAsset(asset: { relativeFilePath: string; sha256: string }, label: string): string {
+  const outputPath = resolveWorkspaceArtifactPath(asset.relativeFilePath);
+  if (!existsSync(outputPath)) throw new Error(`Approved asset is missing for ${label}.`);
+  const actualSha256 = createHash("sha256").update(readFileSync(outputPath)).digest("hex");
+  if (actualSha256 !== asset.sha256) throw new Error(`Approved asset changed after validation for ${label}; replace the frame before continuing.`);
+  return outputPath;
+}
+
+function assertTimelineVisualAssets(project: FactoryProject, timeline: ReturnType<typeof timelineAssemblyOutputSchema.parse>, reviewed: ReturnType<typeof assetReviewOutputSchema.parse>): void {
+  const assetsById = new Map(reviewed.assets.filter((item) => item.reviewStatus === "approved").map((item) => [`asset-${item.asset.sha256}`, item.asset]));
+  const assignments = resolveProjectAssetAssignments(project, reviewed.assets);
+  assertReusableAssetAssignments(project, assignments);
+  for (const item of timeline.items.filter((candidate) => candidate.track === "primary_visual")) {
+    const shot = project.shots.find((candidate) => `visual-${candidate.id}` === item.id);
+    const assetId = shot ? assignments.get(shot.id) : undefined;
+    const asset = assetId ? assetsById.get(assetId) : undefined;
+    if (!shot || !asset || item.sourceId !== assetId) throw new Error("The approved timeline has a visual without its approved Asset Review source.");
+    assertCurrentApprovedAsset(asset, shot.id);
+  }
+}
+
+function manualAssetWarnings(project: FactoryProject, asset: AcquiredImageAsset, duplicateHash: boolean): string[] {
+  const expectedAspectRatio = project.setup.aspectRatio ?? (project.format === "short" ? "9:16" : "16:9");
+  const targetRatio = expectedAspectRatio === "16:9" ? 16 / 9 : expectedAspectRatio === "1:1" ? 1 : 9 / 16;
+  const actualRatio = asset.width / asset.height;
+  const warnings: string[] = [];
+  if (Math.abs(actualRatio - targetRatio) / targetRatio > 0.12) warnings.push(`Aspect ratio differs from the project canvas (${expectedAspectRatio}).`);
+  if (Math.min(asset.width, asset.height) < 512) warnings.push("Resolution is below the recommended 512px minimum on the short side.");
+  if (duplicateHash) warnings.push("Duplicate image hash detected; this frame reuses an image already in the intake.");
+  return warnings;
+}
+
 ipcMain.handle("select-manual-asset-upload", async (_event, input: unknown) => {
-  const request = manualAssetUploadRequestSchema.parse(input); const project = projectRepository.loadProject(request.projectId); if (!project) throw new Error(`Project not found: ${request.projectId}`);
-  const source = workflowRunStore.listArtifacts(request.projectId, "asset-review").find((item) => item.id === request.artifactId && item.status === "needs_review"); if (!source?.stageRunId || !source.payloadJson) throw new Error("Manual Upload must start from a reviewable Asset Review artifact.");
-  const shot = project.shots.find((item) => item.id === request.shotId); if (!shot) throw new Error("The selected shot was not found.");
-  const selected = await dialog.showOpenDialog({ properties: ["openFile"], filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }] }); if (selected.canceled || !selected.filePaths[0]) return factoryProjectResponseSchema.parse(project);
-  const asset = await importLocalImageAsset({ projectId: request.projectId, shotId: request.shotId, workspaceRoot, sourcePath: selected.filePaths[0] }); const current = assetReviewOutputSchema.parse(source.payloadJson); if (current.assets.some((item) => item.asset.sha256 === asset.sha256)) throw new Error("That image is already present in this review.");
-  const output = assetReviewOutputSchema.parse({ ...current, assets: [...current.assets.filter((item) => item.asset.shotId !== request.shotId), { asset, reviewStatus: "needs_review" }] }); const inputArtifactIds = [current.acquisitionArtifactId]; const runId = `stage-run-${randomUUID()}`; const artifactId = `artifact-${randomUUID()}`; const now = new Date().toISOString();
-  const nextProject = markDownstreamStagesStale({ ...project, shots: project.shots.map((item) => item.id === request.shotId ? { ...item, visualMode: "uploaded" as const } : item) }, "asset-review");
-  db.exec("BEGIN IMMEDIATE;"); try { workflowRunStore.rejectReviewRun(source.stageRunId, { withinTransaction: true }); saveProjectWithWorkflowInvalidation(nextProject, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId: request.projectId, stageId: "asset-review", status: "running", runnerId: "asset-review-manual-upload", runnerVersion: "asset-review-v1", inputArtifactIds, inputFingerprint: canonicalSha256({ stageId: "asset-review", sourceArtifactId: source.id, manualUploadSha256: asset.sha256, shotId: request.shotId }), outputArtifactIds: [], startedAt: now }); workflowRunStore.finishRun({ id: runId, projectId: request.projectId, stageId: "asset-review", status: "needs_review", runnerId: "asset-review-manual-upload", runnerVersion: "asset-review-v1", inputArtifactIds, inputFingerprint: canonicalSha256({ stageId: "asset-review", sourceArtifactId: source.id, manualUploadSha256: asset.sha256, shotId: request.shotId }), outputArtifactIds: [artifactId], finishedAt: now }, { id: artifactId, projectId: request.projectId, stageId: "asset-review", stageRunId: runId, type: "asset-review", version: workflowRunStore.listArtifacts(request.projectId, "asset-review").length + 1, status: "needs_review", payloadJson: output, createdAt: now, updatedAt: now }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
+  const request = manualAssetUploadRequestSchema.parse(input);
+  const project = projectRepository.loadProject(request.projectId);
+  if (!project) throw new Error(`Project not found: ${request.projectId}`);
+  const reviewArtifacts = workflowRunStore.listArtifacts(request.projectId, "asset-review");
+  const reviewArtifact = request.artifactId
+    ? reviewArtifacts.find((item) => item.id === request.artifactId && (item.status === "needs_review" || item.status === "approved"))
+    : reviewArtifacts.find((item) => item.status === "needs_review") ?? reviewArtifacts.find((item) => item.status === "approved");
+  if (request.artifactId && (!reviewArtifact?.stageRunId || !reviewArtifact.payloadJson)) throw new Error("Manual upload must start from a reviewable Asset Intake.");
+  if (request.shotId && !project.shots.some((shot) => shot.id === request.shotId)) throw new Error("The selected storyboard frame was not found.");
+  let sourcePaths = request.sourcePaths;
+  if (!sourcePaths?.length) {
+    const selected = await dialog.showOpenDialog({ properties: ["openFile", "multiSelections"], filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp"] }] });
+    if (selected.canceled || selected.filePaths.length === 0) return factoryProjectResponseSchema.parse(project);
+    sourcePaths = selected.filePaths;
+  }
+
+  const currentItems = reviewArtifact?.payloadJson ? assetReviewOutputSchema.parse(reviewArtifact.payloadJson).assets : [];
+  const occupied = new Set(currentItems.filter((item) => item.reviewStatus !== "rejected").map((item) => item.assignedShotId ?? item.asset.shotId));
+  if (request.shotId) occupied.delete(request.shotId);
+  const targetShots = project.shots.filter((shot) => shot.visualMode !== "reuse");
+  const frameToShotId = new Map<string, string>();
+  const promptArtifact = currentApprovedArtifacts(project, "prompt-preparation").find((item) => item.payloadJson);
+  if (promptArtifact?.payloadJson) {
+    const promptOutput = promptPreparationOutputSchema.parse(promptArtifact.payloadJson);
+    for (const scenePrompt of promptOutput.scenePrompts ?? []) {
+      for (const frame of scenePrompt.frameManifest) {
+        if (frame.assetStrategy === "REUSE_EXISTING") continue;
+        frameToShotId.set(frame.displayNumber, frame.shotId);
+      }
+    }
+  }
+  const imported: AcquiredImageAsset[] = [];
+  const seenHashes = new Set(currentItems.map((item) => item.asset.sha256));
+  for (let index = 0; index < sourcePaths.length; index += 1) {
+    const sourcePath = sourcePaths[index]!;
+    const numericShotId = mapNumericAssetFilename({ sourcePath, targetShotIds: targetShots.map((shot) => shot.id), frameToShotId });
+    const numericShot = numericShotId ? targetShots.find((candidate) => candidate.id === numericShotId) : undefined;
+    const shot = index === 0 && request.shotId
+      ? project.shots.find((candidate) => candidate.id === request.shotId)
+      : numericShot ?? targetShots.find((candidate) => !occupied.has(candidate.id) && !imported.some((asset) => asset.shotId === candidate.id));
+    if (!shot) throw new Error(`Could not map ${basename(sourcePath)} to an empty storyboard frame. Assign it manually from Asset Intake.`);
+    const asset = await importLocalImageAsset({ projectId: request.projectId, shotId: shot.id, workspaceRoot, sourcePath });
+    const warnings = manualAssetWarnings(project, asset, seenHashes.has(asset.sha256));
+    seenHashes.add(asset.sha256);
+    occupied.add(shot.id);
+    imported.push({ ...asset, ...(warnings.length ? { warnings } : {}) } as AcquiredImageAsset);
+  }
+
+  const mergedAssets = [
+    ...currentItems.filter((item) => !imported.some((asset) => asset.shotId === (item.assignedShotId ?? item.asset.shotId))),
+    ...imported.map((asset) => {
+      const { warnings, ...assetData } = asset as AcquiredImageAsset & { warnings?: string[] };
+      return {
+        asset: assetData,
+        reviewStatus: "needs_review" as const,
+        assignedShotId: asset.shotId,
+        ...(warnings?.length ? { warnings } : {})
+      };
+    })
+  ];
+  const acquisitionArtifactId = `artifact-${randomUUID()}`;
+  const acquisitionOutput = assetAcquisitionOutputSchema.parse({ assets: mergedAssets.map((item) => item.asset) });
+  const reviewOutput = assetReviewOutputSchema.parse({ acquisitionArtifactId, assets: mergedAssets });
+  const now = new Date().toISOString();
+  const acquisitionRunId = `stage-run-${randomUUID()}`;
+  const reviewRunId = `stage-run-${randomUUID()}`;
+  const reviewArtifactId = `artifact-${randomUUID()}`;
+  const inputArtifactIds = Array.from(new Set([
+    ...workflowRunStore.listArtifacts(request.projectId, "prompt-preparation").filter((item) => item.status === "approved").slice(-1).map((item) => item.id),
+    ...(reviewArtifact?.payloadJson ? [assetReviewOutputSchema.parse(reviewArtifact.payloadJson).acquisitionArtifactId] : [])
+  ]));
+  const fingerprint = canonicalSha256({ stageId: "manual-asset-intake", projectId: request.projectId, assetSha256s: imported.map((asset) => asset.sha256), shotIds: imported.map((asset) => asset.shotId) });
+  let nextProject = moveManualStageToApproved(project, "asset-acquisition");
+  nextProject = moveManualStageToNeedsReview(nextProject, "asset-review");
+  nextProject = markDownstreamStagesStale(nextProject, "asset-review");
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    if (reviewArtifact?.stageRunId) {
+      if (reviewArtifact.status === "needs_review") workflowRunStore.rejectReviewRun(reviewArtifact.stageRunId, { withinTransaction: true });
+      else if (reviewArtifact.status === "approved") workflowRunStore.markStageArtifactsStale(request.projectId, ["asset-review"]);
+    }
+    saveProjectWithWorkflowInvalidation(nextProject, { withinTransaction: true });
+    workflowRunStore.createRun({ id: acquisitionRunId, projectId: request.projectId, stageId: "asset-acquisition", status: "running", runnerId: "asset-intake-manual", runnerVersion: "asset-intake-v1", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now });
+    workflowRunStore.finishRun({ id: acquisitionRunId, projectId: request.projectId, stageId: "asset-acquisition", status: "needs_review", runnerId: "asset-intake-manual", runnerVersion: "asset-intake-v1", inputArtifactIds, inputFingerprint: fingerprint, outputArtifactIds: [acquisitionArtifactId], finishedAt: now }, { id: acquisitionArtifactId, projectId: request.projectId, stageId: "asset-acquisition", stageRunId: acquisitionRunId, type: "asset", version: workflowRunStore.listArtifacts(request.projectId, "asset-acquisition").length + 1, status: "needs_review", payloadJson: acquisitionOutput, createdAt: now, updatedAt: now }, { withinTransaction: true });
+    workflowRunStore.approveReviewRun(acquisitionRunId, { withinTransaction: true });
+    workflowRunStore.createRun({ id: reviewRunId, projectId: request.projectId, stageId: "asset-review", status: "running", runnerId: "asset-intake-manual", runnerVersion: "asset-intake-v1", inputArtifactIds: [acquisitionArtifactId], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: now });
+    workflowRunStore.finishRun({ id: reviewRunId, projectId: request.projectId, stageId: "asset-review", status: "needs_review", runnerId: "asset-intake-manual", runnerVersion: "asset-intake-v1", inputArtifactIds: [acquisitionArtifactId], inputFingerprint: fingerprint, outputArtifactIds: [reviewArtifactId], finishedAt: now }, { id: reviewArtifactId, projectId: request.projectId, stageId: "asset-review", stageRunId: reviewRunId, type: "asset-review", version: workflowRunStore.listArtifacts(request.projectId, "asset-review").length + 1, status: "needs_review", payloadJson: reviewOutput, createdAt: now, updatedAt: now }, { withinTransaction: true });
+    db.exec("COMMIT;");
+  } catch (error) {
+    db.exec("ROLLBACK;");
+    throw error;
+  }
   return factoryProjectResponseSchema.parse(nextProject);
 });
-
 async function completeManagedVoiceGeneration(job: TtsJobView): Promise<void> {
   if (!job.projectId || job.state === "queued" || job.state === "running") return;
   const run = workflowRunStore.listRuns(job.projectId, "voice-generation")
@@ -4315,6 +4628,30 @@ ipcMain.handle("list-subtitle-preparation-artifacts", (_event, input: unknown) =
 ipcMain.handle("approve-subtitle-preparation", (_event, input: unknown) => { const { projectId } = subtitlePreparationRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "subtitle-preparation").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Subtitle Preparation output exists."); subtitlePreparationOutputSchema.parse(artifact.payloadJson); const approved = transitionProjectStage(project, "subtitle-preparation", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
 ipcMain.handle("reject-subtitle-preparation", (_event, input: unknown) => { const { projectId } = subtitlePreparationRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "subtitle-preparation").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId) throw new Error("No reviewable Subtitle Preparation output exists."); const rejected = transitionProjectStage(project, "subtitle-preparation", "rejected"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(rejected, { withinTransaction: true }); workflowRunStore.rejectReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(rejected); });
 
+ipcMain.handle("select-project-audio", async (_event, input: unknown) => {
+  const request = selectProjectAudioRequestSchema.parse(input);
+  const project = projectRepository.loadProject(request.projectId);
+  if (!project) throw new Error(`Project not found: ${request.projectId}`);
+  const selected = await dialog.showOpenDialog({ properties: ["openFile"], filters: [{ name: "Audio", extensions: ["mp3", "wav", "m4a", "aac", "ogg", "flac"] }] });
+  if (selected.canceled || !selected.filePaths[0]) return factoryProjectResponseSchema.parse(project);
+  const sourcePath = selected.filePaths[0];
+  const extension = extname(sourcePath).toLowerCase();
+  if (![".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"].includes(extension)) throw new Error("Select an MP3, WAV, M4A, AAC, OGG, or FLAC audio file.");
+  const bytes = readFileSync(sourcePath);
+  if (bytes.length === 0 || bytes.length > 200 * 1024 * 1024) throw new Error("Audio file size is outside safe limits.");
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  const relativeFilePath = join("assets", "audio", "project", project.id, `${request.kind}-${sha256.slice(0, 16)}${extension}`);
+  const outputPath = resolveWorkspaceArtifactPath(relativeFilePath);
+  mkdirSync(dirname(outputPath), { recursive: true });
+  if (!existsSync(outputPath)) copyFileSync(sourcePath, outputPath);
+  const setupKey = request.kind === "music" ? "musicPath" : request.kind === "ambient" ? "ambientPath" : "sfxPath";
+  const withAudio = { ...project, setup: { ...project.setup, [setupKey]: relativeFilePath } };
+  const timelineStale = updateProjectStage(withAudio, "timeline-assembly", "stale");
+  const invalidated = markDownstreamStagesStale(timelineStale, "timeline-assembly");
+  saveProjectWithWorkflowInvalidation(invalidated);
+  return factoryProjectResponseSchema.parse(invalidated);
+});
+
 ipcMain.handle("run-timeline-assembly", (_event, input: unknown) => {
   const { projectId } = timelineAssemblyRequestSchema.parse(input);
   const project = projectRepository.loadProject(projectId);
@@ -4329,14 +4666,28 @@ ipcMain.handle("run-timeline-assembly", (_event, input: unknown) => {
   const fps = project.timeline.fps;
   if (subtitleOutput.fps !== fps) throw new Error("Subtitle timing FPS does not match the project timeline.");
 
-  const approvedAssets = new Map(reviewed.assets.filter((item) => item.reviewStatus === "approved" && item.assignedShotId).map((item) => [item.assignedShotId!, item.asset]));
+  const approvedAssets = new Map(reviewed.assets.filter((item) => item.reviewStatus === "approved").map((item) => [`asset-${item.asset.sha256}`, item.asset]));
+  const assignments = resolveProjectAssetAssignments(project, reviewed.assets);
+  assertReusableAssetAssignments(project, assignments);
   const visuals = [...project.shots].sort((a, b) => a.startFrame - b.startFrame).map((shot) => {
-    const asset = approvedAssets.get(shot.id);
-    if (!asset || !shot.approvedAssetId || shot.approvedAssetId !== `asset-${asset.sha256}` || !existsSync(join(workspaceRoot, asset.relativeFilePath))) throw new Error(`Approved asset is missing for shot ${shot.id}.`);
-    return { id: `visual-${shot.id}`, track: "primary_visual" as const, sourceId: shot.approvedAssetId, startFrame: shot.startFrame, durationFrames: shot.durationFrames, fps, ...(shot.motion ? { motion: shot.motion } : {}) };
+    const approvedAssetId = assignments.get(shot.id);
+    const asset = approvedAssetId ? approvedAssets.get(approvedAssetId) : undefined;
+    if (!asset || !approvedAssetId) throw new Error(`Approved asset is missing for shot ${shot.id}.`);
+    assertCurrentApprovedAsset(asset, shot.id);
+    return { id: `visual-${shot.id}`, track: "primary_visual" as const, sourceId: approvedAssetId, startFrame: shot.startFrame, durationFrames: shot.durationFrames, fps, ...(shot.motion ? { motion: shot.motion } : {}) };
   });
   const visualEnd = visuals.reduce((end, item) => Math.max(end, item.startFrame + item.durationFrames), 0);
   for (let index = 1; index < visuals.length; index += 1) if (visuals[index - 1]!.startFrame + visuals[index - 1]!.durationFrames !== visuals[index]!.startFrame) throw new Error("Primary visual track contains a gap or overlap.");
+  const suppliedAudio = ([
+    ["music", project.setup.musicPath, "music"],
+    ["ambient", project.setup.ambientPath, "ambience"],
+    ["sfx", project.setup.sfxPath, "sfx"]
+  ] as const).flatMap(([kind, relativeFilePath, track]) => {
+    if (!relativeFilePath) return [];
+    resolveWorkspaceArtifactPath(relativeFilePath);
+    if (!existsSync(resolveWorkspaceArtifactPath(relativeFilePath))) throw new Error(`Supplied ${kind} audio file is missing.`);
+    return [{ id: `${kind}-project-audio`, track, sourceId: relativeFilePath, startFrame: 0, durationFrames: Math.max(1, visualEnd), fps }];
+  });
 
   let sequentialVoiceFrame = 0;
   let voiceEndFrame = 0;
@@ -4353,7 +4704,7 @@ ipcMain.handle("run-timeline-assembly", (_event, input: unknown) => {
     if (cue.startFrame + cue.durationFrames > voiceEndFrame) throw new Error("Subtitle cue extends beyond approved voice timing.");
     return { id: `subtitle-${cue.id}`, track: "subtitles" as const, sourceId: cue.id, startFrame: cue.startFrame, durationFrames: cue.durationFrames, fps };
   });
-  const output = timelineAssemblyOutputSchema.parse({ fps, items: [...visuals, ...narration, ...subtitleItems] });
+  const output = timelineAssemblyOutputSchema.parse({ fps, items: [...visuals, ...narration, ...suppliedAudio, ...subtitleItems] });
   const fingerprint = canonicalSha256({ stageId: "timeline-assembly", assetReviewArtifactId: assetReview.id, voiceArtifactId: voice.id, subtitleArtifactId: subtitles.id, fps });
   const existing = workflowRunStore.findLatestByInput(projectId, "timeline-assembly", fingerprint);
   if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project);
@@ -4374,7 +4725,21 @@ ipcMain.handle("run-timeline-assembly", (_event, input: unknown) => {
   return factoryProjectResponseSchema.parse(review);
 });
 ipcMain.handle("list-timeline-assembly-artifacts", (_event, input: unknown) => { const { projectId } = timelineAssemblyRequestSchema.parse(input); return timelineAssemblyArtifactsResponseSchema.parse(workflowRunStore.listArtifacts(projectId, "timeline-assembly").map((artifact) => ({ id: artifact.id, ...(artifact.stageRunId ? { stageRunId: artifact.stageRunId } : {}), status: artifact.status, payloadJson: artifact.payloadJson, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt }))); });
-ipcMain.handle("approve-timeline-assembly", (_event, input: unknown) => { const { projectId } = timelineAssemblyRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "timeline-assembly").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Timeline Assembly exists."); const timeline = timelineAssemblyOutputSchema.parse(artifact.payloadJson); const approved = transitionProjectStage({ ...project, timeline }, "timeline-assembly", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
+ipcMain.handle("approve-timeline-assembly", (_event, input: unknown) => {
+  const { projectId } = timelineAssemblyRequestSchema.parse(input);
+  const project = projectRepository.loadProject(projectId);
+  if (!project) throw new Error(`Project not found: ${projectId}`);
+  const artifact = workflowRunStore.listArtifacts(projectId, "timeline-assembly").find((item) => item.status === "needs_review");
+  if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Timeline Assembly exists.");
+  const timeline = timelineAssemblyOutputSchema.parse(artifact.payloadJson);
+  const assetReview = currentApprovedArtifacts(project, "asset-review").find((item) => item.payloadJson);
+  if (!assetReview?.payloadJson) throw new Error("Timeline Assembly approval requires the current approved Asset Review.");
+  assertTimelineVisualAssets(project, timeline, assetReviewOutputSchema.parse(assetReview.payloadJson));
+  const approved = transitionProjectStage({ ...project, timeline }, "timeline-assembly", "approved");
+  db.exec("BEGIN IMMEDIATE;");
+  try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; }
+  return factoryProjectResponseSchema.parse(approved);
+});
 ipcMain.handle("reject-timeline-assembly", (_event, input: unknown) => { const { projectId } = timelineAssemblyRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "timeline-assembly").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId) throw new Error("No reviewable Timeline Assembly exists."); const rejected = transitionProjectStage(project, "timeline-assembly", "rejected"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(rejected, { withinTransaction: true }); workflowRunStore.rejectReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(rejected); });
 
 function resolveWorkspaceArtifactPath(relativeFilePath: string): string {
@@ -4447,25 +4812,36 @@ ipcMain.handle("run-preview-render", async (_event, input: unknown) => {
   const reviewedAssets = assetReviewOutputSchema.parse(assetReviewArtifact.payloadJson);
   const voiceOutput = voiceGenerationOutputSchema.parse(voiceArtifact.payloadJson);
   const subtitleOutput = subtitlePreparationOutputSchema.parse(subtitleArtifact.payloadJson);
-  const assetsByShot = new Map(reviewedAssets.assets
-    .filter((item) => item.reviewStatus === "approved" && item.assignedShotId)
-    .map((item) => [item.assignedShotId!, item.asset]));
+  const assetsById = new Map(reviewedAssets.assets
+    .filter((item) => item.reviewStatus === "approved")
+    .map((item) => [`asset-${item.asset.sha256}`, item.asset]));
+  const assignments = resolveProjectAssetAssignments(project, reviewedAssets.assets);
+  assertReusableAssetAssignments(project, assignments);
   const visualInputs = timeline.items
     .filter((item) => item.track === "primary_visual")
     .sort((a, b) => a.startFrame - b.startFrame)
     .map((item) => {
-      const shot = project.shots.find((candidate) => `visual-${candidate.id}` === item.id && candidate.approvedAssetId === item.sourceId);
-      const asset = shot ? assetsByShot.get(shot.id) : undefined;
-      if (!asset) throw new Error("The approved timeline has a visual without its approved Asset Review source.");
-      return { filePath: resolveWorkspaceArtifactPath(asset.relativeFilePath), startFrame: item.startFrame, durationFrames: item.durationFrames, ...(item.motion ? { motion: item.motion } : {}) };
+      const shot = project.shots.find((candidate) => `visual-${candidate.id}` === item.id);
+      const assetId = shot ? assignments.get(shot.id) : undefined;
+      const asset = assetId ? assetsById.get(assetId) : undefined;
+      if (!asset || !assetId || item.sourceId !== assetId) throw new Error("The approved timeline has a visual without its approved Asset Review source.");
+      return { filePath: assertCurrentApprovedAsset(asset, shot?.id ?? item.id), startFrame: item.startFrame, durationFrames: item.durationFrames, ...(item.motion ? { motion: item.motion } : {}) };
     });
   const voicesByPath = new Map(voiceOutput.segments.map((segment) => [segment.relativeFilePath, segment]));
   const audioInputs = timeline.items
-    .filter((item) => item.track === "narration")
+    .filter((item) => item.track === "narration" || item.track === "music" || item.track === "ambience" || item.track === "sfx")
     .sort((a, b) => a.startFrame - b.startFrame)
     .map((item) => {
-      if (!voicesByPath.has(item.sourceId)) throw new Error("The approved timeline has narration outside the approved Voice Generation artifact.");
-      return { filePath: resolveWorkspaceArtifactPath(item.sourceId), startFrame: item.startFrame };
+      if (item.track === "narration" && !voicesByPath.has(item.sourceId)) throw new Error("The approved timeline has narration outside the approved Voice Generation artifact.");
+      const filePath = resolveWorkspaceArtifactPath(item.sourceId);
+      if (!existsSync(filePath)) throw new Error("An approved timeline audio source is missing.");
+      return {
+        filePath,
+        startFrame: item.startFrame,
+        durationFrames: item.durationFrames,
+        kind: item.track === "narration" ? "narration" as const : item.track === "music" ? "music" as const : item.track === "ambience" ? "ambient" as const : "sfx" as const,
+        ...(item.track === "music" ? { volume: 0.18, loop: true } : item.track === "ambience" ? { volume: 0.12, loop: true } : item.track === "sfx" ? { volume: 0.45 } : {})
+      };
     });
   if (!visualInputs.length || !audioInputs.length) throw new Error("Preview Render requires approved visual and narration media.");
 
@@ -4665,11 +5041,12 @@ ipcMain.handle("run-qa", async (_event, input: unknown) => {
   const visuals = timelineOutput.items.filter((item) => item.track === "primary_visual").sort((a, b) => a.startFrame - b.startFrame);
   for (let index = 0; index < visuals.length; index += 1) if (index === 0 ? visuals[index]!.startFrame !== 0 : visuals[index - 1]!.startFrame + visuals[index - 1]!.durationFrames !== visuals[index]!.startFrame) add("continuity", "blocking", "Primary visual timeline is not contiguous.", visuals[index]!.id);
   const narrationEnd = timelineOutput.items.filter((item) => item.track === "narration").reduce((end, item) => Math.max(end, item.startFrame + item.durationFrames), 0);
+  const mediaEnd = timelineOutput.items.filter((item) => item.track !== "markers").reduce((end, item) => Math.max(end, item.startFrame + item.durationFrames), 0);
   if (!narrationEnd) add("missing_audio", "blocking", "Timeline contains no narration.", "timeline-assembly");
-  if (Math.abs(previewOutput.durationSeconds - narrationEnd / timelineOutput.fps) > 0.5) add("duration_mismatch", "blocking", "Preview duration differs from narration timing.", `preview=${previewOutput.durationSeconds}; narrationFrames=${narrationEnd}`);
+  if (Math.abs(previewOutput.durationSeconds - mediaEnd / timelineOutput.fps) > 0.5) add("duration_mismatch", "blocking", "Preview duration differs from the approved media timeline.", `preview=${previewOutput.durationSeconds}; mediaFrames=${mediaEnd}`);
   if (timelineOutput.items.filter((item) => item.track === "subtitles").some((item) => item.startFrame + item.durationFrames > narrationEnd)) add("subtitle_overflow", "blocking", "A subtitle cue extends beyond narration.", "timeline-assembly");
   for (const shot of project.shots) if (shot.visualMode === "ai_image" && !shot.approvedAssetId) add("missing_shot_asset", "blocking", "An AI-image shot has no approved asset.", shot.id);
-  for (const item of timelineOutput.items.filter((item) => item.track === "narration")) if (!existsSync(resolveWorkspaceArtifactPath(item.sourceId))) add("missing_audio", "blocking", "A narration file is missing.", item.sourceId);
+  for (const item of timelineOutput.items.filter((item) => item.track === "narration" || item.track === "music" || item.track === "ambience" || item.track === "sfx")) if (!existsSync(resolveWorkspaceArtifactPath(item.sourceId))) add("missing_audio", "blocking", "An approved audio file is missing.", item.sourceId);
   if (project.claims.some((claim) => claim.state === "unsupported" || claim.approvalState === "blocked")) add("unsupported_claim", "blocking", "Project contains unsupported or blocked claims.", "claim-map");
   const imageCertification = await loadNineRouterImageCertification({ credentialStore, certificationStore: imageCertificationStore });
   if (imageCertification.status !== "verified") add("certification", "warning", "The current image capability certification is not verified.", "image-certification");
@@ -4701,19 +5078,25 @@ ipcMain.handle("run-capcut-draft", async (_event, input: unknown) => {
   const reviewed = assetReviewOutputSchema.parse(assets.payloadJson);
   const voiceOutput = voiceGenerationOutputSchema.parse(voice.payloadJson);
   const subtitleOutput = subtitlePreparationOutputSchema.parse(subtitles.payloadJson);
-  const assetsById = new Map(reviewed.assets.filter((item) => item.reviewStatus === "approved" && item.assignedShotId).map((item) => [item.asset.sha256, item.asset]));
+  const assetsById = new Map(reviewed.assets.filter((item) => item.reviewStatus === "approved").map((item) => [`asset-${item.asset.sha256}`, item.asset]));
+  const assignments = resolveProjectAssetAssignments(project, reviewed.assets);
+  assertReusableAssetAssignments(project, assignments);
   const visualInputs = timeline.items.filter((item) => item.track === "primary_visual").map((item) => {
-    const asset = [...assetsById.values()].find((candidate) => project.shots.some((shot) => shot.approvedAssetId === item.sourceId && shot.id === candidate.shotId));
-    if (!asset) throw new Error("Timeline visual is not backed by an approved assigned asset.");
-     return { sourcePath: resolveWorkspaceArtifactPath(asset.relativeFilePath), startFrame: item.startFrame, durationFrames: item.durationFrames, fps: item.fps, ...(item.motion ? { motion: item.motion } : {}) };
-   });
+    const shot = project.shots.find((candidate) => `visual-${candidate.id}` === item.id);
+    const assetId = shot ? assignments.get(shot.id) : undefined;
+    const asset = assetId ? assetsById.get(assetId) : undefined;
+    if (!asset || !assetId || item.sourceId !== assetId) throw new Error("Timeline visual is not backed by an approved assigned asset.");
+    return { sourcePath: assertCurrentApprovedAsset(asset, shot?.id ?? item.id), startFrame: item.startFrame, durationFrames: item.durationFrames, fps: item.fps, ...(item.motion ? { motion: item.motion } : {}) };
+  });
   const voiceByPath = new Map(voiceOutput.segments.map((segment) => [segment.relativeFilePath, segment]));
-  const audio = timeline.items.filter((item) => item.track === "narration").map((item) => {
-    const segment = voiceByPath.get(item.sourceId);
-    if (!segment) throw new Error("Timeline narration is not backed by approved Voice Generation output.");
+  const audio = timeline.items.filter((item) => item.track === "narration" || item.track === "music" || item.track === "ambience" || item.track === "sfx").map((item) => {
+    const segment = item.track === "narration" ? voiceByPath.get(item.sourceId) : undefined;
+    if (item.track === "narration" && !segment) throw new Error("Timeline narration is not backed by approved Voice Generation output.");
     const timelineRange = frameRangeToMicroseconds(item.startFrame, item.durationFrames, item.fps);
-    const sourceDurationUs = Math.floor(segment.durationSeconds * 1_000_000);
-    return { filePath: resolveWorkspaceArtifactPath(item.sourceId), startUs: timelineRange.startUs, durationUs: Math.max(1, Math.min(timelineRange.durationUs, sourceDurationUs)) };
+    const sourceDurationUs = segment ? Math.floor(segment.durationSeconds * 1_000_000) : timelineRange.durationUs;
+    const filePath = resolveWorkspaceArtifactPath(item.sourceId);
+    if (!existsSync(filePath)) throw new Error("Timeline audio source is missing.");
+    return { filePath, startUs: timelineRange.startUs, durationUs: Math.max(1, Math.min(timelineRange.durationUs, sourceDurationUs)), ...(item.track !== "narration" ? { track: item.track } : {}) };
   });
   const inputArtifactIds = [qa.id, timelineArtifact.id, assets.id, voice.id, subtitles.id];
   const fingerprint = canonicalSha256({ stageId: "capcut-draft", inputArtifactIds, timeline, capcutStyleVersion: "motion-word-captions-v1" });

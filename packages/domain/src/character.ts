@@ -42,6 +42,7 @@ export interface CharacterReference {
   id: string;
   view: CharacterReferenceView;
   status: "needs_review" | "approved" | "rejected";
+  promptText?: string;
   relativeFilePath?: string;
   sha256?: string;
   mimeType?: "image/png" | "image/jpeg" | "image/webp";
@@ -77,7 +78,25 @@ export function resolveCharacterCompositionLock(version: { composition?: Charact
 }
 
 export function characterVersionIsApproved(version: CharacterVersion | undefined): boolean {
-  return Boolean(version && version.status === "approved" && version.references.length >= 4 && version.references.every((reference) => reference.status === "approved"));
+  return Boolean(version && version.status === "approved" && version.references.length >= 4 && version.references.every((reference) => (
+    reference.status === "approved"
+    && Boolean(reference.relativeFilePath && reference.sha256 && reference.mimeType)
+  )));
+}
+
+/** Resolve the requested character first, then the channel's active approved version. */
+export function resolveApprovedCharacterVersion(
+  profile: { characterVersions?: CharacterVersion[]; activeCharacterVersionId?: string } | undefined,
+  requestedVersionId?: string
+): CharacterVersion | undefined {
+  const versions = profile?.characterVersions ?? [];
+  const requested = requestedVersionId ? versions.find((version) => version.id === requestedVersionId) : undefined;
+  if (characterVersionIsApproved(requested)) return requested;
+  const active = profile?.activeCharacterVersionId
+    ? versions.find((version) => version.id === profile.activeCharacterVersionId)
+    : undefined;
+  if (characterVersionIsApproved(active)) return active;
+  return versions.find((version) => characterVersionIsApproved(version));
 }
 
 export function characterReferenceViewsForCount(count = 5): CharacterReferenceView[] {

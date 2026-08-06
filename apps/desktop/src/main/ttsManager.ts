@@ -8,6 +8,16 @@ import { TtsWorkerClient, TtsWorkerError } from "./ttsWorkerService";
 export type TtsProviderId = "edge-tts" | "kokoro-vietnamese" | "gtts" | "nine-router-tts" | "capcut-experimental";
 export type TtsHealth = "ready" | "degraded" | "unavailable" | "not_tested";
 
+export function voiceMatchesLanguage(provider: TtsProviderId, voiceId: string, language: string): boolean {
+  const aliases: Record<string, string> = { vietnamese: "vi", english: "en", japanese: "ja", korean: "ko", chinese: "zh" };
+  const normalizedLanguage = aliases[language.trim().toLowerCase()] ?? language.trim().toLowerCase().split("-")[0];
+  const normalizedVoiceId = voiceId.trim().replace(/^(?:edge-tts|google-tts)\//i, "").toLowerCase();
+  if (provider === "gtts") return normalizedVoiceId === normalizedLanguage;
+  if (provider === "kokoro-vietnamese") return normalizedLanguage === "vi";
+  const voiceLanguage = normalizedVoiceId.match(/^([a-z]{2})(?:-|$)/)?.[1];
+  return !voiceLanguage || voiceLanguage === normalizedLanguage;
+}
+
 export interface TtsVoice {
   key: string;
   provider: TtsProviderId;

@@ -79,4 +79,28 @@ describe("character service", () => {
     expect(retried.references.find((reference) => reference.view === "teaching_gesture")?.sha256).toBe("b".repeat(64));
     expect(retried.references.filter((reference) => reference.view !== "teaching_gesture")).toEqual(version.references.filter((reference) => reference.view !== "teaching_gesture"));
   });
+
+  it("rejects retries for a view that is not in the character version", async () => {
+    const version = await generateCharacterVersion({
+      profileId: "profile-1",
+      version: 1,
+      name: "Mina",
+      persona,
+      invariantTraits: ["round glasses"],
+      prohibitedChanges: ["wardrobe palette"],
+      imageCapabilityVerified: true,
+      workspaceRoot: "workspace",
+      viewCount: 4,
+      generateImage: async (input: { shotId: string; referenceImages?: unknown }) => asset(input.shotId)
+    });
+
+    await expect(retryCharacterReference({
+      profileId: "profile-1",
+      version,
+      view: "profile",
+      imageCapabilityVerified: true,
+      workspaceRoot: "workspace",
+      generateImage: async (input: { shotId: string; referenceImages?: unknown }) => asset(input.shotId)
+    })).rejects.toMatchObject({ category: "invalid_input" });
+  });
 });

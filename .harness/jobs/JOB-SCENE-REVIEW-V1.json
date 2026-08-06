@@ -1,0 +1,39 @@
+{
+  "jobId": "JOB-SCENE-REVIEW-V1",
+  "type": "short",
+  "title": "Trusted selective scene retry and review handoff",
+  "status": "review_required",
+  "targetBranch": "chore/setup-agent-harness",
+  "assignedRole": "builder",
+  "description": "Complete the primary Scene Review checkpoint by regenerating only the selected scene through the main-process orchestrator and preserving a truthful manual CapCut handoff before packaging.",
+  "businessContext": "The simplified flow currently exposes a scene review screen but selective retry is unimplemented and final orchestration fabricates CapCut approval.",
+  "allowedPaths": [
+    "apps/desktop/src/main/main.ts",
+    "apps/desktop/src/main/productionOrchestrator.ts",
+    "apps/desktop/src/main/productionOrchestrator.test.ts",
+    "apps/desktop/src/preload/preload.cjs",
+    "apps/desktop/src/renderer/App.tsx",
+    "packages/domain/src/ipcSchemas.ts",
+    "packages/domain/test/ipcSchemas.test.ts",
+    ".harness/jobs/JOB-SCENE-REVIEW-V1.json",
+    ".harness/state.json",
+    ".harness/locks/JOB-SCENE-REVIEW-V1.lock"
+  ],
+  "forbiddenPaths": ["packages/db/**", "packages/providers/**", "packages/domain/src/workflowRegistry.ts"],
+  "dependencies": ["approved semi-automatic orchestration", "approved asset acquisition and asset review"],
+  "acceptanceCriteria": [
+    "Retrying a scene invokes a trusted main-process route scoped to that scene and does not rerun unrelated scene media.",
+    "Selective retry preserves unchanged approved scene assets and invalidates only asset review and downstream media artifacts.",
+    "Scene Review exposes a usable retry action and a truthful review handoff without raw IPC errors.",
+    "Final orchestration never submits the historical CapCut confirmation string automatically; packaging waits for explicit CapCut review.",
+    "Focused orchestrator/schema checks, typecheck, and diff check pass."
+  ],
+  "verificationCommands": [
+    "corepack pnpm exec vitest run apps/desktop/src/main/productionOrchestrator.test.ts packages/domain/test/ipcSchemas.test.ts",
+    "corepack pnpm typecheck",
+    "git diff --check"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["Selective media regeneration requires a new provider or persistence system."]
+}

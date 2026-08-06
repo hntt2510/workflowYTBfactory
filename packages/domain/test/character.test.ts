@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { characterReferenceViewsForCount, characterVersionIsApproved, createFixtureProject, characterVersionSchema, defaultCharacterCompositionLock, resolveCharacterCompositionLock } from "../src";
+import { characterReferenceViewsForCount, characterVersionIsApproved, createFixtureProject, characterVersionSchema, defaultCharacterCompositionLock, resolveApprovedCharacterVersion, resolveCharacterCompositionLock } from "../src";
 
 function characterVersion(status: "draft" | "approved" = "approved", referenceStatus: "needs_review" | "approved" = "approved") {
   const now = "2026-08-04T00:00:00.000Z";
@@ -67,5 +67,11 @@ describe("character versions", () => {
   it("defaults new projects to character-first while preserving explicit legacy projects", () => {
     expect(createFixtureProject({ topic: "New", format: "short", targetLanguage: "Vietnamese" }).setup.visualWorkflow).toBe("character_first");
     expect(createFixtureProject({ topic: "Old", format: "short", targetLanguage: "Vietnamese", visualWorkflow: "legacy" }).setup.visualWorkflow).toBe("legacy");
+  });
+
+  it("falls back to the active approved character when a project snapshot is stale", () => {
+    const active = characterVersion();
+    active.id = "character-active";
+    expect(resolveApprovedCharacterVersion({ activeCharacterVersionId: active.id, characterVersions: [active] }, "missing")?.id).toBe(active.id);
   });
 });

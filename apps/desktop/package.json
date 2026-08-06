@@ -10,15 +10,16 @@
     "build": "vite build"
   },
   "dependencies": {
+    "@gsap/react": "^2.1.2",
     "@lsf/db": "workspace:*",
     "@lsf/domain": "workspace:*",
     "@lsf/generation-queue": "workspace:*",
     "@lsf/media": "workspace:*",
     "@lsf/providers": "workspace:*",
+    "gsap": "^3.15.0",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zustand": "^5.0.2"
-  },
-  "devDependencies": {}
+  }
 }
