@@ -145,6 +145,15 @@ describe("semi-automatic reference chain", () => {
     expect(nextSemiAutomaticChain(characterApproved)).toBe("idea");
   });
 
+  it("stops the idea chain at the character checkpoint", async () => {
+    const project = createFixtureProject({ topic: "Character checkpoint chain", format: "short", targetLanguage: "English", workflowMode: "semi_automatic", visualWorkflow: "character_first" });
+    const events: string[] = [];
+    const result = await runIdeaChain(referenceClient(project, events), { project });
+    expect(result.stages.find((stage) => stage.id === "character-preparation")?.status).toBe("needs_review");
+    expect(events).toContain("run:character-preparation");
+    expect(events).not.toContain("run:visual-routing");
+  });
+
   it("does not treat an automatic stage failure as a human checkpoint", () => {
     const project = setStatus(projectWithApprovedReferences(), "competitor-dna", "failed");
     expect(hasSemiAutomaticAttention(project)).toBe(false);

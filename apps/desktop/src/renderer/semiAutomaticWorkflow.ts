@@ -306,6 +306,7 @@ export async function runIdeaChain(
   current = await runAndApprove(client, current, "scene-plan", () => client.runScenePlan({ projectId: current.id }), () => client.approveScenePlan({ projectId: current.id }), "idea", 5, total, input.onProgress);
   current = await runAndApprove(client, current, "shot-plan", () => client.runShotPlan({ projectId: current.id }), () => client.approveShotPlan({ projectId: current.id }), "idea", 6, total, input.onProgress);
   current = await runCheckpoint(client, current, "character-preparation", () => client.runCharacterPreparation({ projectId: current.id }), "idea", 7, total, "Character Pack is ready for the manual checkpoint before visual production.", input.onProgress);
+  if (!isApproved(current, "character-preparation")) return current;
   current = await runAndApprove(client, current, "visual-routing", () => client.runVisualRouting({ projectId: current.id }), () => client.approveVisualRouting({ projectId: current.id }), "idea", 8, total, input.onProgress);
   current = await runAndApprove(client, current, "asset-concepts", () => client.runAssetConcepts({ projectId: current.id }), undefined, "idea", 9, total, input.onProgress);
   current = await runAndApprove(client, current, "prompt-preparation", () => client.runPromptPreparation({ projectId: current.id }), () => client.approvePromptPreparation({ projectId: current.id }), "idea", 10, total, input.onProgress);

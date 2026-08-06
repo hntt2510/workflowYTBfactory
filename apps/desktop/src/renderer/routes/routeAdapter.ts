@@ -23,7 +23,8 @@ export function routeForStage(stageId?: string): RouteId {
   if (/outline|script|fact-review|retention/.test(stage)) return "script";
   if (stage === "scene-plan") return "scenes";
   if (/shot-plan|visual-routing/.test(stage)) return "shots";
-  if (/character-preparation|asset-concepts|prompt-preparation|asset-acquisition|asset-review/.test(stage)) return "assets";
+  if (stage === "character-preparation") return "channel-profiles";
+  if (/asset-concepts|prompt-preparation|asset-acquisition|asset-review/.test(stage)) return "assets";
   if (stage === "voice-generation") return "voice";
   if (/subtitle-preparation|timeline-assembly/.test(stage)) return "timeline";
   if (stage === "preview-render") return "final-preview";

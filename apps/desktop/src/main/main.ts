@@ -1468,6 +1468,10 @@ function persistAssetAcquisitionPreflightFailure(input: {
 function transitionProjectStage(project: FactoryProject, stageId: string, status: WorkflowStageStatus): FactoryProject {
   const current = normalizeProjectStages(project.stages, project.setup.visualWorkflow).find((stage) => stage.id === stageId);
   if (!current) throw new Error(`Unknown workflow stage: ${stageId}`);
+  // A rerun of an approved stage must invalidate its prior output first.
+  if (current.status === "approved" && status === "queued") {
+    return transitionProjectStage(transitionProjectStage(project, stageId, "stale"), stageId, status);
+  }
   if (current.status !== status) assertWorkflowStageTransition(current.status, status);
   const updated = updateProjectStage(project, stageId, status);
   return status === "approved" ? markDownstreamStagesStale(updated, stageId) : updated;
