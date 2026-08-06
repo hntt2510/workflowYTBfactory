@@ -19,7 +19,7 @@ export function DirectorWorkspace(props: ProjectWorkspaceProps & { initialTab?: 
   return (
     <div className="studio-workspace studio-workspace-director">
       <PageHeader
-        eyebrow="02 · Đạo diễn"
+        eyebrow="03 · Director"
         title="Chỉ đạo từng thay đổi nhìn thấy trên màn hình"
         description="Mỗi cảnh có một mục đích, một nhịp thay đổi và một storyboard frame cần thiết."
         actions={<button className="button primary" type="button" onClick={() => setTab("prompts")}>Mở Prompt Studio</button>}

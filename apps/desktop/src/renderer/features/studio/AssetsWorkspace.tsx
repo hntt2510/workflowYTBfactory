@@ -11,7 +11,7 @@ export function AssetsWorkspace(props: ProjectWorkspaceProps) {
   return (
     <div className="studio-workspace studio-workspace-assets">
       <PageHeader
-        eyebrow="03 · Hình ảnh"
+        eyebrow="04 · Assets"
         title="Tạo ảnh ở GG Lab, duyệt ảnh ngay tại đây"
         description="Copy prompt theo cảnh, upload nhiều file, sửa mapping khi cần và chỉ mở bước dựng khi mọi frame bắt buộc đã được duyệt."
         actions={<StatusBadge tone={missing === 0 && required.length > 0 ? "success" : "warning"}>{required.length ? (missing ? `Còn thiếu ${missing} ảnh` : "Đủ ảnh để dựng") : "Chưa có storyboard"}</StatusBadge>}

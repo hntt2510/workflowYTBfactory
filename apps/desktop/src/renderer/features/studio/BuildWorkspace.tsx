@@ -21,7 +21,7 @@ export function BuildWorkspace(props: ProjectWorkspaceProps & { initialTab?: Bui
   return (
     <div className="studio-workspace studio-workspace-build">
       <PageHeader
-        eyebrow="04 · Dựng video"
+        eyebrow="05 · Build"
         title="Từ frame đã duyệt đến một video hoàn chỉnh"
         description="Tạo giọng đọc, phụ đề và timeline, xem preview, chạy QA rồi xuất MP4. CapCut chỉ là bước tiếp theo nếu bạn muốn."
         actions={<button className="button primary" type="button" onClick={() => setTab(exportApproved ? "export" : "preview")}>{exportApproved ? "Mở file đã xuất" : "Xem preview"}</button>}

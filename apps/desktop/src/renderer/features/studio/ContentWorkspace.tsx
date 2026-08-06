@@ -18,7 +18,7 @@ export function ContentWorkspace(props: ProjectWorkspaceProps & { initialTab?: C
   return (
     <div className="studio-workspace studio-workspace-content">
       <PageHeader
-        eyebrow="01 · Nội dung"
+        eyebrow={tab === "brief" ? "01 · Brief" : "02 · Story"}
         title="Biến một ý tưởng thành câu chuyện có thể dựng"
         description="Chốt brief, phát triển ý tưởng, viết lời dẫn và duyệt những gì sẽ đi vào storyboard."
         actions={<StatusBadge tone={project.stages.find((stage) => stage.id === "script")?.status === "approved" ? "success" : "info"}>{project.scriptSections.length ? `${project.scriptSections.length} đoạn lời dẫn` : "Chưa có lời dẫn"}</StatusBadge>}

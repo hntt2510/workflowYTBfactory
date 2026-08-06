@@ -1057,6 +1057,7 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
     await assertText(win, "Tạo dự án video");
     phases.createScreen = "reached";
     await setInputValue(win, "#simple-topic", topic);
+    await clickText(win, "Tiếp tục: định dạng");
     await setSelectValue(win, "#simple-language", "Vietnamese");
     await setSelectValue(win, "#simple-duration", "45-60 seconds");
     await setSelectValue(win, "#simple-aspect-ratio", "16:9");
@@ -1064,7 +1065,6 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
     await setSelectValue(win, "#simple-resolution", "1080p");
     selectedVoice = await selectFirstAvailableOption(win, "#simple-voice") ?? "";
     if (!selectedVoice) throw new Error("The simplified Create screen did not expose an available voice.");
-    await clickText(win, "Tiếp tục: định dạng");
     await clickText(win, "Tiếp tục: xác nhận");
     await clickText(win, "Tạo dự án");
     await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
@@ -1163,7 +1163,7 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
       } else if (checkpointText.includes("Tạo ý tưởng") || checkpointText.includes("Generate ideas")) {
         const generateIdeasLabel = checkpointText.includes("Tạo ý tưởng") ? "Tạo ý tưởng" : "Generate ideas";
         await clickText(win, generateIdeasLabel);
-        const generatedText = await waitForOneOfPageText(win, ["Chọn ý tưởng", "Approve this idea", "Choose Idea", "Phòng ý tưởng thất bại", "Idea generation failed", "Cần xử lý", "needs attention"], 900_000);
+        const generatedText = await waitForOneOfPageText(win, ["Chọn ý tưởng", "Approve this idea", "Choose Idea", "Phòng ý tưởng thất bại", "Idea generation failed", "Cần xử lý", "needs attention"], requireFullFlow ? 900_000 : 20_000);
         if (generatedText.includes("Chọn ý tưởng") || generatedText.includes("Approve this idea") || generatedText.includes("Choose Idea")) {
           const approveGeneratedLabel = generatedText.includes("Chọn ý tưởng") ? "Chọn ý tưởng" : generatedText.includes("Choose Idea") ? "Choose Idea" : "Approve this idea";
           await clickText(win, approveGeneratedLabel);
@@ -1336,7 +1336,7 @@ async function waitForEnabledControl(win: BrowserWindow, label: string, timeoutM
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const count = await win.webContents.executeJavaScript(
-      `(() => Array.from(document.querySelectorAll("button,a")).filter((element) => {
+      `(() => Array.from(document.querySelectorAll("button,a,summary")).filter((element) => {
         const text = [element.innerText, element.textContent, element.getAttribute("aria-label"), element.getAttribute("title")].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim();
         return !element.disabled && (text === ${JSON.stringify(label)} || text.includes(${JSON.stringify(label)}));
       }).length)()`,
@@ -1867,9 +1867,10 @@ async function assertNoText(win: BrowserWindow, forbidden: string): Promise<void
 }
 
 async function clickText(win: BrowserWindow, label: string): Promise<void> {
+  await waitForEnabledControl(win, label, 15_000);
   const result = await win.webContents.executeJavaScript(
-    `(() => {
-      const elements = Array.from(document.querySelectorAll("button,a"));
+      `(() => {
+        const elements = Array.from(document.querySelectorAll("button,a,summary"));
       const normalize = (value) => (value || "").replace(/\\s+/g, " ").trim();
       const textOf = (el) => normalize([el.innerText, el.textContent, el.getAttribute("aria-label"), el.getAttribute("title")].filter(Boolean).join(" "));
       const exact = elements.filter((el) => textOf(el) === ${JSON.stringify(label)});
