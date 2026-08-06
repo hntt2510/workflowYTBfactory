@@ -149,8 +149,15 @@ function createBrowserAssetScreenshotFixture(): {
     prompt,
     acquisition,
     review,
-    previewUrls: Object.fromEntries(assets.map((asset) => [asset.sha256, `/${asset.relativeFilePath}`]))
+    previewUrls: Object.fromEntries(assets.map((asset, index) => [asset.sha256, browserFixturePreviewUrl(index)]))
   };
+}
+
+function browserFixturePreviewUrl(index: number): string {
+  const label = String(index + 1).padStart(3, "0");
+  const accent = ["#f47757", "#f2b84b", "#6ac7b8"][index % 3];
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920"><rect width="1080" height="1920" fill="#191513"/><rect x="48" y="48" width="984" height="1824" rx="56" fill="#28201c" stroke="${accent}" stroke-width="12"/><circle cx="790" cy="700" r="230" fill="${accent}" opacity=".22"/><rect x="110" y="1120" width="520" height="34" rx="17" fill="${accent}"/><rect x="110" y="1190" width="360" height="24" rx="12" fill="#f3eadf" opacity=".8"/><text x="110" y="280" fill="#f3eadf" font-family="sans-serif" font-size="92" font-weight="700">FRAME ${label}</text><text x="110" y="390" fill="${accent}" font-family="sans-serif" font-size="42">CREATOR STUDIO FIXTURE</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
 function webFallback(): LongShortFactoryApi {

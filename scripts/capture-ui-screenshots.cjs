@@ -146,6 +146,15 @@ async function assertNoHorizontalOverflow(send, route) {
   if (metrics.scrollWidth > metrics.width + 1) throw new Error(`Horizontal overflow at ${route}: ${metrics.scrollWidth}px > ${metrics.width}px`);
 }
 
+async function assertImagesLoaded(send, route) {
+  const result = await send("Runtime.evaluate", {
+    expression: `Array.from(document.querySelectorAll("img")).map((image) => ({ alt: image.alt, complete: image.complete, width: image.naturalWidth, height: image.naturalHeight }))`,
+    returnByValue: true
+  });
+  const broken = (result.result.value ?? []).filter((image) => !image.complete || image.width === 0 || image.height === 0);
+  if (broken.length) throw new Error(`Broken images at ${route}: ${JSON.stringify(broken.slice(0, 5))}`);
+}
+
 async function removeTempDir(dir) {
   try {
     await fs.rm(dir, { recursive: true, force: true });
@@ -292,6 +301,7 @@ async function captureViewport(viewport, outputDir) {
     const assetText = await send("Runtime.evaluate", { expression: "document.body.innerText", returnByValue: true });
     if (assetText.result.value.includes("Chọn một dự án để bắt đầu")) throw new Error(`Asset intake screenshot fixture lost selection: ${assetText.result.value.slice(0, 500)}`);
     await assertNoHorizontalOverflow(send, "asset-intake-complete");
+    await assertImagesLoaded(send, "asset-intake-complete");
     await send("Runtime.evaluate", { expression: "document.querySelector('.content-scroll')?.scrollTo(0, 650)" });
     await screenshot(send, output("asset-intake-complete"));
   } finally {
