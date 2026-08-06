@@ -1,4 +1,8 @@
 export type RouteId =
+  | "content"
+  | "director"
+  | "assets"
+  | "build"
   | "projects"
   | "create"
   | "production"
@@ -39,6 +43,13 @@ export const workspaceRoutes: NavItem[] = [
   { id: "settings", label: "Cài đặt" }
 ];
 
+export const creatorWorkspaceRoutes: NavItem[] = [
+  { id: "content", label: "Nội dung", requiresProject: true },
+  { id: "director", label: "Đạo diễn", requiresProject: true },
+  { id: "assets", label: "Hình ảnh", requiresProject: true },
+  { id: "build", label: "Dựng video", requiresProject: true }
+];
+
 export const projectRoutes: NavItem[] = [
   { id: "project-overview", label: "Project Diagnostic", requiresProject: true },
   { id: "final-preview", label: "Final Preview", requiresProject: true },
@@ -61,7 +72,15 @@ export const advancedRoutes: NavItem[] = [
   { id: "providers", label: "Providers" }
 ];
 
-export const allRoutes = [...workspaceRoutes, { id: "new-project", label: "New Project" } satisfies NavItem, ...projectRoutes, ...advancedRoutes];
+export const allRoutes = [
+  ...workspaceRoutes,
+  ...creatorWorkspaceRoutes,
+  { id: "create", label: "Tạo dự án" } satisfies NavItem,
+  { id: "new-project", label: "New Project" } satisfies NavItem,
+  { id: "scene-review", label: "Duyệt cảnh", requiresProject: true } satisfies NavItem,
+  ...projectRoutes,
+  ...advancedRoutes
+];
 
 export function routeLabel(route: RouteId): string {
   return allRoutes.find((item) => item.id === route)?.label ?? "Tổng quan";

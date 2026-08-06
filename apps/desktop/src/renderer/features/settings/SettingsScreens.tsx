@@ -6,31 +6,31 @@ export function SettingsScreen(props: { bootstrap: BootstrapData; setRoute: (rou
   const runtime = props.bootstrap.runtime;
   return (
     <>
-      <PageHeader title="Settings" description="Dark-only local workspace settings. Most backend settings are read-only until persistence endpoints exist." />
+      <PageHeader title="Cài đặt" description="Cài đặt workspace cục bộ. Hầu hết thiết lập backend chỉ đọc cho đến khi có endpoint lưu trữ." />
       <div className="settings-grid">
-        <SectionCard title="General"><SettingsList items={[['Mode', 'Local desktop'], ['Project persistence', 'SQLite'], ['Cloud sync', 'Unavailable']]} /></SectionCard>
+        <SectionCard title="Chung"><SettingsList items={[['Chế độ', 'Ứng dụng cục bộ'], ['Lưu dự án', 'SQLite'], ['Đồng bộ đám mây', 'Chưa khả dụng']]} /></SectionCard>
         <SectionCard title="Workspace">
-          <SettingsList items={[['Workspace location', props.bootstrap.workspaceRoot], ['Database location', props.bootstrap.databasePath], ['Asset location', 'Not configured'], ['Logs location', 'Not configured']]} />
-          <DisabledAction reason="Open-folder IPC is not implemented.">Open folder</DisabledAction>
+          <SettingsList items={[['Vị trí workspace', props.bootstrap.workspaceRoot], ['Vị trí cơ sở dữ liệu', props.bootstrap.databasePath], ['Vị trí asset', 'Chưa cấu hình'], ['Vị trí log', 'Chưa cấu hình']]} />
+          <DisabledAction reason="IPC mở thư mục chưa được triển khai.">Mở thư mục</DisabledAction>
         </SectionCard>
-        <SectionCard title="Appearance"><SettingsList items={[['Theme', 'Dark only'], ['Density', 'Comfortable'], ['Sidebar', 'Expanded / collapsed']]} /></SectionCard>
-        <SectionCard title="Generation"><SettingsList items={[['Approval policy', 'Guided'], ['Paid generation', 'Explicit stage runs only; never automatic'], ['Provider concurrency', 'Five-worker queue exists; provider-specific setting unavailable']]} /></SectionCard>
-        <SectionCard title="Advanced workflow" description="The stage-by-stage guided experience is hidden from the default navigation but remains available for debugging and recovery.">
-          <button className="button secondary" type="button" onClick={() => props.setRoute('new-project')}>Open Advanced Guided Wizard</button>
+        <SectionCard title="Giao diện"><SettingsList items={[['Chủ đề', 'Chỉ nền tối'], ['Mật độ', 'Thoải mái'], ['Thanh bên', 'Mở rộng / thu gọn']]} /></SectionCard>
+        <SectionCard title="Sản xuất"><SettingsList items={[['Chính sách duyệt', 'Có hướng dẫn'], ['Tạo nội dung có phí', 'Chỉ chạy khi bạn yêu cầu; không tự động'], ['Số tác vụ provider', 'Hàng đợi năm worker; chưa có thiết lập riêng cho provider']]} /></SectionCard>
+        <SectionCard title="Quy trình nâng cao" description="Trải nghiệm hướng dẫn chi tiết được ẩn khỏi điều hướng mặc định nhưng vẫn có sẵn để gỡ lỗi và khôi phục.">
+          <button className="button secondary" type="button" onClick={() => props.setRoute('new-project')}>Mở trình hướng dẫn nâng cao</button>
         </SectionCard>
         <SectionCard title="CapCut"><SettingsList items={[
-          ['Installation status', runtime.capcutInstalled ? 'Detected' : 'Unavailable'],
-          ['Version', 'Not verified'],
-          ['Install path', runtime.capcutInstallPath],
-          ['Draft directory', runtime.capcutDraftDir],
-          ['Python status', runtime.pythonExists ? runtime.pythonVersion : 'Needs setup'],
-          ['Python path', runtime.sidecarPythonPath],
-          ['pycapcut status', runtime.pycapcutStatus],
-          ['Compatibility status', runtime.capcutCompatibility]
+          ['Trạng thái cài đặt', runtime.capcutInstalled ? 'Đã phát hiện' : 'Chưa khả dụng'],
+          ['Phiên bản', 'Chưa xác minh'],
+          ['Đường dẫn cài đặt', runtime.capcutInstallPath],
+          ['Thư mục bản nháp', runtime.capcutDraftDir],
+          ['Trạng thái Python', runtime.pythonExists ? runtime.pythonVersion : 'Cần thiết lập'],
+          ['Đường dẫn Python', runtime.sidecarPythonPath],
+          ['Trạng thái pycapcut', runtime.pycapcutStatus],
+          ['Trạng thái tương thích', runtime.capcutCompatibility]
         ]} /></SectionCard>
-        <SectionCard title="FFmpeg"><SettingsList items={[['Status', runtime.ffmpegAvailable ? 'Detected' : 'Needs setup'], ['Path', runtime.ffmpegPath], ['Version', runtime.ffmpegStatus], ['Preview IPC', runtime.ffmpegAvailable ? 'Ready for explicit approved-media renders' : 'Blocked until FFmpeg is configured'], ['Competitor video processing', runtime.ffmpegAvailable ? 'Ready for future downloader/transcriber wiring' : 'Blocked until FFmpeg is configured']]} /></SectionCard>
-        <SectionCard title="Security"><SettingsList items={[['Credential storage', 'OS keychain reference'], ['Renderer API keys', 'Write-only input'], ['Log redaction', 'Enabled'], ['Generic filesystem IPC', 'Unavailable']]} /></SectionCard>
-        <SectionCard title="Diagnostics"><SettingsList items={[['CodeGraph', 'Development index only'], ['Queue snapshot', `${props.bootstrap.queue.jobs.length} jobs`], ['Project count', `${props.bootstrap.projects.length}`]]} /></SectionCard>
+        <SectionCard title="FFmpeg"><SettingsList items={[['Trạng thái', runtime.ffmpegAvailable ? 'Đã phát hiện' : 'Cần thiết lập'], ['Đường dẫn', runtime.ffmpegPath], ['Phiên bản', runtime.ffmpegStatus], ['IPC xem trước', runtime.ffmpegAvailable ? 'Sẵn sàng dựng media đã duyệt khi bạn yêu cầu' : 'Bị khoá đến khi cấu hình FFmpeg'], ['Xử lý video tham khảo', runtime.ffmpegAvailable ? 'Sẵn sàng cho tích hợp tải xuống / chuyển biên tương lai' : 'Bị khoá đến khi cấu hình FFmpeg']]} /></SectionCard>
+        <SectionCard title="Bảo mật"><SettingsList items={[['Lưu thông tin xác thực', 'Tham chiếu keychain của hệ điều hành'], ['API key ở renderer', 'Chỉ ghi, không đọc lại'], ['Che thông tin trong log', 'Đã bật'], ['IPC filesystem tổng quát', 'Chưa khả dụng']]} /></SectionCard>
+        <SectionCard title="Chẩn đoán"><SettingsList items={[['CodeGraph', 'Chỉ dùng cho phát triển'], ['Ảnh chụp hàng đợi', `${props.bootstrap.queue.jobs.length} tác vụ`], ['Số dự án', `${props.bootstrap.projects.length}`]]} /></SectionCard>
       </div>
     </>
   );
@@ -46,7 +46,7 @@ export function DiagnosticsScreen(props: { bootstrap: BootstrapData; presence: P
   };
   return (
     <>
-      <PageHeader title="Diagnostics" description="Redacted local state for troubleshooting." />
+      <PageHeader title="Chẩn đoán" description="Trạng thái cục bộ đã lược bỏ thông tin nhạy cảm để gỡ lỗi." />
       <SectionCard>
         <pre className="diagnostics">{JSON.stringify(diagnostics, null, 2)}</pre>
       </SectionCard>

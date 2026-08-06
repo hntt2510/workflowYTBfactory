@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("longShortFactory", {
   generateCharacterPack: (input) => ipcRenderer.invoke("generate-character-pack", input),
   retryCharacterReference: (input) => ipcRenderer.invoke("retry-character-reference", input),
   approveCharacterVersion: (input) => ipcRenderer.invoke("approve-character-version", input),
+  setActiveCharacterVersion: (input) => ipcRenderer.invoke("set-active-character-version", input),
   getCharacterPreviewUrl: (input) => ipcRenderer.invoke("get-character-preview-url", input),
   uploadCharacterReference: (input) => ipcRenderer.invoke("upload-character-reference", input),
   runCharacterPreparation: (input) => ipcRenderer.invoke("run-character-preparation", input),

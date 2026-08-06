@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { creatorBlockingMessage } from "../creatorStudioCopy";
 
 export function PageHeader(props: {
   eyebrow?: string;
@@ -57,8 +58,9 @@ export function EmptyState(props: { title: string; detail: string; action?: Reac
 }
 
 export function DisabledAction(props: { children: ReactNode; reason: string }) {
+  const reason = creatorBlockingMessage(props.reason);
   return (
-    <button className="button secondary" type="button" disabled title={props.reason} aria-label={`${String(props.children)} unavailable: ${props.reason}`}>
+    <button className="button secondary" type="button" disabled title={reason} aria-label={`${String(props.children)} chưa sẵn sàng: ${reason}`}>
       {props.children}
     </button>
   );

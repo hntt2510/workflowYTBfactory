@@ -2,5 +2,5 @@
   "schemaVersion": 1,
   "updatedAt": "2026-08-05T21:50:48.159+07:00",
   "activeJobs": ["JOB-CREATOR-STUDIO-V1"],
-  "notes": "JOB-CHARACTER-FIRST-VISUALS-V1 is review_required after builder commit 5fe6666f. JOB-CREATOR-STUDIO-V1 is review_required after builder commits c57fd723, f21c4b42, a05494d2, b0316261, b8a0c97d, bfb17bfa, 1e07197b, 84f05913, df36297b, and 19e2d979; targeted typecheck and renderer verification pass, while reviewer and QA evidence remain pending. Prior review-required VOX jobs and unrelated dirty changes are preserved."
+  "notes": "JOB-CHARACTER-FIRST-VISUALS-V1 is review_required after builder commit 5fe6666f. JOB-CREATOR-STUDIO-V1 is changes_requested after the read-only review recorded in .harness/reviews/JOB-CREATOR-STUDIO-V1.md; targeted renderer tests pass, but ignored workspace modules, nested route-tab synchronization, the four-item stepper, and hard-coded Home next actions require builder fixes before QA. Prior review-required VOX jobs and unrelated dirty changes are preserved."
 }

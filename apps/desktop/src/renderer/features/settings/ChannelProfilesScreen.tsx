@@ -85,6 +85,20 @@ export function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRef
     }
   }
 
+  async function setActive(versionId: string): Promise<void> {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await factoryClient.setActiveCharacterVersion({ profileId: selected.id, versionId });
+      await props.onRefresh();
+      setMessage("Đã chọn phiên bản nhân vật này cho dự án mới.");
+    } catch (error) {
+      setMessage(`Không thể chọn nhân vật: ${safeRendererError(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function updatePersona(field: keyof typeof persona, value: string): void {
     setPersona((current) => ({ ...current, [field]: value }));
   }
@@ -92,25 +106,25 @@ export function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRef
   return (
     <>
       <PageHeader
-        title="Channel Profiles"
-        description="Configure the teacher identity once per channel. New character-first projects reuse the active approved version."
+        title="Hồ sơ kênh"
+        description="Cấu hình nhân vật của kênh một lần. Dự án mới sẽ dùng lại phiên bản nhân vật đang được duyệt."
         actions={
           <>
-            <button className="button primary" type="button" disabled={busy || !selected} onClick={() => void generateCharacterPack()}>Create GG Lab Prompt Pack</button>
-            <DisabledAction reason="Profile import/export is not implemented.">Import JSON</DisabledAction>
+            <button className="button primary" type="button" disabled={busy || !selected} onClick={() => void generateCharacterPack()}>Tạo bộ prompt GG Lab</button>
+            <DisabledAction reason="Nhập/xuất hồ sơ chưa được triển khai.">Nhập JSON</DisabledAction>
           </>
         }
       />
       <div className="split-grid">
-        <SectionCard title="Profiles">
-          <DataTable label="Channel profiles">
+        <SectionCard title="Các hồ sơ">
+          <DataTable label="Hồ sơ kênh">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Main keyword</th>
-                <th>Niche</th>
-                <th>Language</th>
-                <th>Status</th>
+                <th>Tên</th>
+                <th>Từ khoá chính</th>
+                <th>Ngách</th>
+                <th>Ngôn ngữ</th>
+                <th>Trạng thái</th>
               </tr>
             </thead>
             <tbody>
@@ -120,38 +134,38 @@ export function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRef
                   <td>{profile.mainKeyword}</td>
                   <td>{profile.niche}</td>
                   <td>{profile.language}</td>
-                  <td><StatusBadge tone="success">Seeded</StatusBadge></td>
+                  <td><StatusBadge tone="success">Đã khởi tạo</StatusBadge></td>
                 </tr>
               ))}
             </tbody>
           </DataTable>
         </SectionCard>
         {selected ? (
-          <SectionCard title="Teacher character setup" description="Tao prompt local, tu gen anh trong GG Lab, upload tung view roi duyet ca pack.">
+          <SectionCard title="Thiết lập nhân vật kênh" description="Tạo prompt cục bộ, tạo ảnh trong GG Lab, tải từng góc nhìn rồi duyệt cả bộ.">
             <div className="tabs-static">
-              {["General", "Audience", "Content", "Tone", "Visuals", "Voice", "Hashtags", "Avoid Rules", "Router Signals"].map((tab) => <span key={tab}>{tab}</span>)}
+              {["Tổng quan", "Khán giả", "Nội dung", "Giọng điệu", "Hình ảnh", "Giọng đọc", "Hashtag", "Điều cần tránh", "Tín hiệu định tuyến"].map((tab) => <span key={tab}>{tab}</span>)}
             </div>
             <div className="inspector">
               <h3>{selected.name}</h3>
               <p>{selected.targetAudience}</p>
-              <p><strong>Tone:</strong> {selected.tone}</p>
-              <p><strong>Visuals:</strong> {selected.visualStyle}</p>
+              <p><strong>Giọng điệu:</strong> {selected.tone}</p>
+              <p><strong>Hình ảnh:</strong> {selected.visualStyle}</p>
               <TagList items={selected.routerSignals} limit={10} />
               <TagList items={selected.coreHashtags.concat(selected.secondaryHashtags)} limit={8} />
             </div>
             <div className="form-grid">
-              <FormField label="Teacher name" htmlFor="character-name"><input id="character-name" value={characterName} onChange={(event) => setCharacterName(event.target.value)} /></FormField>
-              <FormField label="Role" htmlFor="character-role"><input id="character-role" value={persona.role} onChange={(event) => updatePersona("role", event.target.value)} /></FormField>
-              <FormField label="Age range" htmlFor="character-age"><input id="character-age" value={persona.ageRange} onChange={(event) => updatePersona("ageRange", event.target.value)} /></FormField>
-              <FormField label="Appearance" htmlFor="character-appearance"><textarea id="character-appearance" value={persona.appearance} onChange={(event) => updatePersona("appearance", event.target.value)} /></FormField>
-              <FormField label="Wardrobe" htmlFor="character-wardrobe"><input id="character-wardrobe" value={persona.wardrobe} onChange={(event) => updatePersona("wardrobe", event.target.value)} /></FormField>
-              <FormField label="Palette" htmlFor="character-palette"><input id="character-palette" value={persona.palette} onChange={(event) => updatePersona("palette", event.target.value)} /></FormField>
-              <FormField label="Props (comma separated)" htmlFor="character-props"><input id="character-props" value={persona.props} onChange={(event) => updatePersona("props", event.target.value)} /></FormField>
-              <FormField label="Gestures (comma separated)" htmlFor="character-gestures"><input id="character-gestures" value={persona.gestures} onChange={(event) => updatePersona("gestures", event.target.value)} /></FormField>
-              <FormField label="Tone" htmlFor="character-tone"><input id="character-tone" value={persona.tone} onChange={(event) => updatePersona("tone", event.target.value)} /></FormField>
-              <FormField label="Identity pack views" htmlFor="character-view-count"><select id="character-view-count" value={viewCount} onChange={(event) => setViewCount(Number(event.target.value))}><option value={4}>4 views</option><option value={5}>5 views</option><option value={6}>6 views</option></select></FormField>
-              <FormField label="Invariant traits" htmlFor="character-invariants"><textarea id="character-invariants" value={invariantTraits} onChange={(event) => setInvariantTraits(event.target.value)} /></FormField>
-              <FormField label="Prohibited changes" htmlFor="character-prohibited"><textarea id="character-prohibited" value={prohibitedChanges} onChange={(event) => setProhibitedChanges(event.target.value)} /></FormField>
+              <FormField label="Tên nhân vật" htmlFor="character-name"><input id="character-name" value={characterName} onChange={(event) => setCharacterName(event.target.value)} /></FormField>
+              <FormField label="Vai trò" htmlFor="character-role"><input id="character-role" value={persona.role} onChange={(event) => updatePersona("role", event.target.value)} /></FormField>
+              <FormField label="Độ tuổi" htmlFor="character-age"><input id="character-age" value={persona.ageRange} onChange={(event) => updatePersona("ageRange", event.target.value)} /></FormField>
+              <FormField label="Ngoại hình" htmlFor="character-appearance"><textarea id="character-appearance" value={persona.appearance} onChange={(event) => updatePersona("appearance", event.target.value)} /></FormField>
+              <FormField label="Trang phục" htmlFor="character-wardrobe"><input id="character-wardrobe" value={persona.wardrobe} onChange={(event) => updatePersona("wardrobe", event.target.value)} /></FormField>
+              <FormField label="Bảng màu" htmlFor="character-palette"><input id="character-palette" value={persona.palette} onChange={(event) => updatePersona("palette", event.target.value)} /></FormField>
+              <FormField label="Đạo cụ (cách nhau bằng dấu phẩy)" htmlFor="character-props"><input id="character-props" value={persona.props} onChange={(event) => updatePersona("props", event.target.value)} /></FormField>
+              <FormField label="Cử chỉ (cách nhau bằng dấu phẩy)" htmlFor="character-gestures"><input id="character-gestures" value={persona.gestures} onChange={(event) => updatePersona("gestures", event.target.value)} /></FormField>
+              <FormField label="Giọng điệu" htmlFor="character-tone"><input id="character-tone" value={persona.tone} onChange={(event) => updatePersona("tone", event.target.value)} /></FormField>
+              <FormField label="Số góc nhìn bộ nhân vật" htmlFor="character-view-count"><select id="character-view-count" value={viewCount} onChange={(event) => setViewCount(Number(event.target.value))}><option value={4}>4 góc nhìn</option><option value={5}>5 góc nhìn</option><option value={6}>6 góc nhìn</option></select></FormField>
+              <FormField label="Đặc điểm bất biến" htmlFor="character-invariants"><textarea id="character-invariants" value={invariantTraits} onChange={(event) => setInvariantTraits(event.target.value)} /></FormField>
+              <FormField label="Thay đổi bị cấm" htmlFor="character-prohibited"><textarea id="character-prohibited" value={prohibitedChanges} onChange={(event) => setProhibitedChanges(event.target.value)} /></FormField>
             </div>
             {versions.map((version) => {
               const uploadReady = version.references.length >= 4 && version.references.every((reference) => Boolean(reference.relativeFilePath && reference.sha256));
@@ -160,13 +174,13 @@ export function ChannelProfilesScreen(props: { profiles: ChannelProfile[]; onRef
                   const key = `${version.id}:${reference.view}`;
                   return <div className="profile-card" key={reference.id}>
                     <strong>{reference.view.replaceAll("_", " ")}</strong>
-                    <small>{reference.relativeFilePath ? "image uploaded / review pending" : "prompt ready / image missing"}</small>
-                    {previewUrls[key] ? <img className="character-preview" src={previewUrls[key]} alt={`${version.name} ${reference.view}`} /> : reference.relativeFilePath ? <button className="button compact" type="button" onClick={() => void preview(version.id, reference.view)}>Preview</button> : <p className="muted">No image uploaded.</p>}
+                    <small>{reference.relativeFilePath ? "đã tải ảnh / chờ duyệt" : "prompt sẵn sàng / thiếu ảnh"}</small>
+                    {previewUrls[key] ? <img className="character-preview" src={previewUrls[key]} alt={`${version.name} ${reference.view}`} /> : reference.relativeFilePath ? <button className="button compact" type="button" onClick={() => void preview(version.id, reference.view)}>Xem trước</button> : <p className="muted">Chưa tải ảnh.</p>}
                     {reference.promptText ? <><textarea className="prompt-preview" readOnly value={reference.promptText} aria-label={`Prompt ${reference.view}`} /><button className="button compact" type="button" onClick={() => void navigator.clipboard.writeText(reference.promptText ?? "")}>Copy prompt</button></> : null}
-                    <div className="button-row"><button className="button primary compact" type="button" disabled={busy} onClick={() => void upload(version.id, reference.view)}>Upload / replace</button><button className="button secondary compact" type="button" disabled={busy} onClick={() => void retry(version.id, reference.view)}>Regenerate prompt</button></div>
+                    <div className="button-row"><button className="button primary compact" type="button" disabled={busy} onClick={() => void upload(version.id, reference.view)}>Tải lên / thay thế</button><button className="button secondary compact" type="button" disabled={busy} onClick={() => void retry(version.id, reference.view)}>Tạo lại prompt</button></div>
                   </div>;
                 })}</div>
-                {!characterVersionIsApproved(version) ? <><button className="button primary compact" type="button" disabled={busy || !uploadReady} onClick={() => void approve(version.id)}>Approve / Lock Version</button>{!uploadReady ? <small className="muted">Upload every identity view before approval.</small> : null}</> : <StatusBadge tone="success">Approved and active</StatusBadge>}
+                {!characterVersionIsApproved(version) ? <><button className="button primary compact" type="button" disabled={busy || !uploadReady} onClick={() => void approve(version.id)}>Duyệt / khoá phiên bản</button>{!uploadReady ? <small className="muted">Hãy tải đủ mọi góc nhìn trước khi duyệt.</small> : null}</> : selected.activeCharacterVersionId === version.id ? <StatusBadge tone="success">Đã duyệt và đang dùng</StatusBadge> : <div className="button-row"><StatusBadge tone="success">Đã duyệt</StatusBadge><button className="button secondary compact" type="button" disabled={busy} onClick={() => void setActive(version.id)}>Dùng cho dự án mới</button></div>}
               </SectionCard>;
             })}
             {message ? <p className={message.includes("failed") || message.includes("unavailable") ? "error-message" : "safe-message"}>{message}</p> : null}

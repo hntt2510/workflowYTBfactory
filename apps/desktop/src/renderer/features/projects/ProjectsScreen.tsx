@@ -13,25 +13,25 @@ export function ProjectsScreen(props: {
   return (
     <>
       <PageHeader
-        title="Projects"
-        description="Create, open, and manage SQLite-backed local projects."
-        actions={<button className="button primary" type="button" onClick={() => props.setRoute("create")}><Plus size={16} /> Create Video Project</button>}
+        title="Dự án"
+        description="Tạo, mở và quản lý các dự án cục bộ được lưu bằng SQLite."
+        actions={<button className="button primary" type="button" onClick={() => props.setRoute("create")}><Plus size={16} /> Tạo dự án video</button>}
       />
       <SectionCard>
         {props.projectSummaries.length === 0 ? (
-          <EmptyState title="No persisted projects" detail="The project list is empty because no SQLite-backed project has been created yet." />
+          <EmptyState title="Chưa có dự án đã lưu" detail="Danh sách trống vì chưa có dự án nào được tạo và lưu bằng SQLite." />
         ) : (
-          <DataTable label="Projects">
+          <DataTable label="Dự án">
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Profile</th>
-                <th>Format</th>
-                <th>Language</th>
-                <th>Target duration</th>
-                <th>Updated</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th>Tên</th>
+                <th>Hồ sơ</th>
+                <th>Định dạng</th>
+                <th>Ngôn ngữ</th>
+                <th>Thời lượng mục tiêu</th>
+                <th>Cập nhật</th>
+                <th>Trạng thái</th>
+                <th>Thao tác</th>
               </tr>
             </thead>
             <tbody>
@@ -43,12 +43,12 @@ export function ProjectsScreen(props: {
                   <td>{project.targetLanguage}</td>
                   <td>{project.targetDuration}</td>
                   <td>{formatDate(project.updatedAt)}</td>
-                  <td><StatusBadge tone="success">Persisted</StatusBadge></td>
+                    <td><StatusBadge tone="success">Đã lưu</StatusBadge></td>
                   <td className="row-actions">
-                    <button className="button compact" type="button" onClick={() => void props.onOpenProject(project.id)}>Open</button>
-                    <button className="button danger compact" type="button" onClick={() => void props.onDeleteProject(project.id)}><Trash2 size={14} /> Delete</button>
-                    <DisabledAction reason="Project duplication is not implemented.">Duplicate</DisabledAction>
-                    <DisabledAction reason="Project export is not implemented.">Export</DisabledAction>
+                    <button className="button compact" type="button" onClick={() => void props.onOpenProject(project.id)}>Mở</button>
+                    <button className="button danger compact" type="button" onClick={() => void props.onDeleteProject(project.id)}><Trash2 size={14} /> Xoá</button>
+                    <DisabledAction reason="Nhân bản dự án chưa được triển khai.">Nhân bản</DisabledAction>
+                    <DisabledAction reason="Xuất dự án chưa được triển khai.">Xuất</DisabledAction>
                   </td>
                 </tr>
               ))}

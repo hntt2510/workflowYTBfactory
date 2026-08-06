@@ -1,7 +1,7 @@
 import type { StageEligibility } from "@lsf/domain";
 import { workflowStageDefinitions } from "@lsf/domain";
 import { SettingsList, MetricCard, SectionCard } from "./ui";
-import { creatorStatusLabel } from "../creatorStudioCopy";
+import { creatorBlockingMessage, creatorDependencyLabel, creatorStageLabel, creatorStagePurpose, creatorStatusLabel } from "../creatorStudioCopy";
 import { stageTone } from "../utils";
 
 export function StageStatusHeader(props: {
@@ -13,17 +13,17 @@ export function StageStatusHeader(props: {
 }) {
   const registeredStage = workflowStageDefinitions.find((stage) => stage.name === props.stageName);
   return (
-    <SectionCard title={props.stageName} description={props.purpose}>
+    <SectionCard title={creatorStageLabel(props.stageName)} description={creatorStagePurpose(props.stageName, props.purpose)}>
       <div className="metric-grid">
-        <MetricCard label="Stage number" value={registeredStage?.order ?? props.stageNumber} />
-        <MetricCard label="Current status" value={creatorStatusLabel(props.eligibility.status)} tone={stageTone(props.eligibility.status)} />
-        <MetricCard label="Runnable" value={props.eligibility.runnable ? "Yes" : "No"} tone={props.eligibility.runnable ? "success" : "warning"} />
-        <MetricCard label="Approval" value={props.eligibility.approvable ? "Available" : "Locked"} tone={props.eligibility.approvable ? "success" : "warning"} />
+        <MetricCard label="Số bước" value={registeredStage?.order ?? props.stageNumber} />
+        <MetricCard label="Trạng thái hiện tại" value={creatorStatusLabel(props.eligibility.status)} tone={stageTone(props.eligibility.status)} />
+        <MetricCard label="Có thể chạy" value={props.eligibility.runnable ? "Có" : "Chưa"} tone={props.eligibility.runnable ? "success" : "warning"} />
+        <MetricCard label="Có thể duyệt" value={props.eligibility.approvable ? "Sẵn sàng" : "Đang khoá"} tone={props.eligibility.approvable ? "success" : "warning"} />
       </div>
       <SettingsList items={[
-        ["Dependencies", props.dependencies.join(", ") || "None"],
-        ["Reviewable", props.eligibility.reviewable ? "Yes" : "No"],
-        ["Blocking reasons", props.eligibility.blockingReasons.map((reason) => reason.message).join(" ") || "None"]
+        ["Phụ thuộc", props.dependencies.map(creatorDependencyLabel).join(", ") || "Không có"],
+        ["Có thể duyệt nội dung", props.eligibility.reviewable ? "Có" : "Chưa"],
+        ["Điều đang chặn", props.eligibility.blockingReasons.map((reason) => creatorBlockingMessage(reason.message)).join(" ") || "Không có"]
       ]} />
     </SectionCard>
   );

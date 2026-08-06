@@ -9,6 +9,9 @@ export interface ProjectSummary {
   targetLanguage: string;
   targetDuration: string;
   updatedAt: string;
+  currentStageId?: string;
+  currentStageStatus?: WorkflowStageStatus;
+  progressPercent?: number;
 }
 
 export interface QueueJob {
@@ -339,6 +342,7 @@ export interface LongShortFactoryApi {
   retryCharacterReference: (input: { profileId: string; versionId: string; view: CharacterReferenceView }) => Promise<ChannelProfile>;
   uploadCharacterReference: (input: { profileId: string; versionId: string; view: CharacterReferenceView }) => Promise<ChannelProfile>;
   approveCharacterVersion: (input: { profileId: string; versionId: string }) => Promise<ChannelProfile>;
+  setActiveCharacterVersion: (input: { profileId: string; versionId: string }) => Promise<ChannelProfile>;
   getCharacterPreviewUrl: (input: { profileId: string; versionId: string; view: CharacterReferenceView }) => Promise<{ url: string }>;
   runCharacterPreparation: (input: { projectId: string }) => Promise<FactoryProject>;
   approveCharacterPreparation: (input: { projectId: string }) => Promise<FactoryProject>;

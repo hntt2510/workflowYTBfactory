@@ -2,6 +2,7 @@ import {
   createFixtureProject,
   createStageAttention,
   routeChannelProfile,
+  resolveWorkflowProgress,
   seedChannelProfiles,
   type ChannelRouteDecision,
   type FactoryProject
@@ -67,6 +68,7 @@ function webFallback(): LongShortFactoryApi {
     async retryCharacterReference(): Promise<ChannelProfile> { throw new Error("Character generation requires Electron main process."); },
     async uploadCharacterReference(): Promise<ChannelProfile> { throw new Error("Character reference upload requires Electron main process."); },
     async approveCharacterVersion(): Promise<ChannelProfile> { throw new Error("Character approval requires Electron main process."); },
+    async setActiveCharacterVersion(): Promise<ChannelProfile> { throw new Error("Character selection requires Electron main process."); },
     async getCharacterPreviewUrl(): Promise<{ url: string }> { throw new Error("Character preview requires Electron main process."); },
     async runCharacterPreparation(): Promise<FactoryProject> { throw new Error("Character preparation requires Electron main process."); },
     async approveCharacterPreparation(): Promise<FactoryProject> { throw new Error("Character preparation requires Electron main process."); },
@@ -415,6 +417,10 @@ function webFallback(): LongShortFactoryApi {
 }
 
 function toSummary(project: FactoryProject): ProjectSummary {
+  const progress = resolveWorkflowProgress(project);
+  const currentStage = progress.currentStageId
+    ? progress.stages.find((stage) => stage.stageId === progress.currentStageId)
+    : undefined;
   return {
     id: project.id,
     topic: project.topic,
@@ -423,7 +429,9 @@ function toSummary(project: FactoryProject): ProjectSummary {
     projectName: project.setup.projectName,
     targetLanguage: project.setup.language,
     targetDuration: project.setup.targetDuration,
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    progressPercent: progress.percent,
+    ...(currentStage ? { currentStageId: currentStage.stageId, currentStageStatus: currentStage.internalStatus } : {})
   };
 }
 

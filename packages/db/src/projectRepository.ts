@@ -1,5 +1,6 @@
 import type { ChannelProfile, FactoryProject } from "@lsf/domain";
-import { normalizeProjectStages, seedChannelProfiles } from "@lsf/domain";
+import { normalizeProjectStages, resolveWorkflowProgress, seedChannelProfiles } from "@lsf/domain";
+import type { WorkflowStageStatus } from "@lsf/domain";
 import type { FactoryDatabase } from "./connection";
 
 export interface ProjectSummary {
@@ -11,6 +12,9 @@ export interface ProjectSummary {
   targetLanguage: string;
   targetDuration: string;
   updatedAt: string;
+  currentStageId?: string;
+  currentStageStatus?: WorkflowStageStatus;
+  progressPercent: number;
 }
 
 interface ProjectRow {
@@ -157,6 +161,11 @@ export class ProjectRepository {
           language: item.target_language,
           workflowMode: "guided" as const
         };
+        const project = this.loadProject(item.id);
+        const progress = project ? resolveWorkflowProgress(project) : undefined;
+        const currentStage = progress?.currentStageId
+          ? progress.stages.find((stage) => stage.stageId === progress.currentStageId)
+          : undefined;
         return {
           id: item.id,
           topic: item.topic,
@@ -165,7 +174,9 @@ export class ProjectRepository {
           projectName: setup.projectName,
           targetLanguage: setup.language,
           targetDuration: setup.targetDuration,
-          updatedAt: item.updated_at
+          updatedAt: item.updated_at,
+          progressPercent: progress?.percent ?? 0,
+          ...(currentStage ? { currentStageId: currentStage.stageId, currentStageStatus: currentStage.internalStatus } : {})
         };
       });
   }

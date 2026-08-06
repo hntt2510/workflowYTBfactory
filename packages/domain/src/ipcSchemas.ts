@@ -1000,7 +1000,10 @@ export const projectSummaryResponseSchema = z.object({
   projectName: z.string(),
   targetLanguage: z.string(),
   targetDuration: z.string(),
-  updatedAt: z.string()
+  updatedAt: z.string(),
+  currentStageId: idSchema.optional(),
+  currentStageStatus: z.string().optional(),
+  progressPercent: z.number().int().min(0).max(100).optional()
 });
 
 const timelineItemResponseSchema = timelineItemOutputSchema;

@@ -99,8 +99,10 @@ export function SimpleCreateScreen(props: {
     competitorReference?: { sourceUrl?: string; pastedTranscript: string; notes?: string };
   }) => Promise<void>;
 }) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [inputMode, setInputMode] = useState<"topic" | "existing_script" | "reference">("topic");
   const [topic, setTopic] = useState("");
+  const [projectName, setProjectName] = useState("");
   const [script, setScript] = useState("");
   const [referenceUrl, setReferenceUrl] = useState("");
   const [referenceTranscript, setReferenceTranscript] = useState("");
@@ -114,20 +116,23 @@ export function SimpleCreateScreen(props: {
   const [language, setLanguage] = useState(availableLanguages.includes("Vietnamese") ? "Vietnamese" : availableLanguages[0] ?? "English");
   const [duration, setDuration] = useState("45-60 seconds");
   const [customDuration, setCustomDuration] = useState("");
+  const [format, setFormat] = useState<"long" | "short">("long");
   const [aspectRatio, setAspectRatio] = useState<"16:9" | "9:16" | "1:1">("16:9");
   const [voiceId, setVoiceId] = useState("");
   const [resolution, setResolution] = useState<"1080p" | "720p">("1080p");
   const [catalog, setCatalog] = useState<TtsProviderCatalog | null>(null);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
+    if (!showAdvanced) return;
     let cancelled = false;
     void factoryClient.listTtsProviders({ language: ttsLanguageCode(language) })
       .then((result) => { if (!cancelled) setCatalog(result); })
       .catch(() => { if (!cancelled) setCatalog(null); });
     return () => { cancelled = true; };
-  }, [language]);
+  }, [language, showAdvanced]);
 
   const configuredProvider = props.localTtsSettings?.ttsProvider;
   const selectedLanguageCode = ttsLanguageCode(language);
@@ -154,17 +159,17 @@ export function SimpleCreateScreen(props: {
   async function create(): Promise<void> {
     setMessage("");
     if (!contentReady || !configurationReady) {
-      setMessage(inputMode === "topic" ? "Enter a topic to continue." : inputMode === "existing_script" ? "Paste an existing script to continue." : "Paste a reference transcript to continue.");
-      if (!configurationReady) setMessage("Enter a custom target duration to continue.");
+      setMessage(inputMode === "topic" ? "Nhập chủ đề để tiếp tục." : inputMode === "existing_script" ? "Dán kịch bản có sẵn để tiếp tục." : "Dán transcript tham khảo để tiếp tục.");
+      if (!configurationReady) setMessage("Nhập thời lượng tuỳ chỉnh để tiếp tục.");
       return;
     }
     setSaving(true);
     try {
-      const title = inputMode === "topic" ? topic.trim() : inputMode === "existing_script" ? "Existing script project" : "Reference project";
+      const title = projectName.trim() || (inputMode === "topic" ? topic.trim() : inputMode === "existing_script" ? "Dự án từ kịch bản" : "Dự án từ tài liệu tham khảo");
       await props.onCreateProject({
         topic: title,
         projectName: title.slice(0, 120),
-        format: aspectRatio === "9:16" ? "short" : "long",
+        format,
         targetLanguage: language,
         ...(profileId ? { selectedProfileId: profileId } : {}),
         targetDuration: duration === "Custom" ? customDuration.trim() : duration,
@@ -182,7 +187,7 @@ export function SimpleCreateScreen(props: {
         } : {})
       });
     } catch (error) {
-      setMessage(safeRendererError(error, "The project could not be created. Check the configuration and retry."));
+      setMessage(safeRendererError(error, "Không thể tạo dự án. Hãy kiểm tra cấu hình và thử lại."));
     } finally {
       setSaving(false);
     }
@@ -190,62 +195,51 @@ export function SimpleCreateScreen(props: {
 
   return (
     <>
-      <PageHeader title="Create Video Project" description="Choose the source, VOX Documentary style, an available voice, and output settings. Internal production stages run automatically when valid." />
-      <div className="form-grid">
-        <FormField label="Input mode" htmlFor="simple-input-mode">
-          <select id="simple-input-mode" value={inputMode} onChange={(event) => setInputMode(event.target.value as typeof inputMode)}>
-            <option value="topic">Topic</option>
-            <option value="existing_script">Existing Script</option>
-            <option value="reference">Reference</option>
-          </select>
-        </FormField>
-        <FormField label="Channel profile" htmlFor="simple-channel-profile">
-          <select id="simple-channel-profile" value={profileId} onChange={(event) => setProfileId(event.target.value)}>
-            {props.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-          </select>
-        </FormField>
-        <FormField label="Language" htmlFor="simple-language">
-          <select id="simple-language" value={language} onChange={(event) => setLanguage(event.target.value)}>
-            {availableLanguages.map((option) => <option key={option} value={option}>{option}</option>)}
-          </select>
-        </FormField>
-        <FormField label="Target duration" htmlFor="simple-duration">
-          <select id="simple-duration" value={duration} onChange={(event) => setDuration(event.target.value)}>
-            {['30-45 seconds', '45-60 seconds', '60-90 seconds', '2-3 minutes', '5-8 minutes', 'Custom'].map((option) => <option key={option} value={option}>{option}</option>)}
-          </select>
-        </FormField>
-        {duration === "Custom" ? <FormField label="Custom duration" htmlFor="simple-custom-duration" hint="Describe the target length, for example 90-120 seconds."><input id="simple-custom-duration" value={customDuration} onChange={(event) => setCustomDuration(event.target.value)} placeholder="90-120 seconds" /></FormField> : null}
-        <FormField label="Aspect ratio" htmlFor="simple-aspect-ratio">
-          <select id="simple-aspect-ratio" value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value as typeof aspectRatio)}>
-            <option value="16:9">16:9</option><option value="9:16">9:16</option><option value="1:1">1:1</option>
-          </select>
-        </FormField>
-        <FormField label="Visual style" htmlFor="simple-visual-style">
-          <select id="simple-visual-style" value="vox-documentary" disabled><option value="vox-documentary">VOX Documentary</option></select>
-        </FormField>
-        <FormField label="Teacher character" htmlFor="simple-character-version" hint={approvedCharacterVersions.length ? "The selected approved version is snapshotted into this project." : "No approved version yet. Create the project, then approve one in Channel Profiles."}>
-          <select id="simple-character-version" value={characterVersionId} onChange={(event) => setCharacterVersionId(event.target.value)}>
-            <option value="">Select after creation</option>
-            {approvedCharacterVersions.map((version) => <option key={version.id} value={version.id}>{version.name} v{version.version}{selectedProfile?.activeCharacterVersionId === version.id ? " (active)" : ""}</option>)}
-          </select>
-        </FormField>
-        <FormField label="Voice" htmlFor="simple-voice" hint={voiceOptions.length ? "Available configured voices only." : "No available voice preset was detected. The project will need attention before voice generation."}>
-          <select id="simple-voice" value={voiceId} onChange={(event) => setVoiceId(event.target.value)}>
-            <option value="">Choose an available voice</option>
-            {voiceOptions.map((voice) => <option key={voice.key} value={voice.key}>{voice.label}</option>)}
-          </select>
-        </FormField>
-        <FormField label="Output resolution" htmlFor="simple-resolution">
-          <select id="simple-resolution" value={resolution} onChange={(event) => setResolution(event.target.value as typeof resolution)}><option value="1080p">1080p</option><option value="720p">720p</option></select>
-        </FormField>
+      <PageHeader title="Tạo dự án video" description="Ba bước ngắn để bắt đầu. Ảnh sẽ được tạo thủ công trong GG Lab; provider và CapCut chỉ xuất hiện khi thật sự cần." />
+      <div className="wizard wizard-compact">
+        <aside className="wizard-steps" aria-label="Các bước tạo dự án">
+          {["Nguồn nội dung", "Định dạng", "Xác nhận"].map((label, index) => <button className={step === index + 1 ? "active" : ""} key={label} type="button" onClick={() => setStep((index + 1) as 1 | 2 | 3)}><span>{index + 1}</span>{label}</button>)}
+        </aside>
+        <SectionCard>
+          {step === 1 ? <div className="stack">
+            <div className="option-grid">
+              {(["topic", "existing_script", "reference"] as const).map((mode) => <Option key={mode} title={mode === "topic" ? "Bắt đầu từ chủ đề" : mode === "existing_script" ? "Tôi đã có kịch bản" : "Tôi có tài liệu tham khảo"} detail={mode === "topic" ? "Phát triển ý tưởng trong Story." : mode === "existing_script" ? "Dán lời dẫn và đi thẳng vào biên tập." : "Lưu transcript và nguồn để kiểm tra."} active={inputMode === mode} onClick={() => setInputMode(mode)} />)}
+            </div>
+            <FormField label="Tên dự án (tuỳ chọn)" htmlFor="simple-project-name"><input id="simple-project-name" value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Ví dụ: Những biểu tượng bị lãng quên" /></FormField>
+            {inputMode === "topic" ? <FormField label="Chủ đề" htmlFor="simple-topic"><textarea id="simple-topic" value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="Video sẽ giải thích điều gì?" /></FormField> : null}
+            {inputMode === "existing_script" ? <FormField label="Kịch bản có sẵn" htmlFor="simple-script"><textarea id="simple-script" value={script} onChange={(event) => setScript(event.target.value)} placeholder="Dán kịch bản vào đây" /></FormField> : null}
+            {inputMode === "reference" ? <div className="form-grid"><FormField label="URL tham khảo" htmlFor="simple-reference-url"><input id="simple-reference-url" value={referenceUrl} onChange={(event) => setReferenceUrl(event.target.value)} placeholder="URL nguồn tuỳ chọn" /></FormField><FormField label="Transcript tham khảo" htmlFor="simple-reference-transcript"><textarea id="simple-reference-transcript" value={referenceTranscript} onChange={(event) => setReferenceTranscript(event.target.value)} placeholder="Dán transcript hoặc tài liệu tham khảo" /></FormField><FormField label="Ghi chú" htmlFor="simple-reference-notes"><textarea id="simple-reference-notes" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Ghi chú tuỳ chọn" /></FormField></div> : null}
+            <button className="button primary" type="button" disabled={!contentReady} onClick={() => setStep(2)}>Tiếp tục: định dạng</button>
+          </div> : null}
+          {step === 2 ? <div className="stack">
+            <div className="option-grid"><Option title="YouTube Long" detail="Video dài, nhịp kể đầy đủ." active={format === "long"} onClick={() => { setFormat("long"); if (aspectRatio === "9:16") setAspectRatio("16:9"); }} /><Option title="YouTube Short" detail="Khung dọc, nhịp gọn và trực diện." active={format === "short"} onClick={() => { setFormat("short"); if (aspectRatio === "16:9") setAspectRatio("9:16"); }} /></div>
+            <div className="form-grid">
+              <FormField label="Ngôn ngữ" htmlFor="simple-language"><select id="simple-language" value={language} onChange={(event) => setLanguage(event.target.value)}>{availableLanguages.map((option) => <option key={option} value={option}>{option}</option>)}</select></FormField>
+              <FormField label="Tỷ lệ khung hình" htmlFor="simple-aspect-ratio"><select id="simple-aspect-ratio" value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value as typeof aspectRatio)}><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="1:1">1:1</option></select></FormField>
+              <FormField label="Thời lượng mục tiêu" htmlFor="simple-duration"><select id="simple-duration" value={duration} onChange={(event) => setDuration(event.target.value)}>{[['30-45 seconds', '30-45 giây'], ['45-60 seconds', '45-60 giây'], ['60-90 seconds', '60-90 giây'], ['2-3 minutes', '2-3 phút'], ['5-8 minutes', '5-8 phút'], ['Custom', 'Tuỳ chỉnh']].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></FormField>
+              {duration === "Custom" ? <FormField label="Thời lượng tuỳ chỉnh" htmlFor="simple-custom-duration"><input id="simple-custom-duration" value={customDuration} onChange={(event) => setCustomDuration(event.target.value)} placeholder="90-120 giây" /></FormField> : null}
+            </div>
+            <details className="advanced-disclosure" open={showAdvanced} onToggle={(event) => setShowAdvanced(event.currentTarget.open)}>
+              <summary>Tuỳ chọn nâng cao</summary>
+              <div className="form-grid">
+                <FormField label="Hồ sơ kênh" htmlFor="simple-channel-profile"><select id="simple-channel-profile" value={profileId} onChange={(event) => setProfileId(event.target.value)}>{props.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></FormField>
+                <FormField label="Nhân vật kênh" htmlFor="simple-character-version"><select id="simple-character-version" value={characterVersionId} onChange={(event) => setCharacterVersionId(event.target.value)}><option value="">Chọn sau khi tạo</option>{approvedCharacterVersions.map((version) => <option key={version.id} value={version.id}>{version.name} v{version.version}</option>)}</select></FormField>
+                <FormField label="Giọng đọc" htmlFor="simple-voice"><select id="simple-voice" value={voiceId} onChange={(event) => setVoiceId(event.target.value)}><option value="">Chọn sau trong Build</option>{voiceOptions.map((voice) => <option key={voice.key} value={voice.key}>{voice.label}</option>)}</select></FormField>
+                <FormField label="Độ phân giải" htmlFor="simple-resolution"><select id="simple-resolution" value={resolution} onChange={(event) => setResolution(event.target.value as typeof resolution)}><option value="1080p">1080p</option><option value="720p">720p</option></select></FormField>
+              </div>
+            </details>
+            {message ? <p className="error-message">{message}</p> : null}
+            <div className="button-row"><button className="button secondary" type="button" onClick={() => setStep(1)}>Quay lại</button><button className="button primary" type="button" disabled={!configurationReady} onClick={() => setStep(3)}>Tiếp tục: xác nhận</button></div>
+          </div> : null}
+          {step === 3 ? <div className="stack">
+            <div className="review-list"><p><strong>Dự án:</strong> {projectName.trim() || (inputMode === "topic" ? topic : inputMode === "existing_script" ? "Dự án từ kịch bản" : "Dự án từ tài liệu tham khảo")}</p><p><strong>Nguồn:</strong> {inputMode === "topic" ? "Chủ đề" : inputMode === "existing_script" ? "Kịch bản có sẵn" : "Tài liệu tham khảo"}</p><p><strong>Định dạng:</strong> {format === "short" ? "YouTube Short" : "YouTube Long"} · {aspectRatio} · {duration === "Custom" ? customDuration : duration}</p><p><strong>Ngôn ngữ:</strong> {language}</p></div>
+            <div className="asset-workflow-callout"><strong>Ảnh thủ công trong GG Lab</strong><p>Sau khi tạo, Story và Director sẽ tạo một prompt hoàn chỉnh cho từng cảnh. Bạn chỉ cần tạo ảnh, upload và duyệt trong Assets.</p></div>
+            <details className="advanced-disclosure"><summary>Hiện tuỳ chọn kỹ thuật</summary><p className="muted">Hồ sơ: {selectedProfile?.name ?? "Chưa chọn"} · Nhân vật: {characterVersionId ? "Đã chọn" : "Chọn sau"} · Giọng: {voiceId ? "Đã chọn" : "Chọn sau trong Build"} · Đầu ra: {resolution}</p></details>
+            {message ? <p className="error-message">{message}</p> : null}
+            <div className="button-row"><button className="button secondary" type="button" onClick={() => setStep(2)}>Quay lại</button><button className="button primary" type="button" disabled={saving} onClick={() => void create()}>{saving ? "Đang tạo..." : "Tạo dự án"}</button></div>
+          </div> : null}
+        </SectionCard>
       </div>
-      <SectionCard title="Source material" description="Free-form text is limited to your topic, script, reference, and production notes.">
-        {inputMode === "topic" ? <FormField label="Topic" htmlFor="simple-topic"><textarea id="simple-topic" value={topic} onChange={(event) => setTopic(event.target.value)} placeholder="What should the video explain?" /></FormField> : null}
-        {inputMode === "existing_script" ? <FormField label="Existing script" htmlFor="simple-script"><textarea id="simple-script" value={script} onChange={(event) => setScript(event.target.value)} placeholder="Paste your script here" /></FormField> : null}
-        {inputMode === "reference" ? <div className="form-grid"><FormField label="Reference URL" htmlFor="simple-reference-url"><input id="simple-reference-url" value={referenceUrl} onChange={(event) => setReferenceUrl(event.target.value)} placeholder="Optional source URL" /></FormField><FormField label="Reference transcript" htmlFor="simple-reference-transcript"><textarea id="simple-reference-transcript" value={referenceTranscript} onChange={(event) => setReferenceTranscript(event.target.value)} placeholder="Paste the competitor transcript/reference" /></FormField><FormField label="Notes" htmlFor="simple-reference-notes"><textarea id="simple-reference-notes" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Optional notes" /></FormField></div> : null}
-      </SectionCard>
-      {message ? <p className="error-message">{message}</p> : null}
-      <div className="button-row"><button className="button primary" type="button" disabled={saving || !contentReady || !configurationReady} onClick={() => void create()}>{saving ? "Creating..." : "Create Video Project"}</button><button className="button secondary" type="button" onClick={() => props.setRoute("projects")}>Cancel</button></div>
     </>
   );
 }
@@ -440,13 +434,13 @@ export function NewProjectWizard(props: {
                     <span>{profile.niche}</span>
                     <small>{profile.language} / {profile.tone}</small>
                     <small>{profile.imageStyleModel.name}</small>
-                    <small>Avoid: {profile.avoidList[0] ?? "No rule"}</small>
+                    <small>Cần tránh: {profile.avoidList[0] ?? "Chưa có quy tắc"}</small>
                   </button>
                 ))}
               </div>
-              <button className="button primary" type="button" onClick={() => setStep(3)}>Continue</button>
-              <SectionCard title="Teacher character" description="New Semi-automatic projects use the active approved character by default. You can choose another approved version here.">
-                {characterVersions.length ? <div className="option-grid">{characterVersions.map((version) => <Option key={version.id} title={`${version.name} v${version.version}`} detail={`${creatorStatusLabel(version.status)} / ${version.references.length} views`} active={selectedCharacterVersion?.id === version.id} onClick={() => setSelectedCharacterVersionId(version.id)} />)}</div> : <p className="muted">No character pack is approved for this profile yet. Create one in Channel Profiles before visual production.</p>}
+              <button className="button primary" type="button" onClick={() => setStep(3)}>Tiếp tục</button>
+              <SectionCard title="Nhân vật kênh" description="Dự án sản xuất đơn giản dùng nhân vật đang được duyệt theo mặc định. Bạn có thể chọn phiên bản khác ở đây.">
+                {characterVersions.length ? <div className="option-grid">{characterVersions.map((version) => <Option key={version.id} title={`${version.name} v${version.version}`} detail={`${creatorStatusLabel(version.status)} / ${version.references.length} góc nhìn`} active={selectedCharacterVersion?.id === version.id} onClick={() => setSelectedCharacterVersionId(version.id)} />)}</div> : <p className="muted">Hồ sơ này chưa có bộ nhân vật được duyệt. Hãy tạo trong Hồ sơ kênh trước khi sản xuất hình ảnh.</p>}
               </SectionCard>
             </div>
           ) : null}

@@ -847,6 +847,19 @@ app.whenReady().then(async () => {
         profiles: seedChannelProfiles
       }));
     }
+  } else if (process.env.LSF_E2E_UI_MODE === "verify") {
+    const topic = "Why did oil matter so much in World War II?";
+    if (!projectRepository.listProjects().some((project) => project.topic === topic)) {
+      projectRepository.createProject(createFixtureProject({
+        topic,
+        format: "long",
+        targetLanguage: "English",
+        workflowMode: "guided",
+        visualWorkflow: "legacy",
+        projectName: topic,
+        profiles: seedChannelProfiles
+      }));
+    }
   } else if (process.env.LSF_E2E_UI_MODE === "semi-automatic-resume") {
     const topic = "Semi-automatic resume verification project";
     if (!projectRepository.listProjects().some((project) => project.topic === topic)) {
@@ -892,63 +905,67 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
       await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
-      await assertText(win, "Project command center");
-      await clickText(win, "Reference Intake");
-      await assertText(win, "Reference Validation");
+      await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
+      await navigateToRoute(win, "project-overview");
+      await clickText(win, "Mở tài liệu tham khảo");
+      await assertText(win, "Kiểm tra tài liệu");
       await setInputValue(win, "#idea-competitor-url", "https://www.youtube.com/watch?v=3GKC4kC3iQ0");
       await setInputValue(win, "#idea-competitor-script", "This is a long enough competitor transcript for local reference validation.");
-      await clickText(win, "Save competitor reference");
+      await clickText(win, "Lưu tài liệu tham khảo");
       await assertText(win, "Competitor reference saved as Draft.");
-      await clickText(win, "View");
+      await clickText(win, "Xem");
       await assertText(win, "This is a long enough competitor transcript for local reference validation.");
-      await clickText(win, "Hide");
-      await clickText(win, "Versions");
+      await clickText(win, "Ẩn");
+      await clickText(win, "Phiên bản");
       await assertText(win, "v1");
-      await clickText(win, "Hide versions");
-      await clickText(win, "Replace transcript");
+      await clickText(win, "Ẩn phiên bản");
+      await clickText(win, "Thay transcript");
       await setInputValue(win, "#idea-competitor-script", "Replacement transcript saved as a new immutable version for this source.");
-      await clickText(win, "Create transcript version");
-      await assertText(win, "Transcript version created. Validate the reference set again.");
+      await clickText(win, "Tạo phiên bản transcript");
+      await assertText(win, "Đã tạo phiên bản transcript. Hãy kiểm tra lại bộ tài liệu.");
       await setInputValue(win, "#idea-competitor-url", "http://youtube.com/watch?v=3GKC4kC3iQ0");
       await setInputValue(win, "#idea-competitor-script", "Replacement transcript for the same normalized YouTube source.");
-      await clickText(win, "Save competitor reference");
+      await clickText(win, "Lưu tài liệu tham khảo");
       await assertText(win, "This video already exists in the project.");
-      await clickText(win, "Open existing");
-      await assertText(win, "Current transcript");
-      await clickText(win, "Hide");
-      await clickText(win, "Validate reference set");
-      await assertText(win, "Reference set validated. Review and approve it to continue.");
-      await clickText(win, "Approve reference set");
-      await assertText(win, "Reference set approved. Competitor Workflow is now available.");
-      await clickText(win, "Continue to Competitor Workflow");
-      await assertText(win, "Transcript Cleaning");
-      await assertText(win, "eligible chain starts automatically");
+      await clickText(win, "Mở tài liệu hiện có");
+      await assertText(win, "Transcript hiện tại");
+      await clickText(win, "Ẩn");
+      await clickText(win, "Kiểm tra bộ tài liệu");
+      await assertText(win, "Bộ tài liệu đã hợp lệ. Hãy duyệt để tiếp tục.");
+      await clickText(win, "Duyệt bộ tài liệu");
+      await assertText(win, "Đã duyệt bộ tài liệu. Có thể tiếp tục phân tích tham khảo.");
+      await clickText(win, "Tiếp tục phân tích tham khảo");
+      await assertText(win, "Làm sạch transcript");
+      await assertText(win, "Các bước phân tích");
     } else if (mode === "reference-restart") {
       await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
-      await assertText(win, "Project command center");
-      await clickText(win, "Reference Intake");
-      await assertText(win, "approved");
-      await clickText(win, "Versions");
+      await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
+      await navigateToRoute(win, "project-overview");
+      await clickText(win, "Mở tài liệu tham khảo");
+      await assertText(win, "Đã duyệt");
+      await clickText(win, "Phiên bản");
       await assertText(win, "v2");
     } else if (mode === "reference-invalidation") {
       await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
-      await assertText(win, "Project command center");
-      await clickText(win, "Reference Intake");
-      await clickText(win, "Edit");
+      await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
+      await navigateToRoute(win, "project-overview");
+      await clickText(win, "Mở tài liệu tham khảo");
+      await clickText(win, "Sửa");
       await setInputValue(win, "#idea-competitor-script", "Approved reference edited to verify trusted downstream stale invalidation.");
-      await clickText(win, "Save reference edits");
-      await assertText(win, "Reference edited. Validate the reference set again.");
-      await assertText(win, "stale");
+      await clickText(win, "Lưu chỉnh sửa tài liệu");
+      await assertText(win, "Đã chỉnh sửa tài liệu. Hãy kiểm tra lại bộ tài liệu.");
+      await assertText(win, "Cần cập nhật");
     } else if (mode === "semi-automatic-resume") {
       await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
-      await assertText(win, "Project command center");
-      await assertText(win, "Retry automatic workflow");
+      await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
+      await navigateToRoute(win, "project-overview");
+      await assertText(win, "Thử lại quy trình tự động");
     } else if (mode === "vox-simple-flow") {
       const evidence = await runVoxSimpleFlowVerification(win, topic);
       writeUiVerificationReport(reportPath, { ok: true, mode, workspaceRoot, databasePath, ...evidence });
@@ -958,35 +975,36 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
       await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
-      await assertText(win, "Project command center");
+      await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
       await navigateToRoute(win, "idea-lab");
-      await assertText(win, "Idea Lab");
+      await assertText(win, "Phòng ý tưởng");
       await navigateToRoute(win, "script");
-      await assertText(win, "Narration editor");
+      await assertText(win, "Biên tập lời dẫn");
       await navigateToRoute(win, "settings");
       await assertText(win, workspaceRoot);
-      await assertText(win, "Security");
-      await assertText(win, "Generation");
+      await assertText(win, "Bảo mật");
+      await assertText(win, "Sản xuất");
     } else {
       await assertText(win, "Long/Short Factory");
       await navigateToRoute(win, "dashboard");
-      await clickText(win, "Create Video Project");
-      await assertText(win, "Create Video Project");
-      await assertText(win, "VOX Documentary");
+      await clickText(win, "Tạo dự án video");
+      await assertText(win, "Tạo dự án video");
       await setInputValue(win, "#simple-topic", topic);
-      await clickText(win, "Create Video Project");
-      await assertOneOfText(win, ["Preparing your video", "Project command center"]);
+      await clickText(win, "Tiếp tục: định dạng");
+      await clickText(win, "Tiếp tục: xác nhận");
+      await clickText(win, "Tạo dự án");
+      await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
       await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
-      await assertOneOfText(win, ["Preparing your video", "Project command center"]);
+      await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
       await navigateToRoute(win, "scenes");
-      await assertOneOfText(win, ["Scenes are not ready yet", "Scene Plan"]);
+      await assertOneOfText(win, ["Cảnh", "Scene Plan"]);
       await navigateToRoute(win, "final-preview");
-      await assertText(win, "No reviewable preview yet");
+      await assertText(win, "Chưa có bản xem trước để duyệt");
       await navigateToRoute(win, "settings");
-      await assertText(win, "Generation");
-      await assertText(win, "Diagnostics");
+      await assertText(win, "Sản xuất");
+      await assertText(win, "Chẩn đoán");
     }
     writeUiVerificationReport(reportPath, { ok: true, mode, workspaceRoot, databasePath });
     app.quit();
@@ -1034,20 +1052,22 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
     selectedVoice = existingProject.setup.voiceId ?? "";
     phases.createScreen = "resumed";
   } else {
-    await clickText(win, "Create");
-    await assertText(win, "Create Video Project");
+    await navigateToRoute(win, "dashboard");
+      await clickText(win, "Tạo dự án video");
+    await assertText(win, "Tạo dự án video");
     phases.createScreen = "reached";
     await setInputValue(win, "#simple-topic", topic);
     await setSelectValue(win, "#simple-language", "Vietnamese");
     await setSelectValue(win, "#simple-duration", "45-60 seconds");
     await setSelectValue(win, "#simple-aspect-ratio", "16:9");
+    await clickText(win, "Tuỳ chọn nâng cao");
     await setSelectValue(win, "#simple-resolution", "1080p");
     selectedVoice = await selectFirstAvailableOption(win, "#simple-voice") ?? "";
     if (!selectedVoice) throw new Error("The simplified Create screen did not expose an available voice.");
-    const selectedStyle = await readSelectValue(win, "#simple-visual-style");
-    if (selectedStyle !== "vox-documentary") throw new Error(`Unexpected visual style: ${selectedStyle}`);
-    await clickText(win, "Create Video Project");
-    await assertText(win, "Preparing your video");
+    await clickText(win, "Tiếp tục: định dạng");
+    await clickText(win, "Tiếp tục: xác nhận");
+    await clickText(win, "Tạo dự án");
+    await assertOneOfText(win, ["Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"]);
     summary = await waitForPersistedProject(topic);
   }
   const persisted = projectRepository.loadProject(summary.id);
@@ -1084,25 +1104,26 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
   const resumeFromPreview = resumeProject && process.env.LSF_UI_RESUME_FROM_PREVIEW === "1" && (persistedPreviewStatus === "approved" || persistedPreviewStatus === "needs_review");
   let resumedPreviewCompleted = false;
   if (resumeFromPreview) {
-    await clickText(win, "Final Preview");
-    await waitForText(win, "Final Preview", 30_000);
+    await navigateToRoute(win, "final-preview");
+    await waitForText(win, "Bản xem trước", 30_000);
     if (persistedPreviewStatus === "approved") {
-      await waitForEnabledControl(win, "Render Again", 30_000);
-      await clickText(win, "Render Again");
-      await waitForText(win, "Preview rendered again; approval is still required.", 900_000);
+      await waitForEnabledControl(win, "Dựng lại", 30_000);
+      await clickText(win, "Dựng lại");
+      await waitForText(win, "Đã dựng lại bản xem trước; bạn vẫn cần duyệt.", 900_000);
       await waitForProjectStageStatus(summary.id, "preview-render", ["needs_review"], 900_000);
     }
     phases.sceneReview = "persisted_approved";
     phases.voiceGeneration = persisted.stages.find((stage) => stage.id === "voice-generation")?.status === "approved" ? "approved" : "not_approved";
     phases.subtitles = persisted.stages.find((stage) => stage.id === "subtitle-preparation")?.status === "approved" ? "approved" : "not_approved";
     phases.finalPreview = "real_preview_visible";
-    await waitForEnabledControl(win, "Approve Final Video", 30_000);
-    await clickText(win, "Approve Final Video");
+    await waitForEnabledControl(win, "Duyệt video", 30_000);
+    await clickText(win, "Duyệt video");
     await waitForProjectStageStatus(summary.id, "packaging-export", ["approved"], 900_000);
     phases.previewApproval = "approved";
     phases.packagingExport = "approved";
-    await clickText(win, "Export");
-    await waitForText(win, "Final MP4", 30_000);
+    await navigateToRoute(win, "export");
+    await waitForText(win, "Xuất video", 30_000);
+    await waitForText(win, "MP4 cuối", 30_000);
     phases.export = "verified";
     resumedPreviewCompleted = true;
   }
@@ -1112,34 +1133,40 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
       await navigateToRoute(win, "projects");
     await assertText(win, topic);
     await clickProjectOpen(win, topic);
+    const ideaCheckpointLabels = ["Idea candidates", "Các ứng viên ý tưởng", "Idea Lab", "Phòng ý tưởng", "Open next step", "Mở bước tiếp theo", "Retry automatic workflow", "Thử lại quy trình", "needs attention", "Cần xử lý"];
     let checkpointText = await waitForOneOfPageText(
       win,
       requireFullFlow
-        ? ["Idea candidates", "Idea Lab", "Open next step", "Retry automatic workflow", "needs attention"]
-        : ["Idea candidates", "Project command center", "Retry automatic workflow", "Preparing your video"],
+        ? ideaCheckpointLabels
+        : [...ideaCheckpointLabels, "Biến một ý tưởng thành câu chuyện có thể dựng", "Nội dung"],
       requireFullFlow ? 900_000 : 20_000
     );
-    if (checkpointText.includes("Open next step")) {
-      await clickText(win, "Open next step");
-      checkpointText = await waitForOneOfPageText(win, ["Idea candidates", "Idea Lab", "Retry automatic workflow", "needs attention"], requireFullFlow ? 900_000 : 20_000);
+    if (checkpointText.includes("Open next step") || checkpointText.includes("Mở bước tiếp theo")) {
+      const nextStepLabel = checkpointText.includes("Mở bước tiếp theo") ? "Mở bước tiếp theo" : "Open next step";
+      await clickText(win, nextStepLabel);
+      checkpointText = await waitForOneOfPageText(win, ideaCheckpointLabels, requireFullFlow ? 900_000 : 20_000);
     }
     if (resumeProject && persisted.approvedIdeaId) {
-      if (checkpointText.includes("Retry automatic workflow")) {
-        await waitForEnabledControl(win, "Retry automatic workflow", 30_000);
-        await clickText(win, "Retry automatic workflow");
+      if (checkpointText.includes("Retry automatic workflow") || checkpointText.includes("Thử lại quy trình")) {
+        const retryLabel = checkpointText.includes("Thử lại quy trình") ? "Thử lại quy trình" : "Retry automatic workflow";
+        await waitForEnabledControl(win, retryLabel, 30_000);
+        await clickText(win, retryLabel);
         await waitForProjectStageStatus(summary.id, "asset-review", ["needs_review"], 900_000);
       }
       phases.ideaSelection = "approved";
-    } else if (checkpointText.includes("Idea candidates")) {
+    } else if (checkpointText.includes("Idea candidates") || checkpointText.includes("Các ứng viên ý tưởng")) {
       phases.ideaSelection = "reached";
-      if (checkpointText.includes("Approve this idea") || checkpointText.includes("Choose Idea")) {
-        await clickText(win, checkpointText.includes("Choose Idea") ? "Choose Idea" : "Approve this idea");
+      if (checkpointText.includes("Chọn ý tưởng") || checkpointText.includes("Approve this idea") || checkpointText.includes("Choose Idea")) {
+        const approveIdeaLabel = checkpointText.includes("Chọn ý tưởng") ? "Chọn ý tưởng" : checkpointText.includes("Choose Idea") ? "Choose Idea" : "Approve this idea";
+        await clickText(win, approveIdeaLabel);
         phases.ideaSelection = "approved";
-      } else if (checkpointText.includes("Generate ideas")) {
-        await clickText(win, "Generate ideas");
-        const generatedText = await waitForOneOfPageText(win, ["Approve this idea", "Choose Idea", "Idea generation failed", "needs attention"], 900_000);
-        if (generatedText.includes("Approve this idea") || generatedText.includes("Choose Idea")) {
-          await clickText(win, generatedText.includes("Choose Idea") ? "Choose Idea" : "Approve this idea");
+      } else if (checkpointText.includes("Tạo ý tưởng") || checkpointText.includes("Generate ideas")) {
+        const generateIdeasLabel = checkpointText.includes("Tạo ý tưởng") ? "Tạo ý tưởng" : "Generate ideas";
+        await clickText(win, generateIdeasLabel);
+        const generatedText = await waitForOneOfPageText(win, ["Chọn ý tưởng", "Approve this idea", "Choose Idea", "Phòng ý tưởng thất bại", "Idea generation failed", "Cần xử lý", "needs attention"], 900_000);
+        if (generatedText.includes("Chọn ý tưởng") || generatedText.includes("Approve this idea") || generatedText.includes("Choose Idea")) {
+          const approveGeneratedLabel = generatedText.includes("Chọn ý tưởng") ? "Chọn ý tưởng" : generatedText.includes("Choose Idea") ? "Choose Idea" : "Approve this idea";
+          await clickText(win, approveGeneratedLabel);
           phases.ideaSelection = "approved";
         } else {
           runtimeNotes.push(`Idea checkpoint was reached but generation did not produce a selectable candidate: ${generatedText.slice(0, 300)}`);
@@ -1160,7 +1187,7 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
       const retryScene = prepared.scenes[0]!;
       const acquisitionRunsBefore = workflowRunStore.listRuns(summary.id, "asset-acquisition").length;
 
-      await clickText(win, "Scene Review");
+      await navigateToRoute(win, "scene-review");
       await waitForText(win, "Scene Review", 15_000);
       await waitForEnabledControl(win, "Regenerate Scene", 30_000);
       await clickText(win, "Regenerate Scene");
@@ -1199,11 +1226,11 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
       await waitForProjectStageStatus(summary.id, "asset-review", ["approved"], 60_000);
       phases.sceneReview = `approved:scene-review-checkpoint:${retryScene.id}`;
 
-      await clickText(win, "Voice");
-      await waitForText(win, "Choose voice for this project", 30_000);
+      await navigateToRoute(win, "voice");
+      await waitForText(win, "Giọng đọc", 30_000);
       const selectedProjectVoice = await selectFirstAvailableOption(win, "#project-voice");
       if (!selectedProjectVoice) throw new Error("Voice screen did not expose a matching project voice.");
-      await clickText(win, "Generate voice");
+      await clickText(win, "Tạo giọng đọc");
       const approvedVoice = await waitForProjectStageStatus(summary.id, "voice-generation", ["approved"], 900_000);
       phases.voiceGeneration = approvedVoice.stages.find((stage) => stage.id === "voice-generation")?.status === "approved" ? "approved" : "not_approved";
       const mediaProject = await waitForProjectStageStatus(summary.id, "preview-render", ["needs_review"], 900_000);
@@ -1212,17 +1239,19 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
         throw new Error(`Automatic media generation did not approve Voice and Subtitles (${phases.voiceGeneration}, ${phases.subtitles}).`);
       }
 
-      await waitForText(win, "Final Preview", 900_000);
-      await waitForText(win, "Approve Final Video", 900_000);
+      await navigateToRoute(win, "final-preview");
+      await waitForText(win, "Bản xem trước", 900_000);
+      await waitForText(win, "Duyệt video", 900_000);
       const previewText = await pageText(win);
-      phases.finalPreview = previewText.includes("No reviewable preview yet") ? "screen_reached_empty" : "real_preview_visible";
+      phases.finalPreview = previewText.includes("Chưa có bản xem trước để duyệt") ? "screen_reached_empty" : "real_preview_visible";
       if (requireFullFlow && phases.finalPreview !== "real_preview_visible") throw new Error("Final Preview did not contain a real reviewable video.");
-      await clickText(win, "Approve Final Video");
+      await clickText(win, "Duyệt video");
       await waitForProjectStageStatus(summary.id, "packaging-export", ["approved"], 900_000);
       phases.previewApproval = "approved";
       phases.packagingExport = "approved";
-      await clickText(win, "Export");
-      await waitForText(win, "Final MP4", 30_000);
+      await navigateToRoute(win, "export");
+      await waitForText(win, "Xuất video", 30_000);
+      await waitForText(win, "MP4 cuối", 30_000);
       phases.export = "verified";
     }
   } catch (error) {
@@ -1233,16 +1262,20 @@ async function runVoxSimpleFlowVerification(win: BrowserWindow, topic: string): 
   }
 
   if (phases.export !== "verified") {
-    for (const route of ["Scene Review", "Final Preview", "Export"] as const) {
+    for (const route of [
+      { id: "scene-review", expected: "Scene Review" },
+      { id: "final-preview", expected: "Bản xem trước" },
+      { id: "export", expected: "Xuất video" }
+    ] as const) {
       try {
-        await clickText(win, route);
-        await assertText(win, route);
+        await navigateToRoute(win, route.id);
+        await assertText(win, route.expected);
         const routeText = await pageText(win);
-        if (route === "Scene Review") phases.sceneReview = routeText.includes("Scenes are not ready yet") ? "screen_reached_empty" : "reviewable_assets_visible";
-        if (route === "Final Preview") phases.finalPreview = routeText.includes("No reviewable preview yet") ? "screen_reached_empty" : "reviewable_preview_visible";
-        if (route === "Export") phases.export = "screen_reached";
+        if (route.id === "scene-review") phases.sceneReview = routeText.includes("Cảnh chưa sẵn sàng") ? "screen_reached_empty" : "reviewable_assets_visible";
+        if (route.id === "final-preview") phases.finalPreview = routeText.includes("Chưa có bản xem trước để duyệt") ? "screen_reached_empty" : "reviewable_preview_visible";
+        if (route.id === "export") phases.export = "screen_reached";
       } catch (error) {
-        runtimeNotes.push(`${route} screen unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        runtimeNotes.push(`${route.id} screen unavailable: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
@@ -1873,7 +1906,7 @@ async function clickProjectOpen(win: BrowserWindow, topic: string): Promise<void
       const rows = Array.from(document.querySelectorAll("tr"));
       const textOf = (item) => [item.innerText, item.textContent].filter(Boolean).join(" ").replace(/\\s+/g, " ").trim();
       const row = rows.find((item) => textOf(item).includes(${JSON.stringify(topic)}));
-      const button = row && Array.from(row.querySelectorAll("button")).find((item) => textOf(item).includes("Open"));
+      const button = row && Array.from(row.querySelectorAll("button")).find((item) => textOf(item).includes("Open") || textOf(item).includes("Mở"));
       if (!button || button.disabled) return false;
       button.click();
       return true;
@@ -1950,16 +1983,6 @@ async function selectFirstAvailableOption(win: BrowserWindow, selector: string):
     await delay(250);
   }
   return "";
-}
-
-async function readSelectValue(win: BrowserWindow, selector: string): Promise<string> {
-  return await win.webContents.executeJavaScript(
-    `(() => {
-      const select = document.querySelector(${JSON.stringify(selector)});
-      return select instanceof HTMLSelectElement ? select.value : "";
-    })()`,
-    true
-  ) as string;
 }
 
 function delay(ms: number): Promise<void> {
@@ -2292,6 +2315,17 @@ ipcMain.handle("approve-character-version", (_event, input: unknown) => {
       ? { ...candidate, status: "approved" as const, references: candidate.references.map((reference) => ({ ...reference, status: "approved" as const })), updatedAt: now }
       : candidate)
   };
+  projectRepository.saveChannelProfile(nextProfile);
+  return channelProfileResponseSchema.parse(nextProfile);
+});
+
+ipcMain.handle("set-active-character-version", (_event, input: unknown) => {
+  const request = characterVersionRequestSchema.parse(input);
+  const profile = projectRepository.loadChannelProfile(request.profileId);
+  const version = profile?.characterVersions?.find((candidate) => candidate.id === request.versionId);
+  if (!profile || !version) throw new Error("Character version was not found.");
+  if (!characterVersionIsApproved(version)) throw new Error("Only an approved character version can be selected as active.");
+  const nextProfile: ChannelProfile = { ...profile, activeCharacterVersionId: version.id };
   projectRepository.saveChannelProfile(nextProfile);
   return channelProfileResponseSchema.parse(nextProfile);
 });

@@ -1,125 +1,76 @@
-import { Plus } from "lucide-react";
-import type { BootstrapData, ProjectSummary, ProviderPresence } from "../../types";
-import { DataTable, DisabledAction, EmptyState, MetricCard, PageHeader, SectionCard, StatusBadge } from "../../components/ui";
-import { formatDate, queueCounts } from "../../utils";
+import { ArrowRight, Plus } from "lucide-react";
+import type { BootstrapData, ProjectSummary } from "../../types";
+import { EmptyState, PageHeader, SectionCard, StatusBadge } from "../../components/ui";
+import { formatDate } from "../../utils";
+import { creatorNextAction, creatorPhaseDefinitions } from "../../creatorStudioCopy";
 import type { RouteId } from "../../navigation";
 
 export function Dashboard(props: {
   bootstrap: BootstrapData;
-  providerPresence: ProviderPresence;
   setRoute: (route: RouteId) => void;
   onOpenProject: (projectId: string) => Promise<void>;
 }) {
-  const counts = queueCounts(props.bootstrap.queue);
-  const activeProjects = props.bootstrap.projects.length;
   return (
     <>
       <PageHeader
-        eyebrow="Local production workspace"
-        title="Long/Short Factory"
-        description="Local AI-assisted YouTube production workspace."
+        eyebrow="Home · Creator studio"
+        title="Một ý tưởng. Một quy trình hoàn chỉnh."
+        description="Đi từ brief đến một video YouTube có thể phát — với bạn là người duyệt những quyết định quan trọng."
         actions={
           <>
             <button className="button primary" type="button" onClick={() => props.setRoute("create")}>
-              <Plus size={16} /> Create Video Project
+              <Plus size={16} /> Tạo dự án video
             </button>
-            <button className="button secondary" type="button" onClick={() => props.setRoute("projects")}>Open Project</button>
-            <DisabledAction reason="Project ZIP import is not implemented.">Import Project</DisabledAction>
+            <button className="button secondary" type="button" onClick={() => props.setRoute("projects")}>Mở dự án</button>
           </>
         }
       />
-      <section className="metric-grid">
-        <MetricCard label="Total projects" value={props.bootstrap.projects.length} detail="SQLite-backed" tone="success" />
-        <MetricCard label="Active projects" value={activeProjects} detail="No archived state yet" />
-        <MetricCard label="Queued jobs" value={counts.queued ?? 0} detail="Queue is JSON-backed" />
-        <MetricCard label="Failed jobs" value={counts.failed ?? 0} />
-        <MetricCard label="Assets generated" value="Not available" detail="Asset persistence is not wired" tone="warning" />
-        <MetricCard label="Provider status" value={props.providerPresence.hasCredential ? "Credential saved" : "Not configured"} tone={props.providerPresence.hasCredential ? "success" : "warning"} />
+      <section className="home-hero">
+        <div className="home-hero-copy">
+          <span className="eyebrow">Manual-first production</span>
+          <h2>Ảnh được tạo ở GG Lab. Câu chuyện, nhịp dựng và MP4 được hoàn thiện ở đây.</h2>
+          <p>Không cần cấu hình image provider để bắt đầu. Chỉ chuyển sang bước tiếp theo khi quyết định hiện tại đã đủ chắc.</p>
+        </div>
+        <div className="home-hero-steps" aria-label="Năm bước sản xuất">
+          <span><b>01</b>Brief</span><span><b>02</b>Story</span><span><b>03</b>Director</span><span><b>04</b>Assets</span><span><b>05</b>Build</span>
+        </div>
       </section>
       <RecentProjects projects={props.bootstrap.projects} onOpenProject={props.onOpenProject} />
-      <SystemStatus bootstrap={props.bootstrap} providerPresence={props.providerPresence} />
     </>
   );
 }
 
 function RecentProjects(props: { projects: ProjectSummary[]; onOpenProject: (projectId: string) => Promise<void> }) {
   return (
-    <SectionCard title="Recent projects" description="Persisted projects available from SQLite.">
+    <SectionCard title="Dự án gần đây" description="Mở lại nơi bạn đã dừng và tiếp tục đúng bước cần làm.">
       {props.projects.length === 0 ? (
-        <EmptyState title="No projects yet" detail="Create a demo project to verify persistence and browse workflow screens." />
+        <EmptyState title="Chưa có dự án" detail="Tạo dự án đầu tiên để bắt đầu với brief và kịch bản." />
       ) : (
-        <DataTable label="Recent projects">
-          <thead>
-            <tr>
-              <th>Project name</th>
-              <th>Channel profile</th>
-              <th>Format</th>
-              <th>Language</th>
-              <th>Target duration</th>
-              <th>Current stage</th>
-              <th>Last modified</th>
-              <th>Progress</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.projects.map((project) => (
-              <tr key={project.id}>
-                <td>{project.projectName || project.topic}</td>
-                <td>{project.profileId}</td>
-                <td>{project.format === "long" ? "YouTube Long" : "YouTube Short"}</td>
-                <td>{project.targetLanguage}</td>
-                <td>{project.targetDuration}</td>
-                <td>Not loaded</td>
-                <td>{formatDate(project.updatedAt)}</td>
-                <td>Open to calculate</td>
-                <td><StatusBadge tone="success">Persisted</StatusBadge></td>
-                <td className="row-actions">
-                  <button className="button compact" type="button" onClick={() => void props.onOpenProject(project.id)}>Open</button>
-                  <DisabledAction reason="Duplicate is not implemented.">Duplicate</DisabledAction>
-                  <DisabledAction reason="Export ZIP is not implemented.">Export</DisabledAction>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </DataTable>
+        <div className="home-project-grid">
+          {props.projects.map((project) => (
+            <article className="home-project-card" key={project.id}>
+              <div className="home-project-card-top"><StatusBadge tone={projectCardTone(project)}>{projectCardPhase(project)}</StatusBadge><small>{formatDate(project.updatedAt)}</small></div>
+              <h3>{project.projectName || project.topic}</h3>
+              <p>{project.targetLanguage} · {project.format === "long" ? "YouTube Long" : "YouTube Short"} · {project.targetDuration}</p>
+              <div className="home-project-next"><span>Việc tiếp theo</span><strong>{creatorNextAction(project.currentStageId, project.currentStageStatus)}</strong></div>
+              <div className="home-project-progress"><span>Tiến độ sản xuất</span><strong>{project.progressPercent ?? 0}%</strong></div>
+              <button className="button secondary" type="button" onClick={() => void props.onOpenProject(project.id)}>Mở dự án <ArrowRight size={15} /></button>
+            </article>
+          ))}
+        </div>
       )}
     </SectionCard>
   );
 }
 
-function SystemStatus(props: { bootstrap: BootstrapData; providerPresence: ProviderPresence }) {
-  const sqliteUnavailable = /unavailable/i.test(props.bootstrap.databasePath);
-  const runtime = props.bootstrap.runtime;
-  const items = [
-    ["SQLite", sqliteUnavailable ? "Unavailable" : "Ready", props.bootstrap.databasePath],
-    ["9Router", props.providerPresence.hasCredential ? "Credential saved" : "Not configured", "Provider execution is deferred"],
-    ["FFmpeg", runtime.ffmpegAvailable ? "Ready" : "Needs setup", runtime.ffmpegAvailable ? runtime.ffmpegStatus : "Set FFMPEG_PATH or add ffmpeg to PATH"],
-    [
-      "Python sidecar",
-      runtime.pythonExists && runtime.pycapcutStatus === "Installed" ? "Ready" : "Needs setup",
-      `${runtime.pythonVersion}; pycapcut ${runtime.pycapcutStatus}`
-    ],
-    [
-      "CapCut",
-      runtime.capcutInstalled ? "Experimental" : "Unavailable",
-      runtime.capcutInstalled ? `${runtime.capcutInstallPath}; ${runtime.capcutCompatibility}` : "CapCut install path was not found"
-    ],
-    ["Workspace path", "Ready", props.bootstrap.workspaceRoot],
-    ["CodeGraph development index", "Experimental", "Development-only index"]
-  ];
-  return (
-    <SectionCard title="System status">
-      <div className="status-grid">
-        {items.map(([name, status, detail]) => (
-          <div className="status-row" key={name}>
-            <span>{name}</span>
-            <StatusBadge tone={status === "Ready" ? "success" : status === "Experimental" ? "info" : "warning"}>{status}</StatusBadge>
-            <small>{detail}</small>
-          </div>
-        ))}
-      </div>
-    </SectionCard>
-  );
+function projectCardPhase(project: ProjectSummary): string {
+  if (!project.currentStageId) return "Hoàn tất";
+  return creatorPhaseDefinitions.find((phase) => phase.stageIds.some((stageId) => stageId === project.currentStageId))?.label ?? "Brief";
+}
+
+function projectCardTone(project: ProjectSummary): "default" | "success" | "warning" | "danger" | "info" {
+  if (!project.currentStageId) return "success";
+  if (project.currentStageStatus === "failed" || project.currentStageStatus === "rejected") return "danger";
+  if (project.currentStageStatus === "needs_attention" || project.currentStageStatus === "blocked" || project.currentStageStatus === "stale") return "warning";
+  return "info";
 }

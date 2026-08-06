@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advancedRoutes, allRoutes, projectRoutes, routeLabel, workspaceRoutes } from "./navigation";
+import { advancedRoutes, allRoutes, creatorWorkspaceRoutes, projectRoutes, routeLabel, workspaceRoutes } from "./navigation";
 
 describe("renderer navigation model", () => {
   it("exposes required workspace screens", () => {
@@ -24,5 +24,14 @@ describe("renderer navigation model", () => {
     for (const route of allRoutes) {
       expect(routeLabel(route.id)).toBe(route.label);
     }
+  });
+
+  it("keeps the simplified create route addressable by hash navigation", () => {
+    expect(allRoutes.map((route) => route.id)).toContain("create");
+  });
+
+  it("exposes the compact creator journey and legacy review hash", () => {
+    expect(creatorWorkspaceRoutes.map((route) => route.id)).toEqual(["content", "director", "assets", "build"]);
+    expect(allRoutes.map((route) => route.id)).toContain("scene-review");
   });
 });

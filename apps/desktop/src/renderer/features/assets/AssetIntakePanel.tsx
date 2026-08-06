@@ -116,7 +116,7 @@ export function AssetIntakePanel(props: AssetIntakePanelProps) {
         })}
       </div>
       {reusableShots.length ? (
-        <section className="reuse-intake" aria-label="Reusable storyboard frames">
+        <section className="reuse-intake" aria-label="Storyboard frame tái sử dụng">
           <div className="section-card-header">
             <h3>Frame tái sử dụng</h3>
             <p>Chọn một ảnh đã duyệt để dùng lại; không cần tạo thêm ảnh mới.</p>
@@ -190,5 +190,5 @@ function AssetPreviewImage(props: { projectId: string; artifactId: string; asset
     void factoryClient.getAssetPreviewUrl(props).then((result) => { if (active) setUrl(result.url); }).catch(() => undefined);
     return () => { active = false; };
   }, [props.projectId, props.artifactId, props.assetSha256]);
-  return url ? <img className="asset-slot-preview" src={url} alt="Storyboard frame preview" /> : <div className="asset-slot-preview asset-slot-placeholder">Preview</div>;
+  return url ? <img className="asset-slot-preview" src={url} alt="Ảnh xem trước storyboard frame" /> : <div className="asset-slot-preview asset-slot-placeholder">Xem trước</div>;
 }

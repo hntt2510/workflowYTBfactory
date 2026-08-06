@@ -3,7 +3,7 @@ import { resolveProductionStatus, resolveStageEligibilities, resolveWorkflowProg
 import { PageHeader, MetricCard, SectionCard, SettingsList, StatusBadge } from "../../components/ui";
 import type { ImageModelCertificationResponse, LocalTtsSettings, TextModelCertificationResponse } from "../../types";
 import { automaticChainForStage, characterVersionNeedsSetup, nextSemiAutomaticChain, type SemiAutomaticChain, type SemiAutomaticProgress } from "../../semiAutomaticWorkflow";
-import { creatorPhaseStateLabel, creatorStatusLabel, workflowModeOptions } from "../../creatorStudioCopy";
+import { creatorBlockingMessage, creatorOverviewCopy, creatorPhaseLabel, creatorPhaseStateLabel, creatorStageLabel, creatorStatusLabel, workflowModeOptions } from "../../creatorStudioCopy";
 import { stageTone } from "../../utils";
 import type { RouteId } from "../../navigation";
 
@@ -35,7 +35,7 @@ export function ProjectOverview(props: {
     const presentation = presentationById.get(stage.stageId);
     return presentation?.state !== "not_applicable" && presentation?.state !== "optional";
   });
-  const nextStageName = nextStage ? workflowStageDefinitions.find((stage) => stage.id === nextStage.stageId)?.name ?? nextStage.stageId : undefined;
+  const nextStageName = nextStage ? creatorStageLabel(nextStage.stageId) : undefined;
   const nextChain = nextSemiAutomaticChain(project, props.selectedProfile);
   const isRunning = props.semiAutomaticRunning || project.stages.some((stage) => stage.status === "queued" || stage.status === "running");
   const actionStage = attention ?? checkpoint;
@@ -43,23 +43,33 @@ export function ProjectOverview(props: {
   const actionRoute = characterNeedsSetup ? "channel-profiles" : actionStage ? stageRoute(actionStage.id) : nextStage ? stageRoute(nextStage.stageId) : "advanced-pipeline";
   const phaseRows = progress.phases.map((phase) => ({
     ...phase,
-    currentStage: phase.currentStageName ?? (phase.state === "not_applicable" ? "Not used" : phase.state === "optional" ? "Optional" : phase.state === "complete" ? "Complete" : "Waiting")
+    label: creatorPhaseLabel(phase.id),
+    currentStage: phase.currentStageId
+      ? creatorStageLabel(phase.currentStageId)
+      : phase.state === "not_applicable"
+        ? creatorOverviewCopy.notUsed
+        : phase.state === "optional"
+          ? creatorOverviewCopy.optional
+          : phase.state === "complete"
+            ? creatorOverviewCopy.complete
+            : creatorOverviewCopy.waiting
   }));
+  const currentPhaseLabel = progress.currentStageId
+    ? phaseRows.find((phase) => phase.currentStageId === progress.currentStageId)?.label
+    : undefined;
   const actionLabel = characterNeedsSetup
-    ? "Set up channel character"
+    ? "Thiết lập nhân vật kênh"
     : retryChain && !isRunning
-      ? attention?.attention?.retryAction && attention.attention.retryAction !== "Retry stage"
-        ? attention.attention.retryAction
-        : "Retry automatic workflow"
+      ? "Thử lại quy trình"
       : attention
-        ? `Open ${attention.name}`
+        ? `Mở ${creatorStageLabel(attention.id)}`
         : checkpoint
-          ? `Review ${checkpoint.name}`
+          ? `Duyệt ${creatorStageLabel(checkpoint.id)}`
           : nextChain && !isRunning
-            ? "Continue production"
+            ? creatorOverviewCopy.continue
             : nextStageName
-              ? `Open ${nextStageName}`
-              : "Production complete";
+              ? `Mở ${nextStageName}`
+              : creatorOverviewCopy.complete;
   const capcut = presentationById.get("capcut-draft");
 
   async function continueProduction(): Promise<void> {
@@ -85,71 +95,71 @@ export function ProjectOverview(props: {
   return (
     <>
       <PageHeader
-        eyebrow="Project command center"
+        eyebrow={creatorOverviewCopy.eyebrow}
         title={project.setup.projectName}
-        description="One place to see progress. The app runs safe stages automatically and opens a review screen only when you choose it."
-        actions={<div className="button-row">{progress.percent === 100 ? <><button className="button secondary" type="button" onClick={() => props.setRoute("final-preview")}>Watch final video</button><button className="button secondary" type="button" onClick={() => props.setRoute("export")}>Open export</button></> : null}<button className="button primary" type="button" disabled={isRunning || (!actionStage && !nextStage && !nextChain)} onClick={() => void continueProduction()}>{isRunning ? "Production is running..." : actionLabel}</button></div>}
+        description={creatorOverviewCopy.description}
+        actions={<div className="button-row">{progress.percent === 100 ? <><button className="button secondary" type="button" onClick={() => props.setRoute("final-preview")}>{creatorOverviewCopy.watchFinal}</button><button className="button secondary" type="button" onClick={() => props.setRoute("export")}>{creatorOverviewCopy.openExport}</button></> : null}<button className="button primary" type="button" disabled={isRunning || (!characterNeedsSetup && !actionStage && !nextStage && !nextChain)} onClick={() => void continueProduction()}>{isRunning ? creatorOverviewCopy.running : actionLabel}</button></div>}
       />
       <section className="metric-grid">
-        <MetricCard label="Status" value={creatorStatusLabel(resolveProductionStatus(project))} />
-        <MetricCard label="Progress" value={`${progress.percent}%`} />
-        <MetricCard label="Language" value={project.setup.language || project.targetLanguage} />
-        <MetricCard label="Current step" value={progress.currentStageName ?? "Complete"} />
+        <MetricCard label={creatorOverviewCopy.status} value={creatorStatusLabel(resolveProductionStatus(project))} />
+        <MetricCard label={creatorOverviewCopy.progress} value={`${progress.percent}%`} />
+        <MetricCard label={creatorOverviewCopy.language} value={project.setup.language || project.targetLanguage} />
+        <MetricCard label={creatorOverviewCopy.currentStep} value={progress.currentStageId ? creatorStageLabel(progress.currentStageId) : creatorOverviewCopy.complete} />
       </section>
       {props.semiAutomaticProgress ? (
-        <SectionCard title={props.semiAutomaticRunning ? "Live progress" : "Last automatic update"} description="The current automatic phase and latest persisted result are shown here.">
+        <SectionCard title={props.semiAutomaticRunning ? "Tiến độ trực tiếp" : "Cập nhật gần nhất"} description="Đây là bước đang chạy và kết quả mới nhất đã được lưu.">
           <p>{props.semiAutomaticProgress.message}</p>
-          <p className="muted">{props.semiAutomaticProgress.completed}/{props.semiAutomaticProgress.total} completed - {props.semiAutomaticProgress.stageId}</p>
+          <p className="muted">{props.semiAutomaticProgress.completed}/{props.semiAutomaticProgress.total} bước - {creatorStageLabel(props.semiAutomaticProgress.stageId)}</p>
         </SectionCard>
       ) : null}
-      {props.semiAutomaticError ? <SectionCard title="Needs attention"><p className="error-message">{props.semiAutomaticError}</p></SectionCard> : null}
-      <SectionCard title="Project command center" description="Progress summary: only applicable required stages count toward progress. Optional outputs are shown separately.">
+      {props.semiAutomaticError ? <SectionCard title={creatorOverviewCopy.actionRequired}><p className="error-message">{props.semiAutomaticError}</p></SectionCard> : null}
+      <SectionCard title={creatorOverviewCopy.projectJourney} description={creatorOverviewCopy.journeyDescription}>
         <div className="route-result">
-          <StatusBadge tone={stageTone(progress.currentStageId ? "current" : "complete")}>{progress.completedCount}/{progress.totalCount} required stages complete</StatusBadge>
-          <strong>{progress.currentStageName ? `Current: ${progress.currentStageName}` : "Project complete"}</strong>
-          <span>{progress.currentPhaseName ? `Current phase: ${progress.currentPhaseName}. ` : ""}{actionLabel}.</span>
+          <StatusBadge tone={stageTone(progress.currentStageId ? "current" : "complete")}>{progress.completedCount}/{progress.totalCount} bước bắt buộc</StatusBadge>
+          <strong>{progress.currentStageId ? `Đang làm: ${creatorStageLabel(progress.currentStageId)}` : creatorOverviewCopy.complete}</strong>
+          <span>{currentPhaseLabel ? `Giai đoạn hiện tại: ${currentPhaseLabel}. ` : ""}{actionLabel}.</span>
         </div>
-        {capcut?.state === "optional" ? <p className="muted">CapCut Draft is optional and does not block Packaging Export.</p> : null}
-        {progress.percent === 100 ? <div className="button-row"><button className="button primary compact" type="button" onClick={() => props.setRoute("final-preview")}>Watch final video</button><button className="button secondary compact" type="button" onClick={() => props.setRoute("export")}>View exported files</button></div> : null}
+        {capcut?.state === "optional" ? <p className="muted">CapCut là tuỳ chọn và không chặn việc xuất MP4.</p> : null}
+        {progress.percent === 100 ? <div className="button-row"><button className="button primary compact" type="button" onClick={() => props.setRoute("final-preview")}>{creatorOverviewCopy.watchFinal}</button><button className="button secondary compact" type="button" onClick={() => props.setRoute("export")}>Xem file đã xuất</button></div> : null}
       </SectionCard>
-      <SectionCard title={attention ? "Action required" : checkpoint ? "Review available" : "Production progress"} description={attention?.attention?.message ?? (checkpoint ? "Open the review only when you are ready. Confirming it returns you here." : "Automatic stages continue until a human decision is required.")}>
+      <SectionCard title={attention ? creatorOverviewCopy.actionRequired : checkpoint ? creatorOverviewCopy.reviewAvailable : creatorOverviewCopy.productionProgress} description={attention ? creatorBlockingMessage(attention.attention?.message ?? "") : checkpoint ? "Mở bước duyệt khi bạn sẵn sàng. Sau khi xác nhận, bạn sẽ quay lại đây." : "Các bước an toàn sẽ tiếp tục cho đến khi cần bạn quyết định."}>
         {attention || checkpoint ? (
           <div className="route-result">
-            <StatusBadge tone={attention ? "danger" : "info"}>{attention ? "Needs attention" : "Needs review"}</StatusBadge>
-            <strong>{attention?.name ?? checkpoint?.name}</strong>
-            <span>{attention?.attention?.message ?? "A review decision is ready."}</span>
+            <StatusBadge tone={attention ? "danger" : "info"}>{attention ? "Cần xử lý" : "Chờ bạn duyệt"}</StatusBadge>
+            <strong>{creatorStageLabel(attention?.id ?? checkpoint?.id ?? "")}</strong>
+            <span>{attention ? creatorBlockingMessage(attention.attention?.message ?? "") : "Nội dung đã sẵn sàng để bạn duyệt."}</span>
           </div>
         ) : isRunning ? (
-          <p className="muted">No action is required right now. Keep this screen open to monitor the project.</p>
+          <p className="muted">Chưa cần thao tác. Bạn có thể ở lại đây để theo dõi dự án.</p>
         ) : (
-          <p className="muted">The next safe step will appear here when it is ready.</p>
+          <p className="muted">Bước an toàn tiếp theo sẽ xuất hiện ở đây khi sẵn sàng.</p>
         )}
       </SectionCard>
-      <SectionCard title="Production phases">
+      <SectionCard title={creatorOverviewCopy.phases}>
         <div className="status-grid">
           {phaseRows.map((phase) => (
             <div className="status-row" key={phase.id}>
-              <span>{phase.name}</span>
+              <span>{phase.label}</span>
               <StatusBadge tone={stageTone(phase.state)}>{creatorPhaseStateLabel(phase.state)}</StatusBadge>
-              <small>{phase.currentStage ?? "Complete"}</small>
+              <small>{phase.currentStage}</small>
             </div>
           ))}
         </div>
       </SectionCard>
-      <SectionCard title="Project details">
+      <SectionCard title={creatorOverviewCopy.details}>
         <SettingsList items={[
-          ["Channel profile", props.selectedProfile?.name ?? project.profileId],
-          ["Target duration", project.setup.targetDuration],
-          ["Workflow mode", workflowModeOptions.find((option) => option.value === project.setup.workflowMode)?.label ?? project.setup.workflowMode],
-          ["Scenes", String(project.scenes.length)],
-          ["Shots", String(project.shots.length)],
-          ["Approved idea", project.approvedIdeaId ?? "Pending"]
+          ["Kênh", props.selectedProfile?.name ?? project.profileId],
+          ["Thời lượng mục tiêu", project.setup.targetDuration],
+          ["Cách sản xuất", workflowModeOptions.find((option) => option.value === project.setup.workflowMode)?.label ?? "Có hướng dẫn"],
+          ["Số cảnh", String(project.scenes.length)],
+          ["Số frame", String(project.shots.length)],
+          ["Ý tưởng đã chọn", project.approvedIdeaId ? "Đã chọn" : "Chưa chọn"]
         ]} />
       </SectionCard>
-      <SectionCard title="Advanced controls" description="Internal stages remain available for debugging, not as the normal production path.">
+      <SectionCard title={creatorOverviewCopy.advanced} description="Các bước nội bộ vẫn có trong phần nâng cao để kiểm tra và khôi phục khi cần.">
         <div className="button-row">
-          <button className="button secondary compact" type="button" onClick={() => props.setRoute("reference-intake")}>Reference Intake</button>
-          <button className="button secondary compact" type="button" onClick={() => props.setRoute("advanced-pipeline")}>Open Advanced Pipeline Details</button>
+          <button className="button secondary compact" type="button" onClick={() => props.setRoute("reference-intake")}>Mở tài liệu tham khảo</button>
+          <button className="button secondary compact" type="button" onClick={() => props.setRoute("advanced-pipeline")}>Mở chi tiết nâng cao</button>
         </div>
       </SectionCard>
     </>
