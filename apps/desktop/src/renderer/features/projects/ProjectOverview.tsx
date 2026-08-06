@@ -1,16 +1,20 @@
+import { useState } from "react";
 import type { ChannelProfile, FactoryProject } from "@lsf/domain";
 import { resolveProductionStatus, resolveStageEligibilities, resolveWorkflowProgress, workflowStageDefinitions } from "@lsf/domain";
 import { PageHeader, MetricCard, SectionCard, SettingsList, StatusBadge } from "../../components/ui";
 import type { ImageModelCertificationResponse, LocalTtsSettings, TextModelCertificationResponse } from "../../types";
 import { automaticChainForStage, characterVersionNeedsSetup, nextSemiAutomaticChain, type SemiAutomaticChain, type SemiAutomaticProgress } from "../../semiAutomaticWorkflow";
 import { creatorBlockingMessage, creatorOverviewCopy, creatorPhaseLabel, creatorPhaseStateLabel, creatorStageLabel, creatorStatusLabel, workflowModeOptions } from "../../creatorStudioCopy";
-import { stageTone } from "../../utils";
+import { safeRendererError, stageTone } from "../../utils";
 import type { RouteId } from "../../navigation";
+import { factoryClient } from "../../services/factoryClient";
 
 export function ProjectOverview(props: {
   selectedProject: FactoryProject;
   selectedProfile: ChannelProfile | undefined;
   setRoute: (route: RouteId) => void;
+  setSelectedProject: (project: FactoryProject | null) => void;
+  onRefresh: () => Promise<void>;
   startSemiAutomatic: (chain: SemiAutomaticChain, project: FactoryProject) => Promise<void>;
   textCertification: TextModelCertificationResponse;
   imageCertification: ImageModelCertificationResponse;
@@ -20,6 +24,7 @@ export function ProjectOverview(props: {
   semiAutomaticError: string | null;
 }) {
   const project = props.selectedProject;
+  const [checkpointError, setCheckpointError] = useState<string | null>(null);
   const characterNeedsSetup = characterVersionNeedsSetup(project, props.selectedProfile);
   const eligibilities = resolveStageEligibilities(project, {
     textVerified: props.textCertification.status === "verified",
@@ -73,6 +78,7 @@ export function ProjectOverview(props: {
   const capcut = presentationById.get("capcut-draft");
 
   async function continueProduction(): Promise<void> {
+    setCheckpointError(null);
     if (characterNeedsSetup) {
       props.setRoute("channel-profiles");
       return;
@@ -82,6 +88,17 @@ export function ProjectOverview(props: {
       return;
     }
     if (actionStage) {
+      if (actionStage.id === "character-preparation") {
+        try {
+          const approved = await factoryClient.approveCharacterPreparation({ projectId: project.id });
+          props.setSelectedProject(approved);
+          await props.onRefresh();
+          props.setRoute(stageRoute(resolveWorkflowProgress(approved).currentStageId ?? "visual-routing"));
+        } catch (error) {
+          setCheckpointError(safeRendererError(error, "Không thể xác nhận bộ nhân vật cho dự án."));
+        }
+        return;
+      }
       props.setRoute(actionRoute);
       return;
     }
@@ -112,7 +129,7 @@ export function ProjectOverview(props: {
           <p className="muted">{props.semiAutomaticProgress.completed}/{props.semiAutomaticProgress.total} bước - {creatorStageLabel(props.semiAutomaticProgress.stageId)}</p>
         </SectionCard>
       ) : null}
-      {props.semiAutomaticError ? <SectionCard title={creatorOverviewCopy.actionRequired}><p className="error-message">{props.semiAutomaticError}</p></SectionCard> : null}
+      {props.semiAutomaticError || checkpointError ? <SectionCard title={creatorOverviewCopy.actionRequired}><p className="error-message">{props.semiAutomaticError ?? checkpointError}</p></SectionCard> : null}
       <SectionCard title={creatorOverviewCopy.projectJourney} description={creatorOverviewCopy.journeyDescription}>
         <div className="route-result">
           <StatusBadge tone={stageTone(progress.currentStageId ? "current" : "complete")}>{progress.completedCount}/{progress.totalCount} bước bắt buộc</StatusBadge>

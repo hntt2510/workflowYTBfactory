@@ -49,6 +49,8 @@ export function ContentWorkspace(props: ProjectWorkspaceProps & { initialTab?: C
             selectedProject={project}
             selectedProfile={props.selectedProfile}
             setRoute={props.setRoute}
+            setSelectedProject={props.setSelectedProject}
+            onRefresh={props.onRefresh}
             startSemiAutomatic={props.startSemiAutomatic}
             textCertification={props.textCertification}
             imageCertification={props.imageCertification}
