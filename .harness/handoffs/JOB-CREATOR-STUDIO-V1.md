@@ -62,6 +62,7 @@
 
 - `112a7837` adds scene-scoped Prompt Studio regeneration, preserves global frame numbers, and keeps unknown upload filenames as manually assignable orphan assets.
 - `41947a05` adds a regression test for preserving global frame numbers during scene regeneration.
+- `6faaf8e4` keeps the quick-create format and default target duration aligned when switching between YouTube Long and Short.
 - Latest verification: `corepack pnpm test:unit` (61 files / 417 tests), `corepack pnpm typecheck`, `corepack pnpm --filter @lsf/desktop build`, fixture verification, creator-studio-final Electron verification, and screenshot capture all pass.
 - Lint passes when generated temporary workspaces are excluded; the exact full lint command remains blocked by the pre-existing unused `projectId` in `.tmp-main-flow-runtime/cdp-call.mjs`.
 - Creator-studio-final runtime evidence: real preview visible, MP4 downloaded, preview approved, and packaging export approved. Fixture output: `fixtures/creator-studio-v1/creator-studio-v1.mp4` (1080x1920 H.264/yuv420p, AAC, approximately 10 seconds).
