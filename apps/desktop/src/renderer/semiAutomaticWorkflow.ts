@@ -69,7 +69,7 @@ export function characterVersionNeedsSetup(project: FactoryProject, profile: Cha
 export function nextSemiAutomaticChain(project: FactoryProject, profile?: ChannelProfile): SemiAutomaticChain | undefined {
   if (project.setup.workflowMode !== "semi_automatic") return undefined;
   if (hasSemiAutomaticAttention(project)) return undefined;
-  if (project.setup.visualWorkflow === "character_first") {
+  if (project.setup.visualWorkflow === "character_first" && statusOf(project, "shot-plan") === "approved") {
     if (statusOf(project, "character-preparation") !== "approved") return undefined;
     if (profile && characterVersionNeedsSetup(project, profile)) return undefined;
   }
