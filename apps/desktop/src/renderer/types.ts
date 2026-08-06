@@ -503,7 +503,7 @@ export interface LongShortFactoryApi {
   rejectVisualRouting: (input: { projectId: string }) => Promise<FactoryProject>;
   runAssetConcepts: (input: { projectId: string }) => Promise<FactoryProject>;
   listAssetConceptsArtifacts: (input: { projectId: string }) => Promise<AssetConceptArtifact[]>;
-  runPromptPreparation: (input: { projectId: string }) => Promise<FactoryProject>;
+  runPromptPreparation: (input: { projectId: string; sceneId?: string }) => Promise<FactoryProject>;
   listPromptPreparationArtifacts: (input: { projectId: string }) => Promise<PromptPreparationArtifact[]>;
   approvePromptPreparation: (input: { projectId: string }) => Promise<FactoryProject>;
   rejectPromptPreparation: (input: { projectId: string }) => Promise<FactoryProject>;

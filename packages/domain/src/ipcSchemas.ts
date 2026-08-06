@@ -829,7 +829,7 @@ const scenePromptPackageSchema = z.object({
   frameManifest: z.array(storyboardFrameSpecSchema).min(1).max(20)
 }).strict();
 export const promptPreparationOutputSchema = z.object({ prompts: z.array(visualPromptSchema).max(500), scenePrompts: z.array(scenePromptPackageSchema).max(200).optional() }).strict();
-export const promptPreparationRequestSchema = z.object({ projectId: idSchema }).strict();
+export const promptPreparationRequestSchema = z.object({ projectId: idSchema, sceneId: idSchema.optional() }).strict();
 export const promptPreparationArtifactResponseSchema = z.object({ id: idSchema, stageRunId: idSchema.optional(), status: workflowArtifactStatusSchema, payloadJson: promptPreparationOutputSchema, createdAt: z.string(), updatedAt: z.string() }).strict();
 export const promptPreparationArtifactsResponseSchema = z.array(promptPreparationArtifactResponseSchema);
 const assetConceptSchema = z.object({

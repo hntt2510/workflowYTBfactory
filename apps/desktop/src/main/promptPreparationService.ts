@@ -10,13 +10,13 @@ interface TextClient { createResponseText(input: { model: string; input: string;
 
 type PromptShot = { id: string; sceneId?: string; purpose?: string; durationFrames?: number; visualMode: string; framing: string; cameraAngle: string; cameraMovement: string; subjectAction: string; continuityRefs: string[]; semanticBeat?: string | undefined; assetConceptIds?: string[] | undefined; motion?: ShotMotionPlan | undefined };
 
-export async function runPromptPreparation(input: { shots: PromptShot[]; aspectRatio: "16:9" | "9:16"; character?: CharacterVersion | undefined; assetConcepts?: AssetConcept[] | undefined; manualMode?: boolean; credentialStore: ProviderCredentialStore; certificationStore: TextCertificationStore; createClient?: (config: { baseUrl: string; apiKey: string }) => TextClient }) {
+export async function runPromptPreparation(input: { shots: PromptShot[]; aspectRatio: "16:9" | "9:16"; character?: CharacterVersion | undefined; assetConcepts?: AssetConcept[] | undefined; manualMode?: boolean; frameNumbersByShot?: ReadonlyMap<string, string>; credentialStore: ProviderCredentialStore; certificationStore: TextCertificationStore; createClient?: (config: { baseUrl: string; apiKey: string }) => TextClient }) {
   const imageShots = input.shots.filter((shot) => ["ai_image", "ai_video", "stock_image", "stock_video", "manual_upload", "uploaded"].includes(shot.visualMode));
   if (input.manualMode) {
     const prompts = imageShots.map((shot) => localPromptForShot(shot, input.aspectRatio, input.character, input.assetConcepts ?? []));
     const output = promptPreparationOutputSchema.parse({
       prompts,
-      scenePrompts: compileScenePromptPackages(input.shots, prompts, input.aspectRatio, input.character, input.assetConcepts ?? [])
+      scenePrompts: compileScenePromptPackages(input.shots, prompts, input.aspectRatio, input.character, input.assetConcepts ?? [], input.frameNumbersByShot)
     });
     return { output };
   }
@@ -53,7 +53,7 @@ export async function runPromptPreparation(input: { shots: PromptShot[]; aspectR
     });
   const output = promptPreparationOutputSchema.parse({
     prompts: finalPrompts,
-    scenePrompts: compileScenePromptPackages(input.shots, finalPrompts, input.aspectRatio, input.character, input.assetConcepts ?? [])
+    scenePrompts: compileScenePromptPackages(input.shots, finalPrompts, input.aspectRatio, input.character, input.assetConcepts ?? [], input.frameNumbersByShot)
   });
   const returnedModelId = responses.find((response) => response.returnedModelId)?.returnedModelId;
   return { output, ...(returnedModelId ? { returnedModelId } : {}) };
@@ -110,18 +110,19 @@ function localPromptForShot(shot: PromptShot, aspectRatio: "16:9" | "9:16", char
   };
 }
 
-function compileScenePromptPackages(shots: PromptShot[], prompts: ReturnType<typeof promptPreparationOutputSchema.parse>["prompts"], aspectRatio: "16:9" | "9:16", character: CharacterVersion | undefined, assetConcepts: AssetConcept[]) {
+function compileScenePromptPackages(shots: PromptShot[], prompts: ReturnType<typeof promptPreparationOutputSchema.parse>["prompts"], aspectRatio: "16:9" | "9:16", character: CharacterVersion | undefined, assetConcepts: AssetConcept[], frameNumbersByShot?: ReadonlyMap<string, string>) {
   const promptByShot = new Map(prompts.map((prompt) => [prompt.shotId, prompt]));
   const groups = new Map<string, PromptShot[]>();
   for (const shot of shots) {
     const sceneId = shot.sceneId ?? shot.id;
     groups.set(sceneId, [...(groups.get(sceneId) ?? []), shot]);
   }
-  let globalNumber = 1;
+  const existingNumbers = new Set(frameNumbersByShot ? [...frameNumbersByShot.values()] : []);
+  let globalNumber = Math.max(0, ...[...existingNumbers].map((value) => Number(value)).filter(Number.isFinite)) + 1;
   return [...groups.entries()].map(([sceneId, sceneShots]) => {
     const frameManifest = sceneShots.map((shot, index) => {
       const prompt = promptByShot.get(shot.id);
-      const displayNumber = String(globalNumber++).padStart(3, "0");
+      const displayNumber = frameNumbersByShot?.get(shot.id) ?? String(globalNumber++).padStart(3, "0");
       const role = /reuse/i.test(shot.visualMode) ? "REUSE" : index === 0 ? "BASE" : /expression|face/i.test(`${shot.purpose} ${shot.subjectAction}`) ? "EXPRESSION_CHANGE" : /pose|gesture|move|point/i.test(`${shot.purpose} ${shot.subjectAction}`) ? "POSE_CHANGE" : /chart|money|diagram|insert|cutaway/i.test(`${shot.purpose} ${shot.subjectAction}`) ? "INSERT" : "ACTION_KEYFRAME";
       const assetStrategy = role === "REUSE" ? "REUSE_EXISTING" : role === "BASE" ? "NEW_BASE" : role === "EXPRESSION_CHANGE" ? "EXPRESSION_VARIATION" : role === "POSE_CHANGE" ? "POSE_VARIATION" : role === "INSERT" ? "INSERT_DETAIL" : /environment|background/i.test(`${shot.purpose} ${shot.subjectAction}`) ? "BACKGROUND_VARIATION" : /diagram|graphic|text card/i.test(`${shot.visualMode} ${shot.purpose}`) ? "GRAPHIC_ASSET" : "REFERENCE_VARIATION";
       const concepts = assetConcepts.filter((concept) => concept.shotId === shot.id);
