@@ -43,7 +43,8 @@ function startElectron(workspaceRoot, reportPath, mode) {
       // Keep isolated tests credential-free unless the caller explicitly opts into the configured OS keychain.
       LSF_DEV_MEMORY_KEYCHAIN: process.env.LSF_UI_USE_CONFIGURED_KEYCHAIN === "1" ? "" : "1",
       LSF_E2E_UI_REPORT_PATH: reportPath,
-      LSF_E2E_UI_MODE: mode
+      LSF_E2E_UI_MODE: mode,
+      ...(mode === "creator-studio-final" ? { LSF_E2E_UI_SAVE_PATH: "downloads/creator-studio-final.mp4" } : {})
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -80,7 +81,7 @@ async function runElectronMode(workspaceRoot, mode) {
   const reportPath = path.join(workspaceRoot, `ui-${mode}.json`);
   const electron = startElectron(workspaceRoot, reportPath, mode);
   const exitCode = await new Promise((resolve) => {
-    const timeoutMs = mode === "vox-simple-flow"
+    const timeoutMs = mode === "vox-simple-flow" || mode === "creator-studio-final"
       ? Number(process.env.LSF_UI_TIMEOUT_MS || 900000)
       : 45000;
     const timeout = setTimeout(() => {

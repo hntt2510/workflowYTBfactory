@@ -786,6 +786,250 @@ function createWindow() {
   return win;
 }
 
+const creatorStudioFinalFixtureTopic = "Creator Studio final flow fixture";
+
+function seedCreatorStudioFinalFixture(): void {
+  if (projectRepository.listProjects().some((project) => project.topic === creatorStudioFinalFixtureTopic)) return;
+
+  const base = createFixtureProject({
+    topic: creatorStudioFinalFixtureTopic,
+    projectName: creatorStudioFinalFixtureTopic,
+    format: "short",
+    targetLanguage: "Vietnamese",
+    workflowMode: "semi_automatic",
+    visualWorkflow: "legacy",
+    aspectRatio: "9:16",
+    profiles: seedChannelProfiles
+  });
+  const projectId = base.id;
+  const fixtureRoot = join(repoRoot, "fixtures", "creator-studio-v1");
+  const previewRelativeFilePath = join("previews", projectId, "creator-studio-final.mp4");
+  const subtitleRelativeFilePath = join("previews", projectId, "creator-studio-final.srt");
+  const assetRelativeFilePath = join("assets", projectId, "001.png");
+  const voiceRelativeFilePath = join("audio", projectId, "voice.wav");
+  const musicRelativeFilePath = join("audio", projectId, "music.wav");
+  const copyFixture = (sourceRelativePath: string, targetRelativePath: string): void => {
+    const targetPath = resolveWorkspaceArtifactPath(targetRelativePath);
+    mkdirSync(dirname(targetPath), { recursive: true });
+    copyFileSync(join(fixtureRoot, sourceRelativePath), targetPath);
+  };
+  copyFixture("creator-studio-v1.mp4", previewRelativeFilePath);
+  copyFixture(join("audio", "subtitles.srt"), subtitleRelativeFilePath);
+  copyFixture(join("frames", "001.png"), assetRelativeFilePath);
+  copyFixture(join("audio", "voice-fixture.wav"), voiceRelativeFilePath);
+  copyFixture(join("audio", "music-fixture.wav"), musicRelativeFilePath);
+
+  const assetPath = resolveWorkspaceArtifactPath(assetRelativeFilePath);
+  const voicePath = resolveWorkspaceArtifactPath(voiceRelativeFilePath);
+  const assetBytes = readFileSync(assetPath);
+  const voiceBytes = readFileSync(voicePath);
+  const assetSha256 = createHash("sha256").update(assetBytes).digest("hex");
+  const voiceSha256 = createHash("sha256").update(voiceBytes).digest("hex");
+  const assetId = `asset-${assetSha256}`;
+  const shotId = "shot-creator-studio-final";
+  const sceneId = "scene-creator-studio-final";
+  const sectionId = "section-creator-studio-final";
+  const promptVersionId = "prompt-creator-studio-final-v1";
+  const asset = {
+    shotId,
+    promptVersionId,
+    relativeFilePath: assetRelativeFilePath,
+    sha256: assetSha256,
+    mimeType: "image/png" as const,
+    byteLength: assetBytes.byteLength,
+    width: 1080,
+    height: 1920
+  };
+  const motion = { effect: "zoom_in" as const, intensity: "subtle" as const, rationale: "Keep the fixture motion readable." };
+  const timeline = {
+    fps: 30,
+    items: [
+      { id: "visual-creator-studio-final", track: "primary_visual" as const, sourceId: assetId, startFrame: 0, durationFrames: 300, fps: 30, motion },
+      { id: "narration-creator-studio-final", track: "narration" as const, sourceId: voiceRelativeFilePath, startFrame: 0, durationFrames: 300, fps: 30 },
+      { id: "music-creator-studio-final", track: "music" as const, sourceId: musicRelativeFilePath, startFrame: 0, durationFrames: 300, fps: 30 },
+      { id: "subtitles-creator-studio-final", track: "subtitles" as const, sourceId: subtitleRelativeFilePath, startFrame: 0, durationFrames: 300, fps: 30 }
+    ]
+  };
+  const narration = "Dòng tiền cho biết tiền đang đi vào và đi ra khỏi một doanh nghiệp như thế nào.";
+  const scriptSections = [{
+    id: sectionId,
+    purpose: "Explain the cash-flow concept",
+    narration,
+    estimatedWords: 16,
+    estimatedSeconds: 10,
+    dramaticFunction: "Clear explanation",
+    linkedClaimIds: [],
+    visualOpportunities: ["Teacher and cash-flow diagram"],
+    proofObjects: [],
+    retentionRisk: "low" as const
+  }];
+  const stageStatuses = base.stages.map((stage) => ({
+    ...stage,
+    status: stage.id === "preview-render" ? "needs_review" as const : ["qa", "capcut-draft", "packaging-export"].includes(stage.id) ? "not_started" as const : "approved" as const
+  }));
+  const project: FactoryProject = {
+    ...base,
+    synthetic: true,
+    setup: {
+      ...base.setup,
+      musicPath: musicRelativeFilePath,
+      visualWorkflow: "legacy"
+    },
+    stages: stageStatuses,
+    scriptSections,
+    scenes: [{
+      id: sceneId,
+      scriptSectionId: sectionId,
+      narration,
+      purpose: "Explain cash flow",
+      startFrame: 0,
+      durationFrames: 300,
+      visualMode: "manual_upload",
+      emotionalState: "clear",
+      requiredAssets: ["teacher", "cash-flow diagram"],
+      continuityRefs: []
+    }],
+    shots: [{
+      id: shotId,
+      sceneId,
+      order: 0,
+      startFrame: 0,
+      durationFrames: 300,
+      fps: 30,
+      purpose: "Explain cash flow",
+      visualMode: "manual_upload",
+      framing: "Teacher half-body on the right; diagram safe zone on the left",
+      cameraAngle: "Eye level",
+      cameraMovement: "Slow zoom in",
+      subjectAction: "Teacher points to the cash-flow diagram",
+      startState: {},
+      endState: {},
+      continuityRefs: [],
+      approvedAssetId: assetId,
+      motion
+    }],
+    timeline
+  };
+  projectRepository.createProject(project);
+
+  const createdAt = new Date().toISOString();
+  const artifactIds = new Map<string, string>();
+  const registerArtifact = (stageId: string, type: string, payloadJson: Record<string, unknown>, status: "approved" | "needs_review", inputArtifactIds: string[] = [], relativeFilePath?: string): string => {
+    const runId = `run-${stageId}-${projectId}`;
+    const artifactId = `artifact-${stageId}-${projectId}`;
+    workflowRunStore.completeRun({
+      id: runId,
+      projectId,
+      stageId,
+      status,
+      runnerId: `creator-studio-fixture-${stageId}`,
+      runnerVersion: "creator-studio-final-v1",
+      inputArtifactIds,
+      inputFingerprint: `${projectId}:${stageId}:creator-studio-final-v1`,
+      outputArtifactIds: [artifactId],
+      startedAt: createdAt,
+      finishedAt: createdAt
+    }, {
+      id: artifactId,
+      projectId,
+      stageId,
+      stageRunId: runId,
+      type,
+      version: 1,
+      status,
+      payloadJson,
+      ...(relativeFilePath ? { relativeFilePath } : {}),
+      createdAt,
+      updatedAt: createdAt
+    });
+    artifactIds.set(stageId, artifactId);
+    return artifactId;
+  };
+
+  const ideaLabArtifactId = registerArtifact("idea-lab", "idea-candidates", { candidates: [] }, "approved");
+  const originalityArtifactId = registerArtifact("originality-review", "originality-review", {}, "approved", [ideaLabArtifactId]);
+  const researchArtifactId = registerArtifact("research-source-intake", "research-sources", {}, "approved", [originalityArtifactId]);
+  const claimMapArtifactId = registerArtifact("claim-map", "claim-map", {}, "approved", [researchArtifactId]);
+  const outlineArtifactId = registerArtifact("outline", "outline", {}, "approved", [claimMapArtifactId]);
+  const scriptArtifactId = registerArtifact("script", "script", { sections: scriptSections.map((section) => ({ ...section, outlineSectionId: "outline-creator-studio-final" })) }, "approved", [outlineArtifactId]);
+  const factReviewArtifactId = registerArtifact("fact-review", "fact-review", {}, "approved", [scriptArtifactId]);
+  const retentionReviewArtifactId = registerArtifact("retention-review", "retention-review", {}, "approved", [factReviewArtifactId]);
+  const scenePlanArtifactId = registerArtifact("scene-plan", "scene-plan", {}, "approved", [retentionReviewArtifactId]);
+  const shotPlanArtifactId = registerArtifact("shot-plan", "shot-plan", {}, "approved", [scenePlanArtifactId]);
+  const characterPreparationArtifactId = registerArtifact("character-preparation", "channel-character.approved", {}, "approved", [shotPlanArtifactId]);
+  const visualRoutingArtifactId = registerArtifact("visual-routing", "visual-routing", {}, "approved", [shotPlanArtifactId]);
+  const assetConceptsArtifactId = registerArtifact("asset-concepts", "asset-concepts", { concepts: [] }, "approved", [visualRoutingArtifactId, characterPreparationArtifactId]);
+  const promptArtifactId = registerArtifact("prompt-preparation", "visual-prompts", { prompts: [{ shotId, promptVersionId, positivePrompt: "Teacher explains cash flow with a diagram on the left.", negativePrompt: "No watermark", aspectRatio: "9:16", continuityConstraints: ["Keep the teacher on the right."], prohibitedElements: ["watermark"] }] }, "approved", [assetConceptsArtifactId]);
+  const acquisitionArtifactId = registerArtifact("asset-acquisition", "asset", { assets: [asset] }, "approved", [promptArtifactId]);
+  const assetReviewArtifactId = registerArtifact("asset-review", "asset.approved", { acquisitionArtifactId, assets: [{ asset, reviewStatus: "approved", assignedShotId: shotId }] }, "approved", [acquisitionArtifactId]);
+  const voiceArtifactId = registerArtifact("voice-generation", "voice-segment", {
+    segments: [{ scriptSectionId: sectionId, relativeFilePath: voiceRelativeFilePath, durationSeconds: 10, codec: "pcm_s16le", byteLength: voiceBytes.byteLength, sha256: voiceSha256, startSeconds: 0, actualProvider: "omnivoice-local", voiceId: "creator-studio-fixture", attemptCount: 1, fallbackUsed: false, timingOverflowSeconds: 0 }],
+    mergedRelativeFilePath: voiceRelativeFilePath
+  }, "approved", [scriptArtifactId, assetReviewArtifactId]);
+  const subtitleArtifactId = registerArtifact("subtitle-preparation", "subtitles", { fps: 30, cues: [{ id: "cue-creator-studio-final", scriptSectionId: sectionId, startFrame: 0, durationFrames: 300, text: narration }] }, "approved", [scriptArtifactId, voiceArtifactId]);
+  const timelineArtifactId = registerArtifact("timeline-assembly", "timeline", timeline, "approved", [voiceArtifactId, assetReviewArtifactId, subtitleArtifactId]);
+  registerArtifact("preview-render", "preview-video", {
+    relativeFilePath: previewRelativeFilePath,
+    subtitleRelativeFilePath,
+    subtitlePreset: "vox-clean",
+    durationSeconds: 10,
+    width: 1080,
+    height: 1920,
+    sha256: createHash("sha256").update(readFileSync(resolveWorkspaceArtifactPath(previewRelativeFilePath))).digest("hex"),
+    inputArtifactIds: [timelineArtifactId, assetReviewArtifactId, voiceArtifactId, subtitleArtifactId]
+  }, "needs_review", [timelineArtifactId, assetReviewArtifactId, voiceArtifactId, subtitleArtifactId], previewRelativeFilePath);
+  if (!artifactIds.has("script") || !artifactIds.has("prompt-preparation") || !artifactIds.has("asset-acquisition")) {
+    throw new Error("Creator Studio final fixture did not seed required packaging inputs.");
+  }
+}
+
+async function runCreatorStudioFinalVerification(win: BrowserWindow, topic: string): Promise<Record<string, unknown>> {
+  const phases: Record<string, string> = {
+    finalPreview: "not_reached",
+    download: "not_reached",
+    previewApproval: "not_reached",
+    packagingExport: "not_reached"
+  };
+  await navigateToRoute(win, "projects");
+  await assertText(win, topic);
+  await clickProjectOpen(win, topic);
+  const summary = await waitForPersistedProject(topic);
+  await navigateToRoute(win, "final-preview");
+  await waitForText(win, "Bản xem trước", 30_000);
+  await waitForEnabledControl(win, "Tải MP4", 30_000);
+  const mediaState = await win.webContents.executeJavaScript("(() => { const video = document.querySelector('video'); return { hasVideo: Boolean(video), src: video?.getAttribute('src') ?? '' }; })()", true) as { hasVideo: boolean; src: string };
+  if (!mediaState.hasVideo || !mediaState.src.startsWith("lsf-media://")) throw new Error("Final Preview did not expose a validated workspace video URL.");
+  phases.finalPreview = "real_preview_visible";
+
+  await clickText(win, "Tải MP4");
+  const downloadPath = resolveWorkspaceArtifactPath(join("downloads", "creator-studio-final.mp4"));
+  const downloadStartedAt = Date.now();
+  while (!existsSync(downloadPath) && Date.now() - downloadStartedAt < 30_000) await delay(250);
+  if (!existsSync(downloadPath) || statSync(downloadPath).size <= 0) throw new Error("Final Preview did not create a playable downloaded MP4.");
+  phases.download = "mp4_downloaded";
+
+  await clickText(win, "Duyệt video");
+  await waitForProjectStageStatus(summary.id, "packaging-export", ["approved"], 120_000);
+  phases.previewApproval = "approved";
+  phases.packagingExport = "approved";
+  const finalProject = projectRepository.loadProject(summary.id);
+  const packagingArtifact = workflowRunStore.listArtifacts(summary.id, "packaging-export").find((artifact) => artifact.status === "approved");
+  const exportedRelativePath = typeof packagingArtifact?.payloadJson?.mp4RelativeFilePath === "string" ? packagingArtifact.payloadJson.mp4RelativeFilePath : undefined;
+  if (!finalProject || !packagingArtifact || !exportedRelativePath) throw new Error("Packaging Export did not produce an approved MP4 artifact.");
+  const exportedPath = resolveWorkspaceArtifactPath(exportedRelativePath);
+  if (!existsSync(exportedPath) || statSync(exportedPath).size <= 0) throw new Error("Packaging Export MP4 is missing or empty.");
+  await navigateToRoute(win, "export");
+  await waitForText(win, "Xuất video", 30_000);
+  await waitForText(win, "MP4 cuối", 30_000);
+  return {
+    phase: "final_flow_verified",
+    projectId: summary.id,
+    phases,
+    download: { relativeFilePath: join("downloads", "creator-studio-final.mp4"), byteLength: statSync(downloadPath).size },
+    export: { relativeFilePath: exportedRelativePath, byteLength: statSync(exportedPath).size }
+  };
+}
+
 app.whenReady().then(async () => {
   mkdirSync(workspaceRoot, { recursive: true });
   registerDevAudioProtocol();
@@ -884,6 +1128,8 @@ app.whenReady().then(async () => {
             : stage)
       });
     }
+  } else if (process.env.LSF_E2E_UI_MODE === "creator-studio-final") {
+    seedCreatorStudioFinalFixture();
   }
   const win = createWindow();
   if (process.env.LSF_E2E_UI_REPORT_PATH) {
@@ -894,7 +1140,7 @@ app.whenReady().then(async () => {
 app.on("before-quit", () => ttsManager?.dispose());
 
 async function runUiVerification(win: BrowserWindow, reportPath: string, mode: string): Promise<void> {
-  const topic = mode === "workflow-contract" || mode === "reference-restart" || mode === "reference-invalidation" ? "Workflow contract verification project" : mode === "semi-automatic-resume" ? "Semi-automatic resume verification project" : "Why did oil matter so much in World War II?";
+  const topic = mode === "workflow-contract" || mode === "reference-restart" || mode === "reference-invalidation" ? "Workflow contract verification project" : mode === "semi-automatic-resume" ? "Semi-automatic resume verification project" : mode === "creator-studio-final" ? "Creator Studio final flow fixture" : "Why did oil matter so much in World War II?";
   try {
     writeUiVerificationReport(reportPath, { ok: false, mode, phase: "started", workspaceRoot, databasePath });
     await waitForRenderer(win);
@@ -968,6 +1214,11 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
       await assertText(win, "Thử lại quy trình tự động");
     } else if (mode === "vox-simple-flow") {
       const evidence = await runVoxSimpleFlowVerification(win, topic);
+      writeUiVerificationReport(reportPath, { ok: true, mode, workspaceRoot, databasePath, ...evidence });
+      app.quit();
+      return;
+    } else if (mode === "creator-studio-final") {
+      const evidence = await runCreatorStudioFinalVerification(win, topic);
       writeUiVerificationReport(reportPath, { ok: true, mode, workspaceRoot, databasePath, ...evidence });
       app.quit();
       return;
@@ -4956,9 +5207,12 @@ ipcMain.handle("download-preview-video", async (_event, input: unknown) => {
   const project = projectRepository.loadProject(projectId);
   if (!project) throw new Error("Project not found.");
   const safeName = `${project.profileId}-${project.topic}-${project.id}`.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || projectId;
-  const selected = await dialog.showSaveDialog({ defaultPath: join(app.getPath("downloads"), `${safeName}.mp4`), filters: [{ name: "MP4 video", extensions: ["mp4"] }] });
+  const selected = process.env.LSF_E2E_UI_SAVE_PATH
+    ? { canceled: false, filePath: resolveWorkspaceArtifactPath(process.env.LSF_E2E_UI_SAVE_PATH) }
+    : await dialog.showSaveDialog({ defaultPath: join(app.getPath("downloads"), `${safeName}.mp4`), filters: [{ name: "MP4 video", extensions: ["mp4"] }] });
   if (selected.canceled || !selected.filePath) return downloadPreviewVideoResponseSchema.parse({ canceled: true });
   const destination = selected.filePath.toLowerCase().endsWith(".mp4") ? selected.filePath : `${selected.filePath}.mp4`;
+  mkdirSync(dirname(destination), { recursive: true });
   copyFileSync(outputPath, destination);
   return downloadPreviewVideoResponseSchema.parse({ canceled: false, fileName: basename(destination), savedPath: destination });
 });
