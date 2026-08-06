@@ -2,5 +2,5 @@
   "schemaVersion": 1,
   "updatedAt": "2026-08-06T13:10:00.000+07:00",
   "activeJobs": ["JOB-CREATOR-STUDIO-V1"],
-  "notes": "JOB-CHARACTER-FIRST-VISUALS-V1 is review_required after builder commit 5fe6666f. JOB-CREATOR-STUDIO-V1 is review_required after builder commits 41947a05, e174e9c1, and 2d1fd526; prior review findings were rechecked against current source and verification evidence is recorded in the builder handoff. Independent reviewer and QA evidence remain pending. Prior review-required VOX jobs and unrelated dirty changes are preserved."
+  "notes": "JOB-CHARACTER-FIRST-VISUALS-V1 is review_required after builder commit 5fe6666f. JOB-CREATOR-STUDIO-V1 is active for a final create-form consistency fix; independent reviewer and QA evidence remain pending. Prior review-required VOX jobs and unrelated dirty changes are preserved."
 }

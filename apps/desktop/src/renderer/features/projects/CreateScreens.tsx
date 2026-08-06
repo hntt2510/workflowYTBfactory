@@ -114,9 +114,9 @@ export function SimpleCreateScreen(props: {
   const [characterVersionId, setCharacterVersionId] = useState(defaultCharacterVersion?.id ?? "");
   const availableLanguages = simpleCreateLanguageOptions(props.profiles, props.localTtsSettings);
   const [language, setLanguage] = useState(availableLanguages.includes("Vietnamese") ? "Vietnamese" : availableLanguages[0] ?? "English");
-  const [duration, setDuration] = useState("45-60 seconds");
-  const [customDuration, setCustomDuration] = useState("");
   const [format, setFormat] = useState<"long" | "short">("long");
+  const [duration, setDuration] = useState(() => defaultTargetDuration("long"));
+  const [customDuration, setCustomDuration] = useState("");
   const [aspectRatio, setAspectRatio] = useState<"16:9" | "9:16" | "1:1">("16:9");
   const [voiceId, setVoiceId] = useState("");
   const [resolution, setResolution] = useState<"1080p" | "720p">("1080p");
@@ -146,6 +146,13 @@ export function SimpleCreateScreen(props: {
   const defaultVoiceKey = voiceOptions[0]?.key ?? "";
   const contentReady = inputMode === "topic" ? topic.trim().length > 0 : inputMode === "existing_script" ? script.trim().length > 0 : referenceTranscript.trim().length > 0;
   const configurationReady = duration !== "Custom" || customDuration.trim().length > 0;
+
+  function chooseFormat(nextFormat: "long" | "short"): void {
+    if (duration === defaultTargetDuration(format)) setDuration(defaultTargetDuration(nextFormat));
+    setFormat(nextFormat);
+    if (nextFormat === "long" && aspectRatio === "9:16") setAspectRatio("16:9");
+    if (nextFormat === "short" && aspectRatio === "16:9") setAspectRatio("9:16");
+  }
 
   useEffect(() => {
     const nextDefault = resolveApprovedCharacterVersion(selectedProfile)?.id ?? "";
@@ -212,7 +219,7 @@ export function SimpleCreateScreen(props: {
             <button className="button primary" type="button" disabled={!contentReady} onClick={() => setStep(2)}>Tiếp tục: định dạng</button>
           </div> : null}
           {step === 2 ? <div className="stack">
-            <div className="option-grid"><Option title="YouTube Long" detail="Video dài, nhịp kể đầy đủ." active={format === "long"} onClick={() => { setFormat("long"); if (aspectRatio === "9:16") setAspectRatio("16:9"); }} /><Option title="YouTube Short" detail="Khung dọc, nhịp gọn và trực diện." active={format === "short"} onClick={() => { setFormat("short"); if (aspectRatio === "16:9") setAspectRatio("9:16"); }} /></div>
+            <div className="option-grid"><Option title="YouTube Long" detail="Video dài, nhịp kể đầy đủ." active={format === "long"} onClick={() => chooseFormat("long")} /><Option title="YouTube Short" detail="Khung dọc, nhịp gọn và trực diện." active={format === "short"} onClick={() => chooseFormat("short")} /></div>
             <div className="form-grid">
               <FormField label="Ngôn ngữ" htmlFor="simple-language"><select id="simple-language" value={language} onChange={(event) => setLanguage(event.target.value)}>{availableLanguages.map((option) => <option key={option} value={option}>{option}</option>)}</select></FormField>
               <FormField label="Tỷ lệ khung hình" htmlFor="simple-aspect-ratio"><select id="simple-aspect-ratio" value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value as typeof aspectRatio)}><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="1:1">1:1</option></select></FormField>
