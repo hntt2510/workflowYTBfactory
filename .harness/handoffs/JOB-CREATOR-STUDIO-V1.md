@@ -57,3 +57,11 @@
 - `apps/desktop/src/renderer/App.tsx` is now limited to app state, orchestration, and route dispatch; the five-phase UI and broader acceptance criteria still require independent runtime review and QA.
 - Full unit/build/Electron/screenshot verification was not rerun after the later renderer-only commits; the targeted checks above are current, while the broader results predate those commits.
 - Reviewer and independent QA evidence are pending; this handoff does not self-approve the builder commit.
+
+## Latest follow-up
+
+- `112a7837` adds scene-scoped Prompt Studio regeneration, preserves global frame numbers, and keeps unknown upload filenames as manually assignable orphan assets.
+- `41947a05` adds a regression test for preserving global frame numbers during scene regeneration.
+- Latest verification: `corepack pnpm test:unit` (61 files / 417 tests), `corepack pnpm typecheck`, `corepack pnpm --filter @lsf/desktop build`, fixture verification, creator-studio-final Electron verification, and screenshot capture all pass.
+- Lint passes when generated temporary workspaces are excluded; the exact full lint command remains blocked by the pre-existing unused `projectId` in `.tmp-main-flow-runtime/cdp-call.mjs`.
+- Creator-studio-final runtime evidence: real preview visible, MP4 downloaded, preview approved, and packaging export approved. Fixture output: `fixtures/creator-studio-v1/creator-studio-v1.mp4` (1080x1920 H.264/yuv420p, AAC, approximately 10 seconds).
