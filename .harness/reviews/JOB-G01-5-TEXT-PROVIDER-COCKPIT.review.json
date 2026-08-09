@@ -1,0 +1,21 @@
+{
+  "jobId": "JOB-G01-5-TEXT-PROVIDER-COCKPIT",
+  "reviewer": "reviewer",
+  "commitSha": "b58d9694",
+  "decision": "reject",
+  "findings": [
+    {
+      "path": "apps/desktop/src/main/ideaLabService.ts:16",
+      "severity": "high",
+      "evidence": "The migrated service calls provider.generateText(), then performs JSON.parse(response.text.trim()) and ideaLabOutputSchema.safeParse(parsed) locally. The same pattern remains in Reference Segmentation (line 48), Competitor DNA (line 31), Opportunity Map (line 15), Outline (lines 13-14), Script (line 8), Scene Plan (line 8), Prompt Preparation (line 151), and Transcript Cleaning via parseProviderJson(). This violates the job criterion that TextProvider.generateStructured() centrally extracts, parses, validates structured output and that business services must not reinvent JSON parsing."
+    }
+  ],
+  "evidence": [
+    "Inspected full diff main...b58d9694 and the canonical workflow registry; migrated canonical G01 services do not directly import NineRouterClient.",
+    "CockpitTextProvider normalizes a configured base URL, uses /models and /responses, sets bearer authentication, rejects malformed/missing output text, and has focused adapter tests.",
+    "Renderer reads Cockpit settings through typed preload calls; ProviderCredentialStore only returns hasCredential and settings, not the secret.",
+    "No changed files are under packages/generation-queue, packages/media, packages/capcut, python/capcut_bridge, or OmniVoice.",
+    "Independent verification passed: pnpm test:unit (63 files / 397 tests), pnpm typecheck, pnpm lint, pnpm --filter @lsf/desktop build, and git diff --check.",
+    "docs/G01_5_TEXT_PROVIDER.md requested for review was not present in the branch."
+  ]
+}
