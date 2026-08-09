@@ -92,7 +92,6 @@ export function AppShell(props: {
           onOpenProject={props.onOpenProject}
           setRoute={props.setRoute}
         />
-        {props.selectedProject ? <ProjectPhaseStepper project={props.selectedProject} route={props.route} setRoute={props.setRoute} /> : null}
         <section className="content-scroll"><RouteTransition route={props.route}>{props.children}</RouteTransition></section>
       </section>
     </main>

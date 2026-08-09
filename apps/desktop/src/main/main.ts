@@ -892,6 +892,16 @@ app.whenReady().then(async () => {
             : stage)
       });
     }
+  } else if (process.env.LSF_E2E_UI_MODE === "g02-runtime") {
+    const topic = "G02 runtime verification project";
+    if (!projectRepository.listProjects().some((project) => project.topic === topic)) {
+      const fixture = createFixtureProject({ topic, format: "short", targetLanguage: "Vietnamese", workflowMode: "guided", visualWorkflow: "legacy", projectName: topic, profiles: seedChannelProfiles });
+      projectRepository.createProject(fixture);
+      const now = new Date().toISOString();
+      actionRunStore.create({ id: "e2e-g02-waiting-import", projectId: fixture.id, checkpointId: "images", actionId: "IMPORT_IMAGES", stageId: "gglab-generation-gate", state: "waiting_user", progress: { mode: "indeterminate", startedAt: now, message: "Import images from GG Lab" }, retryable: true, inputFingerprint: "e2e-g02-import-v1", outputArtifactIds: [], startedAt: now, updatedAt: now });
+      actionRunStore.create({ id: "e2e-g02-failed-review", projectId: fixture.id, checkpointId: "images", actionId: "APPROVE_IMAGES", stageId: "asset-review", state: "failed", progress: { mode: "determinate", completedUnits: 2, totalUnits: 3, currentUnit: "asset-3", message: "Image review stopped" }, safeErrorCode: "fixture_failure", safeErrorMessage: "Controlled G02 failure", retryable: true, inputFingerprint: "e2e-g02-review-v1", outputArtifactIds: ["asset-1", "asset-2"], startedAt: now, finishedAt: now, updatedAt: now });
+      actionRunStore.create({ id: "e2e-g02-success-prompts", projectId: fixture.id, checkpointId: "prompts", actionId: "PREPARE_GG_LAB_PROMPTS", stageId: "prompt-preparation", state: "success", progress: { mode: "determinate", completedUnits: 3, totalUnits: 3, message: "Prompt batches prepared" }, retryable: false, inputFingerprint: "e2e-g02-prompts-v1", outputArtifactIds: ["batch-1", "batch-2", "batch-3"], startedAt: now, finishedAt: now, updatedAt: now });
+    }
   }
   const win = createWindow();
   if (process.env.LSF_E2E_UI_REPORT_PATH) {
@@ -902,6 +912,34 @@ app.whenReady().then(async () => {
 app.on("before-quit", () => ttsManager?.dispose());
 
 async function runUiVerification(win: BrowserWindow, reportPath: string, mode: string): Promise<void> {
+  if (mode === "g02-runtime") {
+    const topic = "G02 runtime verification project";
+    try {
+      await waitForRenderer(win);
+      await navigateToRoute(win, "projects");
+      await assertText(win, topic);
+      await clickProjectOpen(win, topic);
+      await waitForEnabledControl(win, "2 tác vụ", 20_000);
+      await clickText(win, "2 tác vụ");
+      await assertText(win, "IMPORT_IMAGES");
+      await assertText(win, "APPROVE_IMAGES");
+      await assertText(win, "2/3");
+      const project = projectRepository.listProjects().find((candidate) => candidate.topic === topic);
+      if (!project) throw new Error("G02 runtime project was not persisted.");
+      const waiting = actionRunStore.list(project.id).find((run) => run.id === "e2e-g02-waiting-import");
+      if (!waiting || waiting.state !== "waiting_user") throw new Error("Waiting ActionRun did not persist.");
+      let duplicateBlocked = false;
+      try { actionRunStore.create({ ...waiting, id: "e2e-g02-duplicate", updatedAt: new Date().toISOString() }); } catch { duplicateBlocked = true; }
+      if (!duplicateBlocked) throw new Error("Duplicate ActionRun was not rejected.");
+      const retry = { ...waiting, id: "e2e-g02-retry-import", state: "success" as const, progress: { mode: "indeterminate" as const, startedAt: waiting.startedAt ?? waiting.updatedAt, message: "Retry completed" }, finishedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      actionRunStore.update({ ...retry, id: waiting.id });
+      if (actionRunStore.list(project.id).find((run) => run.id === waiting.id)?.state !== "success") throw new Error("Action retry completion did not persist.");
+      writeUiVerificationReport(reportPath, { ok: true, mode, workspaceRoot, databasePath });
+    } catch (error) {
+      writeUiVerificationReport(reportPath, { ok: false, mode, error: error instanceof Error ? error.message : String(error), workspaceRoot, databasePath });
+    } finally { win.close(); }
+    return;
+  }
   const topic = mode === "workflow-contract" || mode === "reference-restart" || mode === "reference-invalidation" ? "Workflow contract verification project" : mode === "semi-automatic-resume" ? "Semi-automatic resume verification project" : "Why did oil matter so much in World War II?";
   try {
     writeUiVerificationReport(reportPath, { ok: false, mode, phase: "started", workspaceRoot, databasePath });

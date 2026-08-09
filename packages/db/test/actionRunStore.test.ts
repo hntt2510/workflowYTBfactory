@@ -22,6 +22,8 @@ describe("ActionRunStore", () => {
     store.create(run("run-1"));
     expect(store.list("project-1")).toMatchObject([{ id: "run-1", progress: { mode: "determinate", completedUnits: 1, totalUnits: 3 } }]);
     expect(() => store.create(run("run-2"))).toThrow("already active");
+    store.create({ ...run("run-changed"), inputFingerprint: "changed-input" });
+    expect(store.list("project-1").map((item) => item.id)).toContain("run-changed");
     const failed = { ...run("run-1", "failed"), finishedAt: "2026-01-01T00:01:00.000Z", safeErrorMessage: "Provider failed" };
     store.update(failed);
     store.create(run("run-2"));
