@@ -2,5 +2,5 @@
   "schemaVersion": 1,
   "updatedAt": "2026-08-09T00:00:00.000+07:00",
   "activeJobs": [],
-  "notes": "JOB-G01-SCOPE-RESET is review_required after builder implementation on agent/job-g01-scope-reset. Reviewer and QA evidence are pending. Prior review-required jobs remain preserved on their respective branches."
+  "notes": "JOB-G01-SCOPE-RESET passed: builder commit d0b04dc6, reviewer approval 6a498df8, and independent QA evidence 02a1144c. Awaiting integrator merge gate. Prior review-required jobs remain preserved on their respective branches."
 }
