@@ -36,4 +36,24 @@ describe("ActionRunStore", () => {
     expect(store.list("project-1")[0]).toMatchObject({ state: "failed", retryable: true, progress: { mode: "indeterminate", message: "Waiting for provider" } });
     db.close();
   });
+
+  it("persists waiting, successful, and cancelled action states across a database reopen", () => {
+    const directory = mkdtempSync(join(tmpdir(), "lsf-action-reopen-"));
+    const databasePath = join(directory, "factory.sqlite");
+    const db = openFactoryDatabase(databasePath);
+    const project = createFixtureProject({ topic: "Lifecycle", format: "short", targetLanguage: "Vietnamese" });
+    new ProjectRepository(db).saveProject({ ...project, id: "project-1" });
+    const store = new ActionRunStore(db);
+    store.create({ ...run("waiting", "waiting_user"), progress: { mode: "indeterminate", startedAt: "2026-01-01T00:00:00.000Z", message: "Import images from GG Lab" } });
+    store.create({ ...run("success", "success"), inputFingerprint: "success-input", finishedAt: "2026-01-01T00:01:00.000Z" });
+    store.create({ ...run("cancelled", "cancelled"), inputFingerprint: "cancelled-input", finishedAt: "2026-01-01T00:01:00.000Z" });
+    db.close();
+    const reopened = openFactoryDatabase(databasePath);
+    expect(new ActionRunStore(reopened).list("project-1")).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "waiting", state: "waiting_user", progress: expect.objectContaining({ mode: "indeterminate" }) }),
+      expect.objectContaining({ id: "success", state: "success" }),
+      expect.objectContaining({ id: "cancelled", state: "cancelled" })
+    ]));
+    reopened.close();
+  });
 });

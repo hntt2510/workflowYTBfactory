@@ -8,6 +8,7 @@ import { RouteScreen } from "../routes/RouteScreen";
 import { factoryClient, isBrowserPreview } from "../services/factoryClient";
 import type {
   BootstrapData,
+  ActionRunView,
   ImageModelCertificationResponse,
   LocalTtsSettings,
   ProviderCredentialSettings,
@@ -46,6 +47,7 @@ export function AppRuntime() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [bootstrap, setBootstrap] = useState<BootstrapData>(fallbackBootstrap);
   const [selectedProject, setSelectedProject] = useState<FactoryProject | null>(null);
+  const [actionRuns, setActionRuns] = useState<ActionRunView[]>([]);
   const [providerPresence, setProviderPresence] = useState<ProviderPresence>({ providerId: "cockpit", hasCredential: false });
   const [stockPresence, setStockPresence] = useState<ProviderPresence>({ providerId: "pexels", hasCredential: false });
   const [providerSettings, setProviderSettings] = useState<ProviderCredentialSettings | null>(null);
@@ -74,6 +76,11 @@ export function AppRuntime() {
   useEffect(() => {
     void refresh().catch((reason) => setError(reason instanceof Error ? reason.message : String(reason))).finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!selectedProject) { setActionRuns([]); return; }
+    void factoryClient.listActionRuns({ projectId: selectedProject.id }).then(setActionRuns).catch(() => setActionRuns([]));
+  }, [selectedProject]);
 
   useEffect(() => {
     const onHashChange = () => setRoute(routeFromHash());
@@ -159,7 +166,7 @@ export function AppRuntime() {
   const selectedProfile = selectedProject ? profiles.find((profile) => profile.id === selectedProject.profileId) : undefined;
 
   return (
-    <AppShell collapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)} route={route} selectedProject={selectedProject} selectedProfile={selectedProfile} projects={projectSummaries} queue={bootstrap.queue} onOpenProject={openProject} setRoute={navigate}>
+    <AppShell collapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)} route={route} selectedProject={selectedProject} selectedProfile={selectedProfile} projects={projectSummaries} queue={bootstrap.queue} actionRuns={actionRuns} onOpenProject={openProject} setRoute={navigate}>
       {isBrowserPreview ? <SectionCard><div className="warning-state"><strong>Browser Preview — cấu hình provider bảo mật yêu cầu Electron.</strong><p>API key, lưu credential và Test connection không hoạt động trong browser preview.</p></div></SectionCard> : null}
       {error ? <SectionCard><div className="error-state"><strong>Application bootstrap failed</strong><p>{error}</p></div></SectionCard> : null}
       {loading ? <LoadingScreen /> : null}

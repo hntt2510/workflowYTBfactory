@@ -116,7 +116,7 @@ export function RouteScreen(props: RouteScreenProps) {
     semiAutomaticRunning: props.semiAutomaticRunning,
     semiAutomaticError: props.semiAutomaticError
   };
-  if (props.route === "project-overview") return <CheckpointWorkspace project={project} setRoute={props.setRoute} setSelectedProject={props.setSelectedProject} />;
+  if (props.route === "project-overview") return <CheckpointWorkspace {...workspaceProps} />;
   if (props.route === "content") return <ProjectStudioScreen {...workspaceProps} workspace="content" />;
   if (props.route === "script") return <ProjectStudioScreen {...workspaceProps} workspace="content" initialTab="story" />;
   if (props.route === "idea-lab") return <ProjectStudioScreen {...workspaceProps} workspace="content" initialTab="ideas" />;

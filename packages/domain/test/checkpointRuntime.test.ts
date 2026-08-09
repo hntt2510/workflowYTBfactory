@@ -26,4 +26,13 @@ describe("G02 checkpoint runtime", () => {
     const project = createFixtureProject({ topic: "Topic", format: "short", targetLanguage: "Vietnamese", inputMode: "topic" });
     expect(getActionState(project, "GENERATE_SCRIPT").state).toBe("BLOCKED");
   });
+
+  it("lets the latest successful retry supersede an older failed action run", () => {
+    const project = createFixtureProject({ topic: "Retry", format: "short", targetLanguage: "Vietnamese", inputMode: "topic" });
+    const runs = [
+      { actionId: "GENERATE_IDEAS" as const, state: "success" as const },
+      { actionId: "GENERATE_IDEAS" as const, state: "failed" as const, safeErrorMessage: "old failure" }
+    ];
+    expect(getActionState(project, "GENERATE_IDEAS", runs).state).not.toBe("ERROR");
+  });
 });

@@ -220,7 +220,7 @@ import {
   assetConceptsOutputSchema,
   prepareExistingScript
 } from "@lsf/domain";
-import { actionDefinitions } from "@lsf/domain";
+import { actionDefinitions, getActionState } from "@lsf/domain";
 import type { ActionId, ChannelProfile, CharacterReferenceView, CharacterVersion, CompetitorReference, FactoryProject, ReferenceSetState, StageAttention, WorkflowArtifact, WorkflowStageStatus } from "@lsf/domain";
 import { PersistentGenerationQueue } from "@lsf/generation-queue";
 import { NineRouterClient } from "@lsf/providers";
@@ -2020,6 +2020,11 @@ ipcMain.handle("start-project-action", async (_event, input: unknown) => {
   if (!projectId || !action) throw new Error("A valid project action is required.");
   const project = projectRepository.loadProject(projectId);
   if (!project) throw new Error(`Project not found: ${projectId}`);
+  const currentRuns = actionRunStore.list(projectId);
+  const availability = getActionState(project, action.id, currentRuns);
+  if (availability.state === "BLOCKED") throw new Error(availability.reason ?? "Action prerequisites are not complete.");
+  if (availability.state === "RUNNING") throw new Error("An equivalent action is already running.");
+  if (availability.state === "SUCCESS") throw new Error("Action is already complete. An explicit regenerate flow is required.");
   const now = new Date().toISOString();
   const fingerprint = canonicalSha256({ actionId: action.id, stageId: action.stageId, stage: project.stages.find((stage) => stage.id === action.stageId)?.status ?? "not_started" });
   const channelByAction: Partial<Record<ActionId, string>> = {

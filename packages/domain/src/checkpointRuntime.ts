@@ -67,7 +67,15 @@ export function resolveProjectCheckpoints(project: FactoryProject, runs: readonl
       continue;
     }
     const statuses = applicableStages.map((id) => stageById.get(id)?.status ?? "not_started");
-    const currentRuns = runs.filter((run) => actionDefinitions.find((action) => action.id === run.actionId)?.checkpointId === definition.id);
+    // Stores return newest first. Only each action's latest attempt may control the
+    // checkpoint: an old failure must not mask a later successful retry.
+    const seenActions = new Set<ActionId>();
+    const currentRuns = runs.filter((run) => {
+      const matches = actionDefinitions.find((action) => action.id === run.actionId)?.checkpointId === definition.id;
+      if (!matches || seenActions.has(run.actionId)) return false;
+      seenActions.add(run.actionId);
+      return true;
+    });
     if (currentRuns.some((run) => run.state === "running" || run.state === "queued")) { checkpoints.push({ definition, state: "running" }); continue; }
     if (currentRuns.some((run) => run.state === "waiting_user")) { checkpoints.push({ definition, state: "waiting_user" }); continue; }
     if (currentRuns.some((run) => run.state === "failed") || statuses.some((status) => terminalError.has(status))) { checkpoints.push({ definition, state: "error" }); continue; }
@@ -88,7 +96,7 @@ export function resolveProjectCheckpoints(project: FactoryProject, runs: readonl
 export function getActionState(project: FactoryProject, actionId: ActionId, runs: readonly ActionRunSnapshot[] = []): { state: ActionRuntimeState; reason?: string } {
   const action = actionDefinitions.find((candidate) => candidate.id === actionId);
   if (!action) throw new Error(`Unknown action: ${actionId}`);
-  const run = runs.find((candidate) => candidate.actionId === actionId && ["queued", "running", "waiting_user", "failed"].includes(candidate.state));
+  const run = runs.find((candidate) => candidate.actionId === actionId);
   if (run?.state === "running" || run?.state === "queued") return { state: "RUNNING" };
   if (run?.state === "waiting_user") return { state: "WAITING_USER", ...(run.progress?.message ? { reason: run.progress.message } : {}) };
   if (run?.state === "failed") return { state: "ERROR", ...(run.safeErrorMessage ? { reason: run.safeErrorMessage } : {}) };

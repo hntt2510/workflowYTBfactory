@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-08-09T20:07:00.000+07:00",
-  "activeJobs": [],
-  "notes": "JOB-G02-CHECKPOINT-ACTION-PROGRESS is ready for independent review on its stacked G01.5 base 8f7f49f0."
+  "updatedAt": "2026-08-09T20:15:00.000+07:00",
+  "activeJobs": ["JOB-G02-CHECKPOINT-ACTION-PROGRESS"],
+  "notes": "Human decision reopened JOB-G02-CHECKPOINT-ACTION-PROGRESS; implementation is active on stacked base 8f7f49f0."
 }

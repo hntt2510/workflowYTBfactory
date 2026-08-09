@@ -20,13 +20,13 @@ import {
   Video
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useRef, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import type { ChannelProfile, FactoryProject } from "@lsf/domain";
 import { creatorPhaseDefinitions, creatorRouteLabel, creatorStageLabel, creatorStatusLabel } from "../creatorStudioCopy";
 import { sidebarRouteGroups, type RouteDefinition, type RouteId } from "../navigation";
-import type { ProjectSummary, QueueSnapshot } from "../types";
+import type { ActionRunView, ProjectSummary, QueueSnapshot } from "../types";
 import { currentStage } from "../utils";
 
 gsap.registerPlugin(useGSAP);
@@ -73,6 +73,7 @@ export function AppShell(props: {
   selectedProfile: ChannelProfile | undefined;
   projects: ProjectSummary[];
   queue: QueueSnapshot;
+  actionRuns: ActionRunView[];
   onOpenProject: (projectId: string) => Promise<void>;
   setRoute: (route: RouteId) => void;
 }) {
@@ -87,7 +88,7 @@ export function AppShell(props: {
           selectedProject={props.selectedProject}
           selectedProfile={props.selectedProfile}
           projects={props.projects}
-          queue={props.queue}
+          queue={props.queue} actionRuns={props.actionRuns}
           onOpenProject={props.onOpenProject}
           setRoute={props.setRoute}
         />
@@ -229,12 +230,14 @@ function TopBar(props: {
   selectedProfile: ChannelProfile | undefined;
   projects: ProjectSummary[];
   queue: QueueSnapshot;
+  actionRuns: ActionRunView[];
   onOpenProject: (projectId: string) => Promise<void>;
   setRoute: (route: RouteId) => void;
 }) {
   const saveState = props.selectedProject ? "Đã lưu cục bộ" : "Chưa mở dự án";
   const stage = props.selectedProject ? creatorStageLabel(currentStage(props.selectedProject)) : "Chọn một dự án để bắt đầu";
-  const queueActive = props.queue.running > 0 || props.queue.jobs.length > 0;
+  const [runtimeOpen, setRuntimeOpen] = useState(false);
+  const activeRuns = props.actionRuns.filter((run) => ["queued", "running", "waiting_user", "failed"].includes(run.state));
   return (
     <header className="topbar">
       <button className="icon-button topbar-toggle" onClick={props.onToggle} type="button" aria-label="Thu gọn hoặc mở thanh điều hướng">
@@ -253,9 +256,10 @@ function TopBar(props: {
             {props.projects.map((project) => <option key={project.id} value={project.id}>{project.projectName || project.topic}</option>)}
           </select>
         </label>
-        {queueActive ? <span className="queue-chip" title="Background work is available in developer diagnostics."><Play size={15} /> {props.queue.running} đang chạy</span> : null}
+        {activeRuns.length ? <button className="queue-chip" type="button" onClick={() => setRuntimeOpen((value) => !value)}><Play size={15} /> {activeRuns.length} tác vụ</button> : null}
         <button className="icon-button" type="button" aria-label="Mở cài đặt" onClick={() => props.setRoute("settings")}><Settings size={17} /></button>
       </div>
+      {runtimeOpen ? <div className="runtime-drawer" role="dialog" aria-label="Action runtime">{activeRuns.map((run) => <div className="status-row" key={run.id}><span>{run.actionId}</span><small>{run.state} · {run.progress.mode === "determinate" ? `${run.progress.completedUnits}/${run.progress.totalUnits}` : run.progress.message}{run.safeErrorMessage ? ` · ${run.safeErrorMessage}` : ""}</small></div>)}</div> : null}
     </header>
   );
 }
