@@ -9,10 +9,11 @@ describe("renderer audit navigation registry", () => {
     expect(Object.keys(routeHandlerIntent).sort()).toEqual(expected.sort());
   });
 
-  it("derives the verbose audit sidebar from the registry without hiding project routes", () => {
+  it("keeps the primary sidebar app-level while retaining compatibility routes in the registry", () => {
     const sidebarIds = sidebarRouteGroups.flatMap((group) => group.items.map((route) => route.id));
-    expect(sidebarIds.sort()).toEqual(allRoutes.map((route) => route.id).sort());
-    expect(sidebarRouteGroups.flatMap((group) => group.items).filter((route) => route.requiresProject)).not.toHaveLength(0);
+    expect(sidebarIds.sort()).toEqual(["dashboard", "projects", "create", "channel-profiles", "asset-library", "providers", "settings"].sort());
+    expect(sidebarRouteGroups.flatMap((group) => group.items).filter((route) => route.requiresProject)).toHaveLength(0);
+    expect(allRoutes.some((route) => route.id === "reference-intake")).toBe(true);
     expect(sidebarRouteGroups.flatMap((group) => group.items).find((route) => route.id === "providers")?.label).toContain("Cockpit");
   });
 

@@ -1,4 +1,21 @@
-import type { AssetConcept, ChannelProfile, ChannelRouteDecision, CharacterReferenceView, CharacterVersion, CompetitorDnaOutput, CompetitorReference, FactoryProject, CleanedTranscriptOutput, ReferenceSegmentationOutput, StageEligibility, SubtitlePreset, WorkflowStageStatus } from "@lsf/domain";
+import type { ActionId, ActionProgress, AssetConcept, ChannelProfile, ChannelRouteDecision, CharacterReferenceView, CharacterVersion, CompetitorDnaOutput, CompetitorReference, FactoryProject, CleanedTranscriptOutput, ReferenceSegmentationOutput, StageEligibility, SubtitlePreset, WorkflowStageStatus } from "@lsf/domain";
+
+export interface ActionRunView {
+  id: string;
+  projectId: string;
+  checkpointId: string;
+  actionId: ActionId;
+  stageId?: string;
+  state: "queued" | "running" | "waiting_user" | "success" | "failed" | "cancelled";
+  progress: ActionProgress;
+  safeErrorMessage?: string;
+  retryable: boolean;
+  inputFingerprint: string;
+  outputArtifactIds: string[];
+  startedAt?: string;
+  finishedAt?: string;
+  updatedAt: string;
+}
 
 export interface ProjectSummary {
   id: string;
@@ -337,6 +354,8 @@ export interface ImageModelCertificationResponse { status: "not_tested" | "verif
 
 export interface LongShortFactoryApi {
   bootstrap: () => Promise<BootstrapData>;
+  listActionRuns: (input: { projectId: string }) => Promise<ActionRunView[]>;
+  startProjectAction: (input: { projectId: string; actionId: ActionId }) => Promise<ActionRunView>;
   listChannelProfiles: () => Promise<ChannelProfile[]>;
   generateCharacterPack: (input: CharacterGenerationInput) => Promise<ChannelProfile>;
   retryCharacterReference: (input: { profileId: string; versionId: string; view: CharacterReferenceView }) => Promise<ChannelProfile>;

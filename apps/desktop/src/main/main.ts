@@ -16,6 +16,7 @@ import {
   GenerationJobStore,
   TtsJobStore,
   WorkflowRunStore,
+  ActionRunStore,
   JsonLogger,
   openFactoryDatabase
 } from "@lsf/db";
@@ -219,7 +220,8 @@ import {
   assetConceptsOutputSchema,
   prepareExistingScript
 } from "@lsf/domain";
-import type { ChannelProfile, CharacterReferenceView, CharacterVersion, CompetitorReference, FactoryProject, ReferenceSetState, StageAttention, WorkflowArtifact, WorkflowStageStatus } from "@lsf/domain";
+import { actionDefinitions } from "@lsf/domain";
+import type { ActionId, ChannelProfile, CharacterReferenceView, CharacterVersion, CompetitorReference, FactoryProject, ReferenceSetState, StageAttention, WorkflowArtifact, WorkflowStageStatus } from "@lsf/domain";
 import { PersistentGenerationQueue } from "@lsf/generation-queue";
 import { NineRouterClient } from "@lsf/providers";
 import { listNineRouterModels } from "./nineRouterModelService";
@@ -293,6 +295,7 @@ const appSettingsStore = new AppSettingsStore(db);
 const textCertificationStore = new TextCertificationStore(db);
 const imageCertificationStore = new ImageCertificationStore(db);
 const workflowRunStore = new WorkflowRunStore(db);
+const actionRunStore = new ActionRunStore(db);
 const productionOrchestrator = createProductionOrchestrator({
   loadProject: async (projectId) => projectRepository.loadProject(projectId) ?? null,
   invoke: async <T>(channel: string, input: Record<string, unknown>) => {
@@ -304,6 +307,7 @@ const productionOrchestrator = createProductionOrchestrator({
 const generationJobStore = new GenerationJobStore(db);
 const ttsJobStore = new TtsJobStore(db);
 const interruptedRuns = workflowRunStore.recoverInterruptedRuns();
+actionRunStore.recoverInterruptedRuns();
 for (const run of interruptedRuns) {
   const project = projectRepository.loadProject(run.projectId);
   const stage = project?.stages.find((item) => item.id === run.stageId);
@@ -1713,6 +1717,7 @@ function saveProjectWithWorkflowInvalidation(project: FactoryProject, options: {
     projectRepository.saveProject(normalized, { withinTransaction: true });
     if (options.invalidateArtifacts || normalized.referenceSet?.status === "stale") workflowRunStore.markProjectArtifactsStale(normalized.id);
     else workflowRunStore.markStageArtifactsStale(normalized.id, staleStageIds);
+    actionRunStore.markStaleForStages(normalized.id, staleStageIds);
     if (!options.withinTransaction) db.exec("COMMIT;");
     return normalized;
   } catch (error) {
@@ -2002,6 +2007,61 @@ ipcMain.handle("bootstrap", async () => ({
   queue: queue.snapshotWorkers(),
   runtime: await probeRuntimeEnvironment()
 }));
+
+ipcMain.handle("list-action-runs", (_event, input: unknown) => {
+  const { projectId } = projectIdRequestSchema.parse(input);
+  return actionRunStore.list(projectId);
+});
+
+ipcMain.handle("start-project-action", async (_event, input: unknown) => {
+  const request = input as { projectId?: unknown; actionId?: unknown };
+  const projectId = typeof request.projectId === "string" ? request.projectId : "";
+  const action = typeof request.actionId === "string" ? actionDefinitions.find((candidate) => candidate.id === request.actionId) : undefined;
+  if (!projectId || !action) throw new Error("A valid project action is required.");
+  const project = projectRepository.loadProject(projectId);
+  if (!project) throw new Error(`Project not found: ${projectId}`);
+  const now = new Date().toISOString();
+  const fingerprint = canonicalSha256({ actionId: action.id, stageId: action.stageId, stage: project.stages.find((stage) => stage.id === action.stageId)?.status ?? "not_started" });
+  const channelByAction: Partial<Record<ActionId, string>> = {
+    GENERATE_IDEAS: "run-idea-lab",
+    GENERATE_SCRIPT: "run-script",
+    GENERATE_DIRECTOR_PLAN: "run-scene-plan",
+    GENERATE_STORYBOARD: "run-shot-plan",
+    PREPARE_GG_LAB_PROMPTS: "run-prompt-preparation"
+  };
+  const channel = channelByAction[action.id];
+  const run = {
+    id: `action-run-${randomUUID()}`,
+    projectId,
+    checkpointId: action.checkpointId,
+    actionId: action.id as ActionId,
+    stageId: action.stageId,
+    state: channel ? "running" as const : "waiting_user" as const,
+    progress: { mode: "indeterminate" as const, startedAt: now, message: channel ? "Provider action is running." : "Open the workspace and complete the required input or review." },
+    retryable: true,
+    inputFingerprint: fingerprint,
+    outputArtifactIds: [],
+    startedAt: now,
+    updatedAt: now
+  };
+  actionRunStore.create(run);
+  if (!channel) return run;
+  const handler = internalIpcHandlers.get(channel);
+  if (!handler) throw new Error(`Project action handler is unavailable: ${action.id}`);
+  try {
+    await (handler as (event: unknown, value: unknown) => Promise<unknown>)(undefined, { projectId });
+    const completedAt = new Date().toISOString();
+    const success = { ...run, state: "success" as const, progress: { mode: "indeterminate" as const, startedAt: now, message: "Action completed. Review the generated output in this checkpoint." }, retryable: false, finishedAt: completedAt, updatedAt: completedAt };
+    actionRunStore.update(success);
+    return success;
+  } catch (error) {
+    const finishedAt = new Date().toISOString();
+    const message = error instanceof Error ? error.message : "Project action failed.";
+    const failed = { ...run, state: "failed" as const, progress: { mode: "indeterminate" as const, startedAt: now, message: "Action failed." }, safeErrorCode: "action_failed", safeErrorMessage: message.slice(0, 500), retryable: true, finishedAt, updatedAt: finishedAt };
+    actionRunStore.update(failed);
+    throw new Error(failed.safeErrorMessage);
+  }
+});
 
 ipcMain.handle("route-topic", (_event, input: unknown) => {
   const parsed = channelRouteInputSchema.parse(input);

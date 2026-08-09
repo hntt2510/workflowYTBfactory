@@ -15,6 +15,7 @@ import { ScenesScreen, ShotsScreen, VisualsScreen } from "../features/director/D
 import { Dashboard } from "../features/home/HomeScreens";
 import { AssetLibraryScreen } from "../features/assets/AssetLibraryScreen";
 import { ProjectOverview } from "../features/projects/ProjectOverview";
+import { CheckpointWorkspace } from "../features/projects/CheckpointWorkspace";
 import { NewProjectWizard, SimpleCreateScreen, ttsLanguageCode } from "../features/projects/CreateScreens";
 import { AdvancedPipelineScreen, ProductionScriptPanel, ProductionScreen, SceneReviewScreen } from "../features/production/ProductionScreens";
 import { ProjectsScreen } from "../features/projects/ProjectsScreen";
@@ -115,7 +116,8 @@ export function RouteScreen(props: RouteScreenProps) {
     semiAutomaticRunning: props.semiAutomaticRunning,
     semiAutomaticError: props.semiAutomaticError
   };
-  if (props.route === "content" || props.route === "project-overview") return <ProjectStudioScreen {...workspaceProps} workspace="content" />;
+  if (props.route === "project-overview") return <CheckpointWorkspace project={project} setRoute={props.setRoute} setSelectedProject={props.setSelectedProject} />;
+  if (props.route === "content") return <ProjectStudioScreen {...workspaceProps} workspace="content" />;
   if (props.route === "script") return <ProjectStudioScreen {...workspaceProps} workspace="content" initialTab="story" />;
   if (props.route === "idea-lab") return <ProjectStudioScreen {...workspaceProps} workspace="content" initialTab="ideas" />;
   if (props.route === "reference-intake") return <ProjectStudioScreen {...workspaceProps} workspace="content" initialTab="references" />;

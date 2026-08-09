@@ -12,6 +12,7 @@ export * from "./legacyWorkflowRegistry";
 export * from "./workflowEligibility";
 export * from "./workflowTransitions";
 export * from "./workflowProgress";
+export * from "./checkpointRuntime";
 export * from "./referenceIdentity";
 export * from "./referenceSegmentation";
 export * from "./originalityReview";

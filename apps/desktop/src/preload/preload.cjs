@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("longShortFactory", {
   bootstrap: () => ipcRenderer.invoke("bootstrap"),
+  listActionRuns: (input) => ipcRenderer.invoke("list-action-runs", input),
+  startProjectAction: (input) => ipcRenderer.invoke("start-project-action", input),
   listChannelProfiles: () => ipcRenderer.invoke("list-channel-profiles"),
   generateCharacterPack: (input) => ipcRenderer.invoke("generate-character-pack", input),
   retryCharacterReference: (input) => ipcRenderer.invoke("retry-character-reference", input),

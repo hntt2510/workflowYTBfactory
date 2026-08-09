@@ -253,7 +253,7 @@ function TopBar(props: {
             {props.projects.map((project) => <option key={project.id} value={project.id}>{project.projectName || project.topic}</option>)}
           </select>
         </label>
-        {queueActive ? <button className="queue-chip" type="button" onClick={() => props.setRoute("production-queue")}><Play size={15} /> {props.queue.running} đang chạy</button> : null}
+        {queueActive ? <span className="queue-chip" title="Background work is available in developer diagnostics."><Play size={15} /> {props.queue.running} đang chạy</span> : null}
         <button className="icon-button" type="button" aria-label="Mở cài đặt" onClick={() => props.setRoute("settings")}><Settings size={17} /></button>
       </div>
     </header>

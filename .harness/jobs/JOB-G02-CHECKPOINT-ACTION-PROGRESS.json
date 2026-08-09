@@ -1,0 +1,19 @@
+{
+  "jobId": "JOB-G02-CHECKPOINT-ACTION-PROGRESS",
+  "type": "long",
+  "title": "G02 project checkpoints, actions, and persistent progress runtime",
+  "status": "review_required",
+  "targetBranch": "main",
+  "baseCommit": "8f7f49f0fa26f53f221f5320071a6c55de207b05",
+  "assignedRole": "builder",
+  "description": "Stacked G02 implementation: replace primary stage-route navigation with a checkpoint workspace, centralized action registry, and persistent honest ActionRun runtime.",
+  "businessContext": "Creators work through one continuous project factory workflow. Sidebar navigation is app-level; workflow execution is explicit, explainable, persistent, and never fabricates progress.",
+  "allowedPaths": ["apps/desktop/src/main/**", "apps/desktop/src/preload/**", "apps/desktop/src/renderer/**", "apps/desktop/test/**", "packages/domain/src/**", "packages/domain/test/**", "packages/db/src/**", "packages/db/test/**", "packages/providers/**", ".harness/jobs/JOB-G02-CHECKPOINT-ACTION-PROGRESS.json", ".harness/state.json", ".harness/locks/JOB-G02-CHECKPOINT-ACTION-PROGRESS.lock", ".harness/handoffs/JOB-G02-CHECKPOINT-ACTION-PROGRESS.md"],
+  "forbiddenPaths": ["packages/generation-queue/**", "packages/media/**", "packages/capcut/**", "python/capcut_bridge/**", "OmniVoice/**", "docs/product/acceptance-criteria.md"],
+  "dependencies": ["G02 is stacked on approved G01.5 commit 8f7f49f0; it must be rebased to any newer approved G01.5 head before G02 review.", "Existing Cockpit TextProvider and secure credential abstraction."],
+  "acceptanceCriteria": ["Primary sidebar has only app-level destinations; legacy technical routes remain compatibility/dev-only and never primary creator navigation.", "A registry-driven Project Workspace represents canonical stage state as explicit Brief, Research, Idea, Script, Director, Storyboard, Prompts, Images, and Handoff checkpoints with dynamic applicability and progress.", "Central Action Registry exposes visible READY/RUNNING/WAITING_USER/BLOCKED/SUCCESS/ERROR states; checkpoint navigation never executes generation and applicable blocked actions explain why.", "ActionRun persistence supports safe migration, duplicate-run prevention, restart/resume visibility, determinate real-unit progress or indeterminate provider progress, retry, errors, fingerprints, and explicit stale/invalidation state.", "The primary workflow has no active creator dependency on 9Router, TTS, FFmpeg, CapCut, MP4 production, or Production Queue; Cockpit settings remain accessible.", "Topic, Existing Script, and Reference projects resolve checkpoints correctly; Existing Script does not fake-complete skipped work.", "Unit, persistence, integration, full repository verification, and Electron click-through evidence pass without fake percentages or automatic paid provider reruns."],
+  "verificationCommands": ["pnpm --filter @lsf/providers test", "pnpm --filter @lsf/domain test", "pnpm --filter @lsf/db test", "pnpm --filter @lsf/desktop test", "pnpm test:unit", "pnpm typecheck", "pnpm lint", "pnpm --filter @lsf/desktop build", "git diff --check"],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["The stacked G01.5 base changes or requires a rebase.", "A real Cockpit action or credential is required to test a behavior that cannot be represented by deterministic fixtures.", "A requested ActionRun migration would require destructive project data changes.", "G02 cannot be implemented without modifying a forbidden media/CapCut/TTS subsystem."]
+}

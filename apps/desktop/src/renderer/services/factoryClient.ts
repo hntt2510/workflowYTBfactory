@@ -63,6 +63,8 @@ function webFallback(): LongShortFactoryApi {
         runtime: browserRuntime
       };
     },
+    async listActionRuns() { return []; },
+    async startProjectAction() { throw new Error("Project actions require Electron main process."); },
     async listChannelProfiles() { return seedChannelProfiles; },
     async generateCharacterPack(): Promise<ChannelProfile> { throw new Error("Character generation requires Electron main process."); },
     async retryCharacterReference(): Promise<ChannelProfile> { throw new Error("Character generation requires Electron main process."); },

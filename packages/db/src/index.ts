@@ -7,5 +7,6 @@ export * from "./imageCertificationStore";
 export * from "./generationJobStore";
 export * from "./ttsJobStore";
 export * from "./workflowRunStore";
+export * from "./actionRunStore";
 export * from "./appSettingsStore";
 export * from "./logger";

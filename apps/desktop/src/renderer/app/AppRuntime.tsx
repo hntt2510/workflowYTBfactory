@@ -58,7 +58,6 @@ export function AppRuntime() {
   const [semiAutomaticError, setSemiAutomaticError] = useState<string | null>(null);
   const [semiAutomaticRunning, setSemiAutomaticRunning] = useState(false);
   const semiAutomaticRunLock = useRef(false);
-  const automaticResumeAttemptedProjects = useRef(new Set<string>());
 
   async function refresh() {
     const data = await factoryClient.bootstrap();
@@ -100,25 +99,8 @@ export function AppRuntime() {
       navigate("projects");
       return;
     }
-    automaticResumeAttemptedProjects.current.delete(project.id);
-    const nextChain = nextSemiAutomaticChain(project, bootstrap.profiles.find((profile) => profile.id === project.profileId));
-    const nextRoute = routeForStage(resolveWorkflowProgress(project).currentStageId);
-    if (nextChain && !hasSemiAutomaticAttention(project)) {
-      automaticResumeAttemptedProjects.current.add(project.id);
-      navigate(nextRoute);
-      void startSemiAutomatic(nextChain, project);
-      return;
-    }
-    navigate(nextRoute);
+    navigate("project-overview");
   }
-
-  useEffect(() => {
-    if (loading || !selectedProject || selectedProject.setup.workflowMode !== "semi_automatic" || semiAutomaticRunLock.current) return;
-    const nextChain = nextSemiAutomaticChain(selectedProject, bootstrap.profiles.find((profile) => profile.id === selectedProject.profileId));
-    if (!nextChain || hasSemiAutomaticAttention(selectedProject) || automaticResumeAttemptedProjects.current.has(selectedProject.id)) return;
-    automaticResumeAttemptedProjects.current.add(selectedProject.id);
-    void startSemiAutomatic(nextChain, selectedProject);
-  }, [loading, selectedProject]);
 
   async function deleteProject(projectId: string) {
     if (!window.confirm("Delete this project from SQLite? Workspace files are not removed.")) return;
@@ -133,7 +115,7 @@ export function AppRuntime() {
     const project = await factoryClient.fixtureProject(input);
     setSelectedProject(project);
     await refresh();
-    navigate(routeForStage(resolveWorkflowProgress(project).currentStageId));
+    navigate("project-overview");
   }
 
   async function startSemiAutomatic(chain: SemiAutomaticChain, project: FactoryProject): Promise<void> {

@@ -58,7 +58,9 @@ export const routeGroups: ReadonlyArray<{ id: RouteGroup; label: string }> = [
   { id: "build", label: "DỰNG / PRODUCTION KẾ THỪA" },
   { id: "system", label: "HỆ THỐNG" }
 ];
-export const sidebarRouteGroups = routeGroups.map((group) => ({ ...group, items: routeRegistry.filter((route) => route.group === group.id && route.visibility === "audit") }));
+/** Primary creator navigation is deliberately app-level only. Stage routes remain hash-compatible tools. */
+const primarySidebarRouteIds: readonly RouteId[] = ["dashboard", "projects", "create", "channel-profiles", "asset-library", "providers", "settings"];
+export const sidebarRouteGroups = routeGroups.map((group) => ({ ...group, items: routeRegistry.filter((route) => route.group === group.id && primarySidebarRouteIds.includes(route.id)) })).filter((group) => group.items.length > 0);
 
 /** Compatibility exports; all are derived from the single route registry. */
 export const workspaceRoutes = routeRegistry.filter((route) => route.group === "workspace");
