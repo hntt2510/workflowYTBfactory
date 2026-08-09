@@ -1,0 +1,14 @@
+{
+  "jobId": "JOB-G01-SCOPE-RESET",
+  "commit": "d0b04dc6e5671a262f6dc516d1093d7adb13fa4b",
+  "decision": "pass",
+  "commands": [
+    "corepack pnpm test:unit — 62 files, 382 tests passed",
+    "corepack pnpm typecheck",
+    "corepack pnpm lint",
+    "corepack pnpm --filter @lsf/desktop build",
+    "git diff --check",
+    "LSF_UI_MODES=workflow-contract,reference-restart,verify node scripts/verify-electron-ui.cjs"
+  ],
+  "result": "All commands passed in the isolated QA worktree."
+}
