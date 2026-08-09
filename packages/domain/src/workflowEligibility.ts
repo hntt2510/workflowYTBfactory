@@ -1,6 +1,7 @@
 import type { FactoryProject, PipelineStage, ReferenceSetState, StageEligibility, WorkflowStageDefinition, WorkflowStageStatus } from "./types";
 import { normalizeStageAttention } from "./stageAttention";
-import { workflowStageDefinitions } from "./workflowRegistry";
+import { getWorkflowStageDefinition, workflowStageDefinitions } from "./workflowRegistry";
+import { legacyWorkflowStageDefinitions } from "./legacyWorkflowRegistry";
 
 export interface ProviderCapabilitySnapshot {
   textVerified?: boolean;
@@ -40,48 +41,39 @@ export function buildWorkflowStateSnapshot(project: FactoryProject, providerCapa
 
 export function normalizeProjectStages(stages: PipelineStage[], visualWorkflow: FactoryProject["setup"]["visualWorkflow"] = "legacy"): PipelineStage[] {
   const known = new Map(stages.map((stage) => [stage.id, stage]));
-  return workflowStageDefinitions.map((definition, index) => {
+  const normalized = workflowStageDefinitions.map((definition, index) => {
     const existing = known.get(definition.id);
     if (existing) {
       const attention = existing.attention ? normalizeStageAttention(definition.id, existing.attention) : undefined;
-      const legacyAutomaticStage = visualWorkflow !== "character_first" && (definition.id === "character-preparation" || definition.id === "asset-concepts");
       return {
         ...existing,
         name: definition.name,
         dependsOn: definition.dependsOn,
-        ...(legacyAutomaticStage ? { status: "approved" as const } : {}),
         ...(attention ? { attention } : {})
       };
     }
-    const legacyAutomaticStage = visualWorkflow !== "character_first" && (definition.id === "character-preparation" || definition.id === "asset-concepts");
     return {
       id: definition.id,
       name: definition.name,
-      status: legacyAutomaticStage ? "approved"
-        : index === 0
+      status: (index === 0
         ? "approved"
-        : legacyStageWasAlreadyPassed(definition.id, known) ? "approved" : "not_started",
+        : "not_started") as PipelineStage["status"],
       dependsOn: definition.dependsOn
     };
   });
-}
-
-const legacyRestoredStageIds = new Set(["research-source-intake", "claim-map"]);
-
-function legacyStageWasAlreadyPassed(stageId: string, known: Map<string, PipelineStage>, visiting = new Set<string>()): boolean {
-  if (!legacyRestoredStageIds.has(stageId) || visiting.has(stageId)) return false;
-  const nextVisiting = new Set(visiting).add(stageId);
-  return workflowStageDefinitions
-    .filter((definition) => (definition.dependsOn as readonly string[]).includes(stageId))
-    .some((definition) => known.get(definition.id)?.status === "approved" || legacyStageWasAlreadyPassed(definition.id, known, nextVisiting));
+  const canonicalIds = new Set(workflowStageDefinitions.map((definition) => definition.id));
+  const legacyStages = stages.filter((existing) => !canonicalIds.has(existing.id));
+  return [...normalized, ...legacyStages];
 }
 
 export function resolveStageEligibilities(project: FactoryProject, providerCapabilities: ProviderCapabilitySnapshot = {}): StageEligibility[] {
   const snapshot = buildWorkflowStateSnapshot(project, providerCapabilities);
-  return workflowStageDefinitions.map((definition) => resolveStageEligibility(definition, snapshot));
+  const definitions = project.setup.workflowContract === "legacy" ? [...workflowStageDefinitions, ...legacyWorkflowStageDefinitions] : workflowStageDefinitions;
+  return definitions.map((definition) => resolveStageEligibility(definition, snapshot));
 }
 
 export function resolveStageEligibility(definition: WorkflowStageDefinition, snapshot: WorkflowStateSnapshot): StageEligibility {
+  if (!isSnapshotStageApplicable(definition, snapshot)) return baseEligibility(definition.id, "blocked", false, false, false, [{ code: "NOT_APPLICABLE", message: `${definition.name} is not applicable for this project mode.`, actionRoute: "project-overview" }]);
   const stage = snapshot.stages.find((item) => item.id === definition.id);
   const explicitStatus = stage?.status;
   if (explicitStatus === "running" || explicitStatus === "queued") {
@@ -126,11 +118,14 @@ export function firstActionableStage(project: FactoryProject, providerCapabiliti
 }
 
 function dependencyBlockingReasons(definition: WorkflowStageDefinition, snapshot: WorkflowStateSnapshot): StageEligibility["blockingReasons"] {
-  const dependencies = effectiveDependencies(definition, snapshot);
+  const dependencies = effectiveDependencies(definition, snapshot).filter((dependencyId) => {
+    const dependencyDefinition = getWorkflowStageDefinition(dependencyId);
+    return dependencyDefinition ? isSnapshotStageApplicable(dependencyDefinition, snapshot) : true;
+  });
   const directReasons = dependencies
     .filter((dependencyId) => snapshot.stages.find((stage) => stage.id === dependencyId)?.status !== "approved")
     .map((dependencyId) => {
-      const dependencyDefinition = workflowStageDefinitions.find((stage) => stage.id === dependencyId);
+      const dependencyDefinition = getWorkflowStageDefinition(dependencyId);
       return {
         code: "DEPENDENCY_NOT_APPROVED",
         message: `Approve ${dependencyDefinition?.name ?? dependencyId} before running ${definition.name}.`,
@@ -141,7 +136,7 @@ function dependencyBlockingReasons(definition: WorkflowStageDefinition, snapshot
     .filter((dependencyId) => snapshot.stages.find((stage) => stage.id === dependencyId)?.status === "approved")
     .filter((dependencyId) => !dependencyChainApproved(dependencyId, snapshot))
     .map((dependencyId) => {
-      const dependencyDefinition = workflowStageDefinitions.find((stage) => stage.id === dependencyId);
+      const dependencyDefinition = getWorkflowStageDefinition(dependencyId);
       return {
         code: "DEPENDENCY_CHAIN_NOT_APPROVED",
         message: `A dependency before ${dependencyDefinition?.name ?? dependencyId} is no longer approved.`,
@@ -151,13 +146,22 @@ function dependencyBlockingReasons(definition: WorkflowStageDefinition, snapshot
   return directReasons.concat(chainReasons);
 }
 
+function isSnapshotStageApplicable(definition: WorkflowStageDefinition, snapshot: WorkflowStateSnapshot): boolean {
+  if (definition.applicability === "reference") return snapshot.inputMode === "reference" || snapshot.includedReferenceCount > 0;
+  if (definition.applicability === "not_existing_script") return snapshot.inputMode !== "existing_script";
+  return true;
+}
+
 function dependencyChainApproved(stageId: string, snapshot: WorkflowStateSnapshot, visited = new Set<string>()): boolean {
   if (visited.has(stageId)) return false;
   const nextVisited = new Set(visited);
   nextVisited.add(stageId);
-  const definition = workflowStageDefinitions.find((stage) => stage.id === stageId);
+  const definition = getWorkflowStageDefinition(stageId);
   if (definition && hasRequiredInput(definition, "reference-set.approved") && snapshot.referenceSetStatus !== "approved") return false;
-  return !definition || effectiveDependencies(definition, snapshot).every((dependencyId) =>
+  return !definition || effectiveDependencies(definition, snapshot).filter((dependencyId) => {
+    const dependencyDefinition = getWorkflowStageDefinition(dependencyId);
+    return dependencyDefinition ? isSnapshotStageApplicable(dependencyDefinition, snapshot) : true;
+  }).every((dependencyId) =>
     snapshot.stages.find((stage) => stage.id === dependencyId)?.status === "approved"
     && dependencyChainApproved(dependencyId, snapshot, nextVisited)
   );

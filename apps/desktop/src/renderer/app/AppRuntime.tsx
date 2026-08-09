@@ -138,7 +138,7 @@ export function AppRuntime() {
   }
 
   async function startSemiAutomatic(chain: SemiAutomaticChain, project: FactoryProject): Promise<void> {
-    if (project.setup.workflowMode !== "semi_automatic" || semiAutomaticRunning || semiAutomaticRunLock.current) return;
+    if (project.setup.workflowContract !== "legacy" || project.setup.workflowMode !== "semi_automatic" || semiAutomaticRunning || semiAutomaticRunLock.current) return;
     semiAutomaticRunLock.current = true;
     setSemiAutomaticRunning(true);
     setSemiAutomaticError(null);

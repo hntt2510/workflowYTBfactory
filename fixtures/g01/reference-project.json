@@ -1,0 +1,5 @@
+{
+  "fixture": "g01-reference-project",
+  "setup": { "inputMode": "reference", "workflowContract": "preproduction" },
+  "expectedReferenceStage": "applicable"
+}

@@ -1,0 +1,6 @@
+{
+  "fixture": "g01-existing-script-project",
+  "setup": { "inputMode": "existing_script", "workflowContract": "preproduction" },
+  "expectedNotApplicableStages": ["idea-lab", "story-architecture"],
+  "expectedCurrentStage": "timing"
+}

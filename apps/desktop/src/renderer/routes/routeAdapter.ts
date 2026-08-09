@@ -1,7 +1,16 @@
 import { allRoutes, type RouteId } from "../navigation";
+import { getWorkflowStageDefinition } from "@lsf/domain";
 
 const legacyRouteAliases: Record<string, RouteId> = {
   "new-project": "create"
+};
+const legacyStageRoutes: Record<string, RouteId> = {
+  "reference-validation": "reference-intake", "transcript-cleaning": "reference-intake", "reference-segmentation": "reference-intake",
+  "competitor-dna": "idea-lab", "opportunity-map": "idea-lab", "originality-review": "idea-lab",
+  "outline": "script", "fact-review": "script", "retention-review": "script", "visual-routing": "shots",
+  "character-preparation": "assets", "asset-concepts": "assets", "asset-acquisition": "assets",
+  "voice-generation": "voice", "subtitle-preparation": "timeline", "timeline-assembly": "timeline",
+  "preview-render": "final-preview", "qa": "qa", "capcut-draft": "export", "packaging-export": "export"
 };
 
 export function routeFromHash(hash = window.location.hash): RouteId {
@@ -16,18 +25,9 @@ export function canonicalRoute(route: RouteId): RouteId {
 
 export function routeForStage(stageId?: string): RouteId {
   const stage = stageId?.trim().toLowerCase() ?? "";
-  if (!stage) return "final-preview";
-  if (stage === "project-setup") return "project-overview";
-  if (/reference/.test(stage)) return "reference-intake";
-  if (/competitor|opportunity|idea|originality/.test(stage)) return "idea-lab";
-  if (/outline|script|fact-review|retention/.test(stage)) return "script";
-  if (stage === "scene-plan") return "scenes";
-  if (/shot-plan|visual-routing/.test(stage)) return "shots";
-  if (/character-preparation|asset-concepts|prompt-preparation|asset-acquisition|asset-review/.test(stage)) return "assets";
-  if (stage === "voice-generation") return "voice";
-  if (/subtitle-preparation|timeline-assembly/.test(stage)) return "timeline";
-  if (stage === "preview-render") return "final-preview";
-  if (stage === "qa") return "qa";
-  if (/capcut|packaging-export/.test(stage)) return "export";
+  if (!stage) return "project-overview";
+  const route = getWorkflowStageDefinition(stage)?.screenRoute;
+  if (route && allRoutes.some((item) => item.id === route)) return route as RouteId;
+  if (legacyStageRoutes[stage]) return legacyStageRoutes[stage];
   return "project-overview";
 }

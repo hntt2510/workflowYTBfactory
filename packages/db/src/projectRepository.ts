@@ -123,11 +123,12 @@ export class ProjectRepository {
       format: projectRow.format as FactoryProject["format"],
       targetLanguage: projectRow.target_language,
       setup:
-        payload.setup ?? {
+        payload.setup ? { workflowContract: payload.setup.workflowContract ?? "legacy", ...payload.setup } : {
           projectName: projectRow.topic,
           targetDuration: defaultTargetDuration(projectRow.format),
           language: projectRow.target_language,
-          workflowMode: "guided"
+          workflowMode: "guided",
+          workflowContract: "legacy"
         },
       profileId: projectRow.profile_id,
       routeDecision: JSON.parse(projectRow.route_decision_json) as FactoryProject["routeDecision"],

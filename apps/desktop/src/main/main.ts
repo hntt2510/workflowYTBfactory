@@ -2036,6 +2036,7 @@ ipcMain.handle("fixture-project", (_event, input: unknown) => {
     ...(request.targetDuration ? { targetDuration: request.targetDuration } : {}),
     ...(request.projectName ? { projectName: request.projectName } : {}),
     ...(request.workflowMode ? { workflowMode: request.workflowMode } : {}),
+    workflowContract: "preproduction",
     ...(request.visualWorkflow ? { visualWorkflow: request.visualWorkflow } : {}),
     ...(request.characterVersionId ? { characterVersionId: request.characterVersionId } : {}),
     inputMode: request.inputMode === "topic" && competitorReference ? "reference" : request.inputMode,

@@ -8,6 +8,7 @@ export * from "./stageAttention";
 export * from "./styleSkills";
 export * from "./existingScript";
 export * from "./workflowRegistry";
+export * from "./legacyWorkflowRegistry";
 export * from "./workflowEligibility";
 export * from "./workflowTransitions";
 export * from "./workflowProgress";

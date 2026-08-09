@@ -44,6 +44,7 @@ export interface ProjectSetup {
   targetDuration: string;
   language: string;
   workflowMode: WorkflowMode;
+  workflowContract?: "preproduction" | "legacy";
   visualWorkflow?: VisualWorkflowMode;
   characterVersionId?: string;
   inputMode?: ProductionInputMode;
@@ -292,6 +293,9 @@ export interface WorkflowStageDefinition {
   requiredCapability?: string;
   approvalRequired: boolean;
   invalidates: string[];
+  applicability?: "always" | "reference" | "not_existing_script";
+  optional?: boolean;
+  userInteractionRequired?: boolean;
 }
 
 export interface WorkflowStageRun {

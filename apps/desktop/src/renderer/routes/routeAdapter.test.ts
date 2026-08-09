@@ -12,6 +12,6 @@ describe("creator route adapter", () => {
     expect(routeForStage("reference-validation")).toBe("reference-intake");
     expect(routeForStage("asset-review")).toBe("assets");
     expect(routeForStage("preview-render")).toBe("final-preview");
-    expect(routeForStage()).toBe("final-preview");
+    expect(routeForStage()).toBe("project-overview");
   });
 });

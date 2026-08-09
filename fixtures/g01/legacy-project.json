@@ -1,0 +1,5 @@
+{
+  "fixture": "g01-legacy-project",
+  "setup": { "workflowContract": "legacy" },
+  "expectedBehavior": "preserve legacy stages and load without requiring pre-production metadata"
+}

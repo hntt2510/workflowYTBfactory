@@ -20,7 +20,7 @@ export function ProjectOverview(props: {
   semiAutomaticError: string | null;
 }) {
   const project = props.selectedProject;
-  const characterNeedsSetup = characterVersionNeedsSetup(project, props.selectedProfile);
+  const characterNeedsSetup = project.setup.visualWorkflow === "legacy" && characterVersionNeedsSetup(project, props.selectedProfile);
   const eligibilities = resolveStageEligibilities(project, {
     textVerified: props.textCertification.status === "verified",
     imageVerified: props.imageCertification.status === "verified",
@@ -36,14 +36,14 @@ export function ProjectOverview(props: {
     return presentation?.state !== "not_applicable" && presentation?.state !== "optional";
   });
   const nextStageName = nextStage ? creatorStageLabel(nextStage.stageId) : undefined;
-  const nextChain = nextSemiAutomaticChain(project, props.selectedProfile);
+  const nextChain = project.setup.visualWorkflow === "legacy" ? nextSemiAutomaticChain(project, props.selectedProfile) : undefined;
   const isRunning = props.semiAutomaticRunning || project.stages.some((stage) => stage.status === "queued" || stage.status === "running");
   const actionStage = attention ?? checkpoint;
-  const retryChain = attention && project.setup.workflowMode === "semi_automatic" ? automaticChainForStage(attention.id) : undefined;
-  const actionRoute = characterNeedsSetup ? "channel-profiles" : actionStage ? stageRoute(actionStage.id) : nextStage ? stageRoute(nextStage.stageId) : "advanced-pipeline";
+  const retryChain = attention && project.setup.workflowContract === "legacy" && project.setup.workflowMode === "semi_automatic" ? automaticChainForStage(attention.id) : undefined;
+  const actionRoute = characterNeedsSetup ? "channel-profiles" : actionStage ? stageRoute(actionStage.id) : nextStage ? stageRoute(nextStage.stageId) : "project-overview";
   const phaseRows = progress.phases.map((phase) => ({
     ...phase,
-    label: creatorPhaseLabel(phase.id),
+    label: phase.name,
     currentStage: phase.currentStageId
       ? creatorStageLabel(phase.currentStageId)
       : phase.state === "not_applicable"
@@ -70,7 +70,6 @@ export function ProjectOverview(props: {
             : nextStageName
               ? `Mở ${nextStageName}`
               : creatorOverviewCopy.complete;
-  const capcut = presentationById.get("capcut-draft");
 
   async function continueProduction(): Promise<void> {
     if (characterNeedsSetup) {
@@ -98,7 +97,7 @@ export function ProjectOverview(props: {
         eyebrow={creatorOverviewCopy.eyebrow}
         title={project.setup.projectName}
         description={creatorOverviewCopy.description}
-        actions={<div className="button-row">{progress.percent === 100 ? <><button className="button secondary" type="button" onClick={() => props.setRoute("final-preview")}>{creatorOverviewCopy.watchFinal}</button><button className="button secondary" type="button" onClick={() => props.setRoute("export")}>{creatorOverviewCopy.openExport}</button></> : null}<button className="button primary" type="button" disabled={isRunning || (!characterNeedsSetup && !actionStage && !nextStage && !nextChain)} onClick={() => void continueProduction()}>{isRunning ? creatorOverviewCopy.running : actionLabel}</button></div>}
+        actions={<div className="button-row"><button className="button primary" type="button" disabled={isRunning || (!characterNeedsSetup && !actionStage && !nextStage && !nextChain)} onClick={() => void continueProduction()}>{isRunning ? creatorOverviewCopy.running : actionLabel}</button></div>}
       />
       <section className="metric-grid">
         <MetricCard label={creatorOverviewCopy.status} value={creatorStatusLabel(resolveProductionStatus(project))} />
@@ -119,8 +118,7 @@ export function ProjectOverview(props: {
           <strong>{progress.currentStageId ? `Đang làm: ${creatorStageLabel(progress.currentStageId)}` : creatorOverviewCopy.complete}</strong>
           <span>{currentPhaseLabel ? `Giai đoạn hiện tại: ${currentPhaseLabel}. ` : ""}{actionLabel}.</span>
         </div>
-        {capcut?.state === "optional" ? <p className="muted">CapCut là tuỳ chọn và không chặn việc xuất MP4.</p> : null}
-        {progress.percent === 100 ? <div className="button-row"><button className="button primary compact" type="button" onClick={() => props.setRoute("final-preview")}>{creatorOverviewCopy.watchFinal}</button><button className="button secondary compact" type="button" onClick={() => props.setRoute("export")}>Xem file đã xuất</button></div> : null}
+        {progress.percent === 100 ? <p className="muted">Dự án đã sẵn sàng để bàn giao cho production bên ngoài.</p> : null}
       </SectionCard>
       <SectionCard title={attention ? creatorOverviewCopy.actionRequired : checkpoint ? creatorOverviewCopy.reviewAvailable : creatorOverviewCopy.productionProgress} description={attention ? creatorBlockingMessage(attention.attention?.message ?? "") : checkpoint ? "Mở bước duyệt khi bạn sẵn sàng. Sau khi xác nhận, bạn sẽ quay lại đây." : "Các bước an toàn sẽ tiếp tục cho đến khi cần bạn quyết định."}>
         {attention || checkpoint ? (
@@ -146,6 +144,17 @@ export function ProjectOverview(props: {
           ))}
         </div>
       </SectionCard>
+      <SectionCard title="Các stage của workflow">
+        <div className="status-grid" aria-label="Các stage workflow">
+          {progress.stages.map((stage) => (
+            <button className="status-row" key={stage.stageId} type="button" onClick={() => props.setRoute(stageRoute(stage.stageId))}>
+              <span>{stage.name}</span>
+              <StatusBadge tone={stageTone(stage.state)}>{stage.state}</StatusBadge>
+              <small>{stage.applicable ? (stage.optional ? "Tuỳ chọn" : "Bắt buộc") : "Không áp dụng"}</small>
+            </button>
+          ))}
+        </div>
+      </SectionCard>
       <SectionCard title={creatorOverviewCopy.details}>
         <SettingsList items={[
           ["Kênh", props.selectedProfile?.name ?? project.profileId],
@@ -167,8 +176,6 @@ export function ProjectOverview(props: {
 }
 
 export function stageRoute(name: string): RouteId {
-  if (name === "asset-review" || /asset review/i.test(name)) return "scene-review";
-  if (name === "preview-render" || /preview render/i.test(name)) return "final-preview";
   const stage = workflowStageDefinitions.find((definition) => definition.id === name || definition.name === name);
   if (stage) return stage.screenRoute as RouteId;
   if (/channel|profile/i.test(name)) return "channel-profiles";

@@ -67,6 +67,7 @@ export function characterVersionNeedsSetup(project: FactoryProject, profile: Cha
 
 /** Returns the next automatic segment without crossing a human checkpoint. */
 export function nextSemiAutomaticChain(project: FactoryProject, profile?: ChannelProfile): SemiAutomaticChain | undefined {
+  if (project.setup.workflowContract !== "legacy") return undefined;
   if (project.setup.workflowMode !== "semi_automatic") return undefined;
   if (hasSemiAutomaticAttention(project)) return undefined;
   if (project.setup.visualWorkflow === "character_first") {

@@ -4,6 +4,7 @@ import type { ChannelProfile, FactoryProject, PipelineStage, VideoFormat, Visual
 import { normalizeReferenceIdentity } from "./referenceIdentity";
 import { characterVersionIsApproved, resolveApprovedCharacterVersion } from "./character";
 import { workflowStageDefinitions } from "./workflowRegistry";
+import { legacyWorkflowStageDefinitions } from "./legacyWorkflowRegistry";
 
 function uniqueId(prefix: string): string {
   const random = typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -16,8 +17,9 @@ function defaultTargetDuration(format: VideoFormat): string {
   return format === "long" ? "8-12 minutes" : "45-60 seconds";
 }
 
-export function createPipelineStages(approvedThroughIndex = 0): PipelineStage[] {
-  return workflowStageDefinitions.map((definition, index) => ({
+export function createPipelineStages(approvedThroughIndex = 0, workflowContract: "preproduction" | "legacy" = "legacy"): PipelineStage[] {
+  const definitions = workflowContract === "legacy" ? [...workflowStageDefinitions, ...legacyWorkflowStageDefinitions] : workflowStageDefinitions;
+  return definitions.map((definition, index) => ({
     id: definition.id,
     name: definition.name,
     status: index <= approvedThroughIndex ? "approved" : "not_started",
@@ -34,6 +36,7 @@ export function createFixtureProject(input: {
   targetDuration?: string;
   projectName?: string;
   workflowMode?: WorkflowMode;
+  workflowContract?: "preproduction" | "legacy";
   visualWorkflow?: VisualWorkflowMode;
   characterVersionId?: string;
   inputMode?: "topic" | "existing_script" | "reference";
@@ -72,9 +75,11 @@ export function createFixtureProject(input: {
     : [];
   const selectedCharacterVersion = resolveApprovedCharacterVersion(profile, input.characterVersionId);
   const boundCharacterVersionId = selectedCharacterVersion?.id ?? input.characterVersionId;
-  const stages = createPipelineStages(0).map((stage) => (
+  const stages = createPipelineStages(0, input.workflowContract).map((stage) => (
     competitorReferences.length && stage.id === "reference-intake"
       ? { ...stage, status: "approved" as const }
+      : input.inputMode === "existing_script" && stage.id === "script" && input.sourceScript?.trim()
+        ? { ...stage, status: "approved" as const }
       : stage.id === "character-preparation" && input.visualWorkflow !== "legacy" && characterVersionIsApproved(selectedCharacterVersion)
         ? { ...stage, status: "approved" as const }
         : stage
@@ -90,6 +95,7 @@ export function createFixtureProject(input: {
       targetDuration: input.targetDuration?.trim() || defaultTargetDuration(input.format),
       language: input.targetLanguage,
       workflowMode: input.workflowMode ?? "semi_automatic",
+      workflowContract: input.workflowContract ?? "legacy",
       visualWorkflow: input.visualWorkflow ?? (input.workflowMode === "guided" ? "legacy" : "character_first"),
       ...(boundCharacterVersionId ? { characterVersionId: boundCharacterVersionId } : {}),
       inputMode: input.inputMode ?? (input.competitorReference ? "reference" : "topic"),

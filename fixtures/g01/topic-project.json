@@ -1,0 +1,6 @@
+{
+  "fixture": "g01-topic-project",
+  "setup": { "inputMode": "topic", "workflowContract": "preproduction" },
+  "expectedCurrentStage": "idea-lab",
+  "referenceStage": "not_applicable"
+}
