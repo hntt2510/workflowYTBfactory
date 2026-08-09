@@ -87,6 +87,7 @@ export class ProjectRepository {
             synthetic: project.synthetic === true,
             referenceSet: project.referenceSet,
             competitorReferences: project.competitorReferences,
+            approvedScript: project.approvedScript,
             assetConcepts: project.assetConcepts
           })
         );
@@ -114,6 +115,7 @@ export class ProjectRepository {
 	      setup?: FactoryProject["setup"];
       referenceSet?: FactoryProject["referenceSet"];
       competitorReferences?: FactoryProject["competitorReferences"];
+      approvedScript?: FactoryProject["approvedScript"];
       assetConcepts?: FactoryProject["assetConcepts"];
 	    };
     return {
@@ -136,6 +138,7 @@ export class ProjectRepository {
       referenceSet: payload.referenceSet ?? { status: payload.competitorReferences?.length ? "needs_validation" : "not_started" },
       ideas: this.loadPayloadRows("ideas", projectId),
       ...(projectRow.approved_idea_id ? { approvedIdeaId: projectRow.approved_idea_id } : {}),
+      ...(payload.approvedScript ? { approvedScript: payload.approvedScript } : {}),
 	      claims: this.loadPayloadRows("claims", projectId),
 	      competitorReferences: payload.competitorReferences ?? [],
 	      scriptSections: this.loadPayloadRows("script_sections", projectId),

@@ -10,7 +10,7 @@ describe("G01 workflow eligibility", () => {
 
   it("does not require image/video/audio capabilities in the default image handoff path", () => {
     const project = createFixtureProject({ topic: "Topic", format: "short", targetLanguage: "Vietnamese", inputMode: "topic" });
-    const stages = project.stages.map((stage) => ({ ...stage, status: ["project-setup", "idea-lab", "story-architecture", "script", "timing", "director-analysis", "scene-plan", "shot-plan", "prompt-preparation", "batch-planner", "gglab-generation-gate"].includes(stage.id) ? "approved" as const : stage.status }));
+    const stages = project.stages.map((stage) => ({ ...stage, status: ["project-setup", "idea-lab", "story-architecture", "outline", "script", "timing", "director-analysis", "scene-plan", "shot-plan", "prompt-preparation", "batch-planner", "gglab-generation-gate"].includes(stage.id) ? "approved" as const : stage.status }));
     const imageReview = resolveStageEligibilities({ ...project, stages }).find((stage) => stage.stageId === "asset-review");
     expect(imageReview).toMatchObject({ status: "ready", runnable: true, blockingReasons: [] });
   });
@@ -20,7 +20,8 @@ describe("G01 workflow eligibility", () => {
     const eligibilities = resolveStageEligibilities(project, { textVerified: false });
     expect(eligibilities.find((stage) => stage.stageId === "idea-lab")).toMatchObject({ status: "blocked", runnable: false });
     expect(eligibilities.find((stage) => stage.stageId === "story-architecture")).toMatchObject({ status: "blocked", runnable: false });
-    expect(eligibilities.find((stage) => stage.stageId === "timing")?.status).toBe("ready");
+    expect(eligibilities.find((stage) => stage.stageId === "script")?.status).toBe("ready");
+    expect(eligibilities.find((stage) => stage.stageId === "timing")?.status).toBe("blocked");
   });
 
   it("preserves unknown legacy stages while adding missing canonical stages", () => {

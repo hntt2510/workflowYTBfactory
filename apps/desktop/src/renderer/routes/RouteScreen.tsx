@@ -24,7 +24,7 @@ import { VoiceScreen } from "../features/voice/VoiceScreen";
 import { ChannelProfilesScreen } from "../features/settings/ChannelProfilesScreen";
 import { DiagnosticsScreen, SettingsScreen } from "../features/settings/SettingsScreens";
 import { ProvidersScreen } from "../features/settings/ProvidersScreen";
-import { CompetitorDnaScreen, IdeaLabScreen, ReferenceIntakeScreen, ScriptScreen } from "../features/story/StoryScreens";
+import { IdeaLabScreen, ReferenceIntakeScreen, ScriptScreen } from "../features/story/StoryScreens";
 import { ExportScreen, QaScreen, TimelineScreen } from "../features/build/BuildScreens";
 import { FinalPreviewScreen } from "../features/build/FinalPreviewScreen";
 import { ProjectStudioScreen } from "../features/studio/ProjectStudioScreen";
@@ -132,7 +132,7 @@ export function RouteScreen(props: RouteScreenProps) {
   if (props.route === "scene-review") return <SceneReviewScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} />;
   if (props.route === "final-preview") return <FinalPreviewScreen project={props.selectedProject} localTtsSettings={props.localTtsSettings} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} startSemiAutomatic={props.startSemiAutomatic} />;
   if (props.route === "advanced-pipeline") return <AdvancedPipelineScreen project={props.selectedProject} setRoute={props.setRoute} />;
-  if (props.route === "competitor-dna") return <CompetitorDnaScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} textCertification={props.textCertification} startSemiAutomatic={props.startSemiAutomatic} />;
+  if (props.route === "competitor-dna") return <ProjectStudioScreen {...workspaceProps} workspace="content" initialTab="references" />;
   if (props.route === "export") return <ExportScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} />;
   return <EmptyState title="Tuyến chưa được triển khai" detail="Tuyến này được đăng ký cho đợt kiểm tra giao diện nhưng chưa có màn hình thực thi." action={<button className="button secondary" type="button" onClick={() => props.setRoute("dashboard")}>Về trang chủ</button>} />;
 }

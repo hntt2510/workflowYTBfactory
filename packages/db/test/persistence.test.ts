@@ -188,6 +188,19 @@ describe("project persistence", () => {
     db.close();
   });
 
+  it("persists the explicitly approved current Script across a database reopen", () => {
+    const { dbPath, db, repo } = openTemp();
+    const project = {
+      ...createFixtureProject({ topic: "approved script persistence", format: "short", targetLanguage: "Vietnamese" }),
+      approvedScript: { scriptArtifactId: "script-artifact-v2", approvedAt: "2026-08-09T00:00:00.000Z" }
+    };
+    repo.saveProject(project);
+    db.close();
+    const reopened = openFactoryDatabase(dbPath);
+    expect(new ProjectRepository(reopened).loadProject(project.id)?.approvedScript).toEqual(project.approvedScript);
+    reopened.close();
+  });
+
   it("records system automatic approval metadata only for Semi-automatic intermediate stages", () => {
     const { db, repo } = openTemp();
     const project = createFixtureProject({ topic: "automatic approval audit", format: "short", targetLanguage: "English", workflowMode: "semi_automatic" });
@@ -421,6 +434,19 @@ describe("project persistence", () => {
     store.markProjectArtifactsStale(project.id);
     expect(store.listRuns(project.id, "reference-validation")[0]?.status).toBe("stale");
     expect(store.listArtifacts(project.id, "reference-validation")[0]?.status).toBe("stale");
+    db.close();
+  });
+
+  it("approves Script Review for the current reviewable creator draft without approving the draft first", () => {
+    const { db, repo } = openTemp();
+    const project = createFixtureProject({ topic: "script review draft", format: "short", targetLanguage: "Vietnamese", inputMode: "existing_script", sourceScript: "Bản nháp do creator nhập." });
+    repo.saveProject(project);
+    const store = new WorkflowRunStore(db);
+    const now = "2026-08-09T00:00:00.000Z";
+    store.completeRun({ id: "script-user-edit", projectId: project.id, stageId: "script", status: "needs_review", runnerId: "script-user-edit", runnerVersion: "v1", inputArtifactIds: [], inputFingerprint: "s".repeat(64), outputArtifactIds: ["script-draft"], startedAt: now, finishedAt: now }, { id: "script-draft", projectId: project.id, stageId: "script", stageRunId: "script-user-edit", type: "script", version: 2, status: "needs_review", payloadJson: { sections: [] }, createdAt: now, updatedAt: now });
+    store.completeRun({ id: "script-review-current", projectId: project.id, stageId: "script-review", status: "needs_review", runnerId: "script-review-text-provider", runnerVersion: "v1", inputArtifactIds: ["script-draft"], inputFingerprint: "r".repeat(64), outputArtifactIds: ["script-review-artifact"], startedAt: now, finishedAt: now }, { id: "script-review-artifact", projectId: project.id, stageId: "script-review", stageRunId: "script-review-current", type: "script-review", version: 1, status: "needs_review", payloadJson: { overallStatus: "pass" }, createdAt: now, updatedAt: now });
+    expect(() => store.approveReviewRun("script-review-current")).not.toThrow();
+    expect(store.listArtifacts(project.id, "script-review")[0]?.status).toBe("approved");
     db.close();
   });
 

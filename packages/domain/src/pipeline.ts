@@ -78,8 +78,6 @@ export function createFixtureProject(input: {
   const stages = createPipelineStages(0, input.workflowContract).map((stage) => (
     competitorReferences.length && stage.id === "reference-intake"
       ? { ...stage, status: "approved" as const }
-      : input.inputMode === "existing_script" && stage.id === "script" && input.sourceScript?.trim()
-        ? { ...stage, status: "approved" as const }
       : stage.id === "character-preparation" && input.visualWorkflow !== "legacy" && characterVersionIsApproved(selectedCharacterVersion)
         ? { ...stage, status: "approved" as const }
         : stage

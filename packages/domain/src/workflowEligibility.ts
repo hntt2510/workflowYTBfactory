@@ -231,6 +231,10 @@ function providerBlockingReasons(definition: WorkflowStageDefinition, snapshot: 
   // Character-first projects create images manually in GG Lab. Provider text/image
   // capability must not block the normal prompt and asset-intake path.
   if (snapshot.visualWorkflow === "character_first" && ["asset-concepts", "prompt-preparation", "asset-acquisition"].includes(definition.id)) return [];
+  // Existing Script starts from user-provided local text; importing it cannot
+  // require Cockpit. The separate Script Review action will require a verified
+  // text provider only when the creator explicitly invokes it.
+  if (snapshot.inputMode === "existing_script" && definition.id === "script") return [];
   if (definition.executionKind === "provider_text" && !snapshot.providerCapabilities?.textVerified) {
     return [{
       code: "TEXT_MODEL_NOT_VERIFIED",

@@ -14,6 +14,8 @@ import type {
   ReferenceSegmentationArtifact,
   RetentionReviewArtifact,
   ScriptArtifact,
+  ScriptReviewArtifact,
+  StoryArchitectureArtifact,
   TextModelCertificationResponse,
   TranscriptCleaningArtifact
 } from "../../types";
@@ -861,6 +863,7 @@ export function IdeaLabScreen(props: { project: FactoryProject; setSelectedProje
               <p><strong>Câu hỏi của người xem:</strong> {idea.dramaticQuestion}</p>
               <p><strong>Cảm xúc mục tiêu:</strong> {idea.targetEmotion}</p>
               <p><strong>Concept thumbnail:</strong> {idea.thumbnailConcept}</p>
+              <p><strong>Decision-support scores:</strong> Novelty {idea.noveltyScore}/100 — {idea.scoreExplanations.novelty}<br />Audience fit {idea.audienceFitScore}/100 — {idea.scoreExplanations.audienceFit}<br />Thumbnail {idea.thumbnailPotentialScore}/100 — {idea.scoreExplanations.thumbnailPotential}<br />Production feasibility {idea.productionFeasibilityScore}/100 — {idea.scoreExplanations.productionFeasibility}</p>
               <p><strong>Độ khó dự kiến:</strong> {creatorStatusLabel(idea.productionDifficulty)} / <strong>Rủi ro nghiên cứu:</strong> {idea.researchRisk}</p>
               <p><strong>Tóm tắt tính riêng:</strong> {idea.noveltyExplanation}</p>
               <div className="button-row"><StatusBadge tone={props.project.approvedIdeaId === idea.id ? "success" : ideaLab.status === "needs_review" ? "warning" : "info"}>{props.project.approvedIdeaId === idea.id ? "Ý tưởng đã chọn" : ideaLab.status === "needs_review" ? "Cần duyệt" : "Ứng viên"}</StatusBadge>{ideaLab.status === "needs_review" ? <><button className="button primary compact" type="button" disabled={!ideaLab.approvable} onClick={() => void approveIdea(idea.id)}>Chọn ý tưởng</button><button className="button secondary compact" type="button" onClick={() => setEditingIdea(idea)}>Sửa</button></> : null}</div>
@@ -895,8 +898,12 @@ export function IdeaLabScreen(props: { project: FactoryProject; setSelectedProje
 }
 
 export function ScriptScreen(props: { project: FactoryProject; selectedProfile: ChannelProfile | undefined; setSelectedProject: (project: FactoryProject | null) => void; textCertification: TextModelCertificationResponse }) {
+  const [storyArchitectures, setStoryArchitectures] = useState<StoryArchitectureArtifact[]>([]);
   const [outlines, setOutlines] = useState<OutlineArtifact[]>([]);
   const [scripts, setScripts] = useState<ScriptArtifact[]>([]);
+  const [scriptReviews, setScriptReviews] = useState<ScriptReviewArtifact[]>([]);
+  const [selectedFindingIds, setSelectedFindingIds] = useState<string[]>([]);
+  const [revisionInstructions, setRevisionInstructions] = useState("");
   const [factReviews, setFactReviews] = useState<FactReviewArtifact[]>([]);
   const [retentionReviews, setRetentionReviews] = useState<RetentionReviewArtifact[]>([]);
   const [running, setRunning] = useState(false);
@@ -904,28 +911,41 @@ export function ScriptScreen(props: { project: FactoryProject; selectedProfile: 
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [draftNarration, setDraftNarration] = useState("");
   const eligibilities = resolveStageEligibilities(props.project, { textVerified: props.textCertification.status === "verified" });
+  const storyArchitecture = eligibilities.find((stage) => stage.stageId === "story-architecture")!;
   const outline = eligibilities.find((stage) => stage.stageId === "outline")!;
   const script = eligibilities.find((stage) => stage.stageId === "script")!;
+  const scriptReview = eligibilities.find((stage) => stage.stageId === "script-review")!;
   const factReview = eligibilities.find((stage) => stage.stageId === "fact-review")!;
   const retentionReview = eligibilities.find((stage) => stage.stageId === "retention-review")!;
   async function refreshArtifacts() {
-    const [nextOutlines, nextScripts, nextFactReviews, nextRetentionReviews] = await Promise.all([
+    const [nextStoryArchitectures, nextOutlines, nextScripts, nextScriptReviews, nextFactReviews, nextRetentionReviews] = await Promise.all([
+      factoryClient.listStoryArchitectureArtifacts({ projectId: props.project.id }),
       factoryClient.listOutlineArtifacts({ projectId: props.project.id }),
       factoryClient.listScriptArtifacts({ projectId: props.project.id }),
+      factoryClient.listScriptReviewArtifacts({ projectId: props.project.id }),
       factoryClient.listFactReviewArtifacts({ projectId: props.project.id }),
       factoryClient.listRetentionReviewArtifacts({ projectId: props.project.id })
     ]);
-    setOutlines(nextOutlines); setScripts(nextScripts); setFactReviews(nextFactReviews); setRetentionReviews(nextRetentionReviews);
+    setStoryArchitectures(nextStoryArchitectures); setOutlines(nextOutlines); setScripts(nextScripts); setScriptReviews(nextScriptReviews); setFactReviews(nextFactReviews); setRetentionReviews(nextRetentionReviews);
   }
-  useEffect(() => { void refreshArtifacts().catch(() => { setOutlines([]); setScripts([]); setFactReviews([]); setRetentionReviews([]); }); }, [props.project.id]);
+  useEffect(() => { void refreshArtifacts().catch(() => { setStoryArchitectures([]); setOutlines([]); setScripts([]); setScriptReviews([]); setFactReviews([]); setRetentionReviews([]); }); }, [props.project.id]);
   async function perform(action: () => Promise<FactoryProject>, success: string, failed: string) { setRunning(true); setMessage(""); try { props.setSelectedProject(await action()); await refreshArtifacts(); setMessage(success); } catch (error) { setMessage(`${failed}: ${safeRendererError(error)}`); } finally { setRunning(false); } }
   function runOutline() { return perform(() => factoryClient.runOutline({ projectId: props.project.id }), "Dàn ý đã sẵn sàng để duyệt.", "Không thể tạo dàn ý"); }
+  function runStoryArchitecture() { return perform(() => factoryClient.runStoryArchitecture({ projectId: props.project.id }), "Chiến lược câu chuyện đã sẵn sàng để duyệt.", "Không thể tạo chiến lược câu chuyện"); }
+  function approveStoryArchitecture() { return perform(() => factoryClient.approveStoryArchitecture({ projectId: props.project.id }), "Chiến lược câu chuyện đã được duyệt. Có thể lập dàn ý.", "Không thể duyệt chiến lược câu chuyện"); }
+  function rejectStoryArchitecture() { return perform(() => factoryClient.rejectStoryArchitecture({ projectId: props.project.id }), "Chiến lược câu chuyện đã bị từ chối.", "Không thể từ chối chiến lược câu chuyện"); }
   function approveOutline() { return perform(() => factoryClient.approveOutline({ projectId: props.project.id }), "Dàn ý đã được duyệt. Có thể viết kịch bản.", "Không thể duyệt dàn ý"); }
   function rejectOutline() { return perform(() => factoryClient.rejectOutline({ projectId: props.project.id }), "Dàn ý đã bị từ chối.", "Không thể từ chối dàn ý"); }
   function runScript() { return perform(() => factoryClient.runScript({ projectId: props.project.id }), "Kịch bản đã sẵn sàng để duyệt.", "Không thể tạo kịch bản"); }
   function regenerateScript() { return perform(() => factoryClient.regenerateScript({ projectId: props.project.id }), "Kịch bản đã được tạo lại và sẵn sàng để duyệt.", "Không thể tạo lại kịch bản"); }
-  function approveScript() { return perform(() => factoryClient.approveScript({ projectId: props.project.id }), "Kịch bản đã được duyệt. Có thể kiểm tra sự thật.", "Không thể duyệt kịch bản"); }
+  function approveScript(scriptArtifactId: string) { return perform(() => factoryClient.approveScript({ projectId: props.project.id, scriptArtifactId }), "Kịch bản đã được duyệt rõ ràng.", "Không thể duyệt kịch bản"); }
   function rejectScript() { return perform(() => factoryClient.rejectScript({ projectId: props.project.id }), "Kịch bản đã bị từ chối.", "Không thể từ chối kịch bản"); }
+  function runScriptReview(scriptArtifactId?: string) { return perform(() => factoryClient.runScriptReview({ projectId: props.project.id, ...(scriptArtifactId ? { scriptArtifactId } : {}) }), "Bản kiểm tra kịch bản đã sẵn sàng. Chọn các nhận xét cần sửa hoặc duyệt bản hiện tại.", "Không thể chạy kiểm tra kịch bản"); }
+  function reviseCurrentScript(review: ScriptReviewArtifact) {
+    if (!selectedFindingIds.length) { setMessage("Hãy chọn ít nhất một nhận xét trước khi sửa kịch bản."); return; }
+    return perform(() => factoryClient.reviseScript({ projectId: props.project.id, scriptArtifactId: review.payloadJson.scriptArtifactId, reviewArtifactId: review.id, findingIds: selectedFindingIds, ...(revisionInstructions.trim() ? { instructions: revisionInstructions.trim() } : {}) }), "Đã tạo phiên bản kịch bản mới; hãy review lại trước khi duyệt.", "Không thể sửa kịch bản");
+  }
+  function reviewForScript(scriptArtifactId: string): ScriptReviewArtifact | undefined { return scriptReviews.find((review) => review.status === "approved" && review.payloadJson.scriptArtifactId === scriptArtifactId); }
   async function saveScriptEdit(sectionId: string): Promise<void> {
     const artifact = [...scripts].reverse().find((item) => item.status === "needs_review" || item.status === "approved");
     if (!artifact) { setMessage("Cần có bản kịch bản đã lưu trước khi chỉnh sửa."); return; }
@@ -952,13 +972,22 @@ export function ScriptScreen(props: { project: FactoryProject; selectedProfile: 
   return (
     <>
       <PageHeader title="Câu chuyện" description="Dàn ý, kịch bản và các lượt kiểm tra được duyệt riêng để bạn luôn biết bước tiếp theo." actions={outline.runnable ? <button className="button primary" type="button" onClick={() => void runOutline()} disabled={running}>Lập dàn ý</button> : <DisabledAction reason={outline.blockingReasons[0]?.message ?? "Dàn ý chưa thể chạy."}>Lập dàn ý</DisabledAction>} />
+      <StageStatusHeader stageName="Story Architecture" stageNumber={10} eligibility={storyArchitecture} dependencies={["Approved idea"]} purpose="Chốt chiến lược kể chuyện trước khi viết dàn ý hoặc lời dẫn." />
+      <SectionCard title="Chiến lược câu chuyện" description="Đây là narrative intent; không chứa cảnh, góc máy hay chỉ dẫn hình ảnh.">
+        {storyArchitecture.runnable ? <button className="button primary" type="button" onClick={() => void runStoryArchitecture()} disabled={running}>Tạo chiến lược câu chuyện</button> : <DisabledAction reason={storyArchitecture.blockingReasons[0]?.message ?? "Chiến lược câu chuyện chưa thể chạy."}>Tạo chiến lược câu chuyện</DisabledAction>}
+        {storyArchitectures.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{creatorStatusLabel(artifact.status)}</StatusBadge><p><strong>{artifact.payloadJson.viewerPromise}</strong></p><p>{artifact.payloadJson.dramaticQuestion}</p>{artifact.payloadJson.beats.map((beat) => <p key={beat.id}>{beat.order + 1}. {beat.purpose}: {beat.viewerQuestion}</p>)}{artifact.status === "needs_review" ? <div className="button-row"><button className="button compact" type="button" onClick={() => void approveStoryArchitecture()} disabled={running}>Duyệt chiến lược</button><button className="button danger compact" type="button" onClick={() => void rejectStoryArchitecture()} disabled={running}>Từ chối</button></div> : null}</div>)}
+      </SectionCard>
       <StageStatusHeader stageName="Outline" stageNumber={10} eligibility={outline} dependencies={["Approved idea", "Approved Originality Review"]} purpose="Lập các phần chính từ ý tưởng đã duyệt, chưa thêm nghiên cứu bên ngoài." />
-      <SectionCard title="Duyệt dàn ý">{outlines.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{creatorStatusLabel(artifact.status)}</StatusBadge>{artifact.payloadJson.sections.map((section) => <p key={section.id}>{section.purpose}: {section.keyPoint}</p>)}{artifact.status === "needs_review" ? <div className="button-row">{outline.approvable ? <button className="button compact" type="button" onClick={() => void approveOutline()} disabled={running}>Duyệt dàn ý</button> : <DisabledAction reason={outline.blockingReasons[0]?.message ?? "Dàn ý chưa thể duyệt."}>Duyệt dàn ý</DisabledAction>}<button className="button danger compact" type="button" onClick={() => void rejectOutline()} disabled={running}>Từ chối dàn ý</button></div> : null}</div>)}</SectionCard>
+      <SectionCard title="Duyệt dàn ý">{outlines.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{creatorStatusLabel(artifact.status)}</StatusBadge><p><strong>Kế hoạch:</strong> {artifact.payloadJson.targetDurationSeconds}s · {artifact.payloadJson.targetWords} từ · {artifact.payloadJson.assumedWordsPerMinute} từ/phút</p>{artifact.payloadJson.sections.map((section) => <p key={section.id}><strong>{section.purpose}</strong> ({section.narrativeRole}, {section.estimatedWords} từ / {section.estimatedSeconds}s): {section.keyPoint}<small>Story beats: {section.storyBeatIds.join(", ")} · Retention: {section.retentionIntent}</small></p>)}{artifact.status === "needs_review" ? <div className="button-row">{outline.approvable ? <button className="button compact" type="button" onClick={() => void approveOutline()} disabled={running}>Duyệt dàn ý</button> : <DisabledAction reason={outline.blockingReasons[0]?.message ?? "Dàn ý chưa thể duyệt."}>Duyệt dàn ý</DisabledAction>}<button className="button danger compact" type="button" onClick={() => void rejectOutline()} disabled={running}>Từ chối dàn ý</button></div> : null}</div>)}</SectionCard>
       <StageStatusHeader stageName="Script" stageNumber={11} eligibility={script} dependencies={["Approved Outline"]} purpose="Viết lời dẫn dựa trên dàn ý đã duyệt." />
-      <SectionCard title="Duyệt kịch bản" description="Mỗi lần tạo đều được lưu lại; bạn duyệt nội dung trước khi chuyển sang kiểm tra sự thật.">
-        {script.runnable ? <button className="button primary" type="button" onClick={() => void runScript()} disabled={running}>Tạo kịch bản</button> : <DisabledAction reason={script.blockingReasons[0]?.message ?? "Kịch bản chưa thể chạy."}>Tạo kịch bản</DisabledAction>}
+      <SectionCard title="Duyệt kịch bản" description="Mỗi phiên bản được lưu riêng. Phải có Script Review cho đúng phiên bản trước khi duyệt.">
+        {props.project.setup.inputMode === "existing_script" && !scripts.length ? <button className="button primary" type="button" onClick={() => void runScriptReview()} disabled={running}>Review kịch bản đã nhập</button> : script.runnable ? <button className="button primary" type="button" onClick={() => void runScript()} disabled={running}>Tạo kịch bản</button> : <DisabledAction reason={script.blockingReasons[0]?.message ?? "Kịch bản chưa thể chạy."}>Tạo kịch bản</DisabledAction>}
         {props.project.setup.inputMode !== "existing_script" && props.project.scriptSections.length ? <button className="button secondary" type="button" onClick={() => void regenerateScript()} disabled={running}>Tạo lại kịch bản</button> : null}
-        {scripts.map((artifact) => <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{creatorStatusLabel(artifact.status)}</StatusBadge>{artifact.payloadJson.sections.map((section) => <p key={section.id}><strong>{section.purpose}</strong>: {section.narration}</p>)}{artifact.status === "needs_review" ? <div className="button-row">{script.approvable ? <button className="button compact" type="button" onClick={() => void approveScript()} disabled={running}>Duyệt kịch bản</button> : <DisabledAction reason={script.blockingReasons[0]?.message ?? "Kịch bản chưa thể duyệt."}>Duyệt kịch bản</DisabledAction>}<button className="button danger compact" type="button" onClick={() => void rejectScript()} disabled={running}>Từ chối kịch bản</button></div> : null}</div>)}
+        {scripts.map((artifact) => { const review = reviewForScript(artifact.id); return <div key={artifact.id}><StatusBadge tone={artifact.status === "approved" ? "success" : "warning"}>{creatorStatusLabel(artifact.status)} · v{scripts.indexOf(artifact) + 1} · {artifact.payloadJson.source ?? "provider"}</StatusBadge>{artifact.payloadJson.sections.map((section) => <p key={section.id}><strong>{section.purpose}</strong>: {section.narration}</p>)}{artifact.status === "needs_review" ? <div className="button-row"><button className="button secondary compact" type="button" onClick={() => void runScriptReview(artifact.id)} disabled={running}>Run Script Review</button>{review && review.payloadJson.overallStatus !== "blocked" ? <button className="button primary compact" type="button" onClick={() => void approveScript(artifact.id)} disabled={running}>Duyệt kịch bản</button> : <DisabledAction reason={review ? "Có finding blocking cần sửa." : "Hãy chạy Script Review cho đúng phiên bản này trước."}>Duyệt kịch bản</DisabledAction>}<button className="button danger compact" type="button" onClick={() => void rejectScript()} disabled={running}>Từ chối kịch bản</button></div> : null}</div>; })}
+      </SectionCard>
+      <StageStatusHeader stageName="Script Review" stageNumber={12} eligibility={scriptReview} dependencies={["Current Script version"]} purpose="Đánh giá độc lập, không tự viết lại hay làm mất hiệu lực kịch bản chỉ vì review tồn tại." />
+      <SectionCard title="Script Review" description="Chọn những finding muốn áp dụng; các phần không được chọn sẽ được giữ nguyên khi tạo revision.">
+        {scriptReviews.length ? scriptReviews.map((review) => <div key={review.id}><StatusBadge tone={review.payloadJson.overallStatus === "pass" ? "success" : review.payloadJson.overallStatus === "blocked" ? "danger" : "warning"}>{creatorStatusLabel(review.payloadJson.overallStatus)}</StatusBadge><p>{review.payloadJson.summary}</p><TagList items={review.payloadJson.strengths} />{review.payloadJson.findings.map((finding) => <label key={finding.id} className="status-row"><input type="checkbox" checked={selectedFindingIds.includes(finding.id)} onChange={(event) => setSelectedFindingIds((ids) => event.target.checked ? [...ids, finding.id] : ids.filter((id) => id !== finding.id))} /> <strong>{finding.category}</strong> {finding.sectionId ? `(${finding.sectionId})` : ""}: {finding.explanation}<small>Hướng sửa: {finding.suggestedDirection}</small></label>)}<FormField label="Chỉ dẫn revision (tuỳ chọn)" htmlFor={`script-revision-${review.id}`}><textarea id={`script-revision-${review.id}`} value={revisionInstructions} onChange={(event) => setRevisionInstructions(event.target.value)} /></FormField><div className="button-row"><button className="button primary compact" type="button" disabled={running || !selectedFindingIds.length} onClick={() => void reviseCurrentScript(review)}>Revise Script</button>{review.payloadJson.requiredFixes.length ? <TagList items={review.payloadJson.requiredFixes} /> : null}</div></div>) : <EmptyState title="Chưa có Script Review" detail="Chạy review trên phiên bản Script hiện tại trước khi duyệt." />}
       </SectionCard>
       <StageStatusHeader stageName="Fact Review" stageNumber={12} eligibility={factReview} dependencies={["Approved Script"]} purpose="Kiểm tra luận điểm trong kịch bản bằng các quy tắc cục bộ." />
       <SectionCard title="Kiểm tra sự thật" description="Luận điểm bị chặn sẽ không thể duyệt. Các luận điểm cần diễn giải phải giữ nguyên mức độ chắc chắn trong lời dẫn.">

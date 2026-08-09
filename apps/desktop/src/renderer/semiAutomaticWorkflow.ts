@@ -12,7 +12,7 @@ export type SemiAutomaticClient = Pick<LongShortFactoryApi,
   | "runIdeaLab"
   | "runOriginalityReview" | "approveOriginalityReview"
   | "runOutline" | "approveOutline"
-  | "runScript" | "approveScript"
+  | "runScript" | "runScriptReview"
   | "runFactReview" | "approveFactReview"
   | "runRetentionReview" | "approveRetentionReview"
   | "runScenePlan" | "approveScenePlan"
@@ -301,7 +301,11 @@ export async function runIdeaChain(
   const total = ideaStages.length;
   current = await runAndApprove(client, current, "originality-review", () => client.runOriginalityReview({ projectId: current.id }), () => client.approveOriginalityReview({ projectId: current.id }), "idea", 0, total, input.onProgress);
   current = await runAndApprove(client, current, "outline", () => client.runOutline({ projectId: current.id }), () => client.approveOutline({ projectId: current.id }), "idea", 1, total, input.onProgress);
-  current = await runAndApprove(client, current, "script", () => client.runScript({ projectId: current.id }), () => client.approveScript({ projectId: current.id }), "idea", 2, total, input.onProgress);
+  current = await client.runScript({ projectId: current.id });
+  input.onProgress?.({ chain: "idea", completed: 2, total, stageId: "script", message: "Script created; running its independent review." });
+  current = await client.runScriptReview({ projectId: current.id });
+  input.onProgress?.({ chain: "idea", completed: 2, total, stageId: "script-review", message: "Script Review is ready for your explicit approval or revision." });
+  return current;
   current = await runAndApprove(client, current, "fact-review", () => client.runFactReview({ projectId: current.id }), () => client.approveFactReview({ projectId: current.id }), "idea", 3, total, input.onProgress);
   current = await runAndApprove(client, current, "retention-review", () => client.runRetentionReview({ projectId: current.id }), () => client.approveRetentionReview({ projectId: current.id }), "idea", 4, total, input.onProgress);
   current = await runAndApprove(client, current, "scene-plan", () => client.runScenePlan({ projectId: current.id }), () => client.approveScenePlan({ projectId: current.id }), "idea", 5, total, input.onProgress);

@@ -4,7 +4,7 @@ import { getDownstreamWorkflowStageIds, getWorkflowStageImpactIds, workflowStage
 describe("G01 workflow registry", () => {
   it("contains the canonical ordered pre-production journey without a UI total", () => {
     expect(workflowStageDefinitions.map((stage) => stage.name)).toEqual([
-      "Project Brief", "Reference / Research", "Idea Lab", "Story Architecture", "Script", "Timing", "Director Analysis",
+      "Project Brief", "Reference / Research", "Idea Lab", "Story Architecture", "Outline", "Script", "Script Review", "Timing", "Director Analysis",
       "Scene Map", "Storyboard / Keyframes", "Prompt Compiler", "Batch Planner", "GG Lab Generation Gate", "Image Review", "Production Handoff"
     ]);
     expect(workflowStageDefinitions.map((stage) => stage.order)).toEqual(workflowStageDefinitions.map((_, index) => index + 1));
@@ -24,5 +24,7 @@ describe("G01 workflow registry", () => {
   it("tracks transitive downstream invalidation", () => {
     expect([...getDownstreamWorkflowStageIds("scene-plan")]).toEqual(["shot-plan", "prompt-preparation", "batch-planner", "gglab-generation-gate", "asset-review", "production-handoff"]);
     expect([...getWorkflowStageImpactIds("reference-intake")]).toContain("reference-intake");
+    expect([...getDownstreamWorkflowStageIds("idea-lab")]).toEqual(expect.arrayContaining(["story-architecture", "outline", "script", "script-review", "timing"]));
+    expect([...getDownstreamWorkflowStageIds("script-review")]).not.toContain("script");
   });
 });

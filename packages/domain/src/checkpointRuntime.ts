@@ -1,6 +1,6 @@
 import type { FactoryProject, WorkflowStageStatus } from "./types";
 import { isWorkflowStageApplicable } from "./workflowProgress";
-import { workflowStageDefinitions } from "./workflowRegistry";
+import { getWorkflowStageDefinition, workflowStageDefinitions } from "./workflowRegistry";
 
 export type CheckpointId = "brief" | "research" | "idea" | "script" | "director" | "storyboard" | "prompts" | "images" | "handoff";
 export type CheckpointState = "not_applicable" | "locked" | "ready" | "running" | "waiting_user" | "needs_review" | "complete" | "error" | "stale";
@@ -22,7 +22,7 @@ export const checkpointDefinitions: readonly CheckpointDefinition[] = [
   { id: "brief", label: "Brief", order: 1, stageIds: ["project-setup"], required: true, route: "project-overview" },
   { id: "research", label: "Nghiên cứu / Tham khảo", order: 2, stageIds: ["reference-intake"], required: true, route: "reference-intake" },
   { id: "idea", label: "Ý tưởng", order: 3, stageIds: ["idea-lab"], required: true, route: "idea-lab" },
-  { id: "script", label: "Câu chuyện + Kịch bản", order: 4, stageIds: ["story-architecture", "script", "timing"], required: true, route: "script" },
+  { id: "script", label: "Câu chuyện + Kịch bản", order: 4, stageIds: ["story-architecture", "outline", "script", "script-review"], required: true, route: "script" },
   { id: "director", label: "Đạo diễn", order: 5, stageIds: ["director-analysis", "scene-plan"], required: true, route: "scenes" },
   { id: "storyboard", label: "Storyboard / Keyframes", order: 6, stageIds: ["shot-plan"], required: true, route: "shots" },
   { id: "prompts", label: "Prompt + GG Lab Batch", order: 7, stageIds: ["prompt-preparation", "batch-planner"], required: true, route: "visuals" },
@@ -30,7 +30,7 @@ export const checkpointDefinitions: readonly CheckpointDefinition[] = [
   { id: "handoff", label: "Bàn giao", order: 9, stageIds: ["production-handoff"], required: true, route: "project-overview" }
 ];
 
-export type ActionId = "SAVE_BRIEF" | "GENERATE_RESEARCH_ANALYSIS" | "GENERATE_IDEAS" | "SELECT_IDEA" | "GENERATE_SCRIPT" | "REVISE_SCRIPT" | "GENERATE_DIRECTOR_PLAN" | "GENERATE_STORYBOARD" | "PREPARE_GG_LAB_PROMPTS" | "IMPORT_IMAGES" | "APPROVE_IMAGES" | "GENERATE_HANDOFF";
+export type ActionId = "SAVE_BRIEF" | "GENERATE_RESEARCH_ANALYSIS" | "RUN_TRANSCRIPT_CLEANING" | "RUN_REFERENCE_SEGMENTATION" | "GENERATE_COMPETITOR_DNA" | "GENERATE_OPPORTUNITY_MAP" | "GENERATE_IDEAS" | "SELECT_IDEA" | "GENERATE_STORY_ARCHITECTURE" | "GENERATE_OUTLINE" | "GENERATE_SCRIPT" | "REVIEW_SCRIPT" | "REVISE_SCRIPT" | "APPROVE_SCRIPT" | "GENERATE_DIRECTOR_PLAN" | "GENERATE_STORYBOARD" | "PREPARE_GG_LAB_PROMPTS" | "IMPORT_IMAGES" | "APPROVE_IMAGES" | "GENERATE_HANDOFF";
 export interface ActionDefinition {
   id: ActionId;
   checkpointId: CheckpointId;
@@ -38,6 +38,7 @@ export interface ActionDefinition {
   label: string;
   kind: "command" | "user_input";
   prerequisites: readonly CheckpointId[];
+  stagePrerequisites?: readonly string[];
   expectedOutput: string;
   retryPolicy: "retry_failed" | "retry_missing_units" | "resume_user_input";
   invalidates: readonly CheckpointId[];
@@ -45,10 +46,18 @@ export interface ActionDefinition {
 export const actionDefinitions: readonly ActionDefinition[] = [
   { id: "SAVE_BRIEF", checkpointId: "brief", stageId: "project-setup", label: "Lưu Brief", kind: "user_input", prerequisites: [], expectedOutput: "Saved project brief", retryPolicy: "resume_user_input", invalidates: ["research", "idea", "script", "director", "storyboard", "prompts", "images", "handoff"] },
   { id: "GENERATE_RESEARCH_ANALYSIS", checkpointId: "research", stageId: "reference-intake", label: "Phân tích tham khảo", kind: "command", prerequisites: ["brief"], expectedOutput: "Reference analysis artifacts", retryPolicy: "retry_missing_units", invalidates: ["idea", "script", "director", "storyboard", "prompts", "images", "handoff"] },
+  { id: "RUN_TRANSCRIPT_CLEANING", checkpointId: "research", stageId: "transcript-cleaning", label: "Làm sạch transcript", kind: "command", prerequisites: ["brief"], stagePrerequisites: ["reference-intake"], expectedOutput: "Reviewable cleaned transcript", retryPolicy: "retry_missing_units", invalidates: ["idea", "script", "director", "storyboard", "prompts", "images", "handoff"] },
+  { id: "RUN_REFERENCE_SEGMENTATION", checkpointId: "research", stageId: "reference-segmentation", label: "Phân đoạn tham khảo", kind: "command", prerequisites: ["brief"], stagePrerequisites: ["transcript-cleaning"], expectedOutput: "Reviewable reference segments", retryPolicy: "retry_failed", invalidates: ["idea", "script", "director", "storyboard", "prompts", "images", "handoff"] },
+  { id: "GENERATE_COMPETITOR_DNA", checkpointId: "research", stageId: "competitor-dna", label: "Phân tích DNA đối thủ", kind: "command", prerequisites: ["brief"], stagePrerequisites: ["reference-segmentation"], expectedOutput: "Reviewable competitor DNA", retryPolicy: "retry_failed", invalidates: ["idea", "script", "director", "storyboard", "prompts", "images", "handoff"] },
+  { id: "GENERATE_OPPORTUNITY_MAP", checkpointId: "research", stageId: "opportunity-map", label: "Tạo bản đồ cơ hội", kind: "command", prerequisites: ["brief"], stagePrerequisites: ["competitor-dna"], expectedOutput: "Reviewable opportunity map", retryPolicy: "retry_failed", invalidates: ["idea", "script", "director", "storyboard", "prompts", "images", "handoff"] },
   { id: "GENERATE_IDEAS", checkpointId: "idea", stageId: "idea-lab", label: "Tạo ý tưởng", kind: "command", prerequisites: ["brief"], expectedOutput: "Reviewable idea candidates", retryPolicy: "retry_failed", invalidates: ["script", "director", "storyboard", "prompts", "images", "handoff"] },
   { id: "SELECT_IDEA", checkpointId: "idea", stageId: "idea-lab", label: "Chọn ý tưởng", kind: "user_input", prerequisites: ["brief"], expectedOutput: "Approved idea", retryPolicy: "resume_user_input", invalidates: ["script", "director", "storyboard", "prompts", "images", "handoff"] },
-  { id: "GENERATE_SCRIPT", checkpointId: "script", stageId: "script", label: "Tạo kịch bản", kind: "command", prerequisites: ["idea"], expectedOutput: "Reviewable script", retryPolicy: "retry_failed", invalidates: ["director", "storyboard", "prompts", "images", "handoff"] },
+  { id: "GENERATE_STORY_ARCHITECTURE", checkpointId: "script", stageId: "story-architecture", label: "Tạo chiến lược câu chuyện", kind: "command", prerequisites: ["idea"], expectedOutput: "Reviewable story architecture", retryPolicy: "retry_failed", invalidates: ["script", "director", "storyboard", "prompts", "images", "handoff"] },
+  { id: "GENERATE_OUTLINE", checkpointId: "script", stageId: "outline", label: "Tạo dàn ý", kind: "command", prerequisites: ["idea"], stagePrerequisites: ["story-architecture"], expectedOutput: "Reviewable duration-aware outline", retryPolicy: "retry_failed", invalidates: ["script", "director", "storyboard", "prompts", "images", "handoff"] },
+  { id: "GENERATE_SCRIPT", checkpointId: "script", stageId: "script", label: "Tạo kịch bản", kind: "command", prerequisites: ["idea"], stagePrerequisites: ["outline"], expectedOutput: "Reviewable script", retryPolicy: "retry_failed", invalidates: ["director", "storyboard", "prompts", "images", "handoff"] },
+  { id: "REVIEW_SCRIPT", checkpointId: "script", stageId: "script-review", label: "Kiểm tra kịch bản", kind: "command", prerequisites: [], expectedOutput: "Structured script review", retryPolicy: "retry_failed", invalidates: [] },
   { id: "REVISE_SCRIPT", checkpointId: "script", stageId: "script", label: "Sửa kịch bản", kind: "user_input", prerequisites: ["idea"], expectedOutput: "Revised script", retryPolicy: "resume_user_input", invalidates: ["director", "storyboard", "prompts", "images", "handoff"] },
+  { id: "APPROVE_SCRIPT", checkpointId: "script", stageId: "script", label: "Duyệt kịch bản", kind: "user_input", prerequisites: [], stagePrerequisites: ["script-review"], expectedOutput: "Explicitly approved script", retryPolicy: "resume_user_input", invalidates: [] },
   { id: "GENERATE_DIRECTOR_PLAN", checkpointId: "director", stageId: "scene-plan", label: "Tạo kế hoạch đạo diễn", kind: "command", prerequisites: ["script"], expectedOutput: "Reviewable director plan", retryPolicy: "retry_failed", invalidates: ["storyboard", "prompts", "images", "handoff"] },
   { id: "GENERATE_STORYBOARD", checkpointId: "storyboard", stageId: "shot-plan", label: "Tạo storyboard", kind: "command", prerequisites: ["director"], expectedOutput: "Reviewable storyboard", retryPolicy: "retry_missing_units", invalidates: ["prompts", "images", "handoff"] },
   { id: "PREPARE_GG_LAB_PROMPTS", checkpointId: "prompts", stageId: "prompt-preparation", label: "Chuẩn bị prompt GG Lab", kind: "command", prerequisites: ["storyboard"], expectedOutput: "Reviewable GG Lab prompt batches", retryPolicy: "retry_missing_units", invalidates: ["images", "handoff"] },
@@ -113,9 +122,28 @@ export function getActionState(project: FactoryProject, actionId: ActionId, runs
   if (run?.state === "running" || run?.state === "queued") return { state: "RUNNING" };
   if (run?.state === "waiting_user") return { state: "WAITING_USER", ...(run.progress?.message ? { reason: run.progress.message } : {}) };
   if (run?.state === "failed") return { state: "ERROR", ...(run.safeErrorMessage ? { reason: run.safeErrorMessage } : {}) };
+  const stageById = new Map(project.stages.map((stage) => [stage.id, stage.status]));
+  // Script Review is intentionally available for a current draft before Script
+  // approval; treating its canonical dependency as an approved-only dependency
+  // would make the G02 checkpoint button contradict the creator flow.
+  if (actionId === "REVIEW_SCRIPT") {
+    const scriptStatus = stageById.get("script");
+    const reviewStatus = stageById.get("script-review");
+    if (reviewStatus === "approved") return { state: "SUCCESS" };
+    if (scriptStatus === "needs_review" || scriptStatus === "approved") return { state: "READY" };
+    return { state: "BLOCKED", reason: "Create or import a Script draft before running Script Review." };
+  }
+  if (actionId === "APPROVE_SCRIPT") {
+    if (stageById.get("script") !== "needs_review") return { state: "BLOCKED", reason: "A current reviewable Script version is required." };
+    if (stageById.get("script-review") !== "approved") return { state: "BLOCKED", reason: "Run Script Review for the current Script version first." };
+    return { state: "READY" };
+  }
   const checkpoints = resolveProjectCheckpoints(project, runs).checkpoints;
   const unmetPrerequisite = action.prerequisites.map((id) => checkpoints.find((entry) => entry.definition.id === id)!).find((entry) => entry.state !== "complete" && entry.state !== "not_applicable");
   if (unmetPrerequisite) return { state: "BLOCKED", reason: `Hoàn tất ${unmetPrerequisite.definition.label} trước khi tiếp tục.` };
+  const stagePrerequisites = action.stagePrerequisites ?? getWorkflowStageDefinition(action.stageId)?.dependsOn ?? [];
+  const unmetStageDependency = stagePrerequisites.find((stageId) => stageById.get(stageId) !== "approved");
+  if (unmetStageDependency) return { state: "BLOCKED", reason: `Hoàn tất ${getWorkflowStageDefinition(unmetStageDependency)?.name ?? unmetStageDependency} trước khi tiếp tục.` };
   const checkpoint = checkpoints.find((entry) => entry.definition.id === action.checkpointId)!;
   if (checkpoint.state === "complete") return { state: "SUCCESS" };
   if (checkpoint.state === "ready") return { state: "READY" };

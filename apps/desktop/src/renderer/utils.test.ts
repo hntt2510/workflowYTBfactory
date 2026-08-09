@@ -20,6 +20,6 @@ describe("workflow progress helpers", () => {
   it("uses the applicable path instead of raw 28-stage status for topic projects", () => {
     const project = createFixtureProject({ topic: "Topic", format: "short", targetLanguage: "Vietnamese", inputMode: "topic" });
     expect(currentStage(project)).toBe("Idea Lab");
-    expect(projectProgress(project)).toBe(8);
+    expect(projectProgress(project)).toBe(7);
   });
 });

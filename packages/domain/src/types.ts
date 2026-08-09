@@ -155,6 +155,8 @@ export interface IdeaCandidate {
   noveltyScore: number;
   audienceFitScore: number;
   thumbnailPotentialScore: number;
+  productionFeasibilityScore: number;
+  scoreExplanations: { novelty: string; audienceFit: string; thumbnailPotential: string; productionFeasibility: string };
   researchRisk: "low" | "medium" | "high";
   productionDifficulty: "low" | "medium" | "high";
   estimatedValidationCost?: number;
@@ -364,6 +366,11 @@ export interface Timeline {
   items: TimelineItem[];
 }
 
+export interface ApprovedScript {
+  scriptArtifactId: string;
+  approvedAt: string;
+}
+
 export interface FactoryProject {
   id: string;
   synthetic?: boolean;
@@ -377,6 +384,7 @@ export interface FactoryProject {
   referenceSet?: ReferenceSetState;
   ideas: IdeaCandidate[];
   approvedIdeaId?: string;
+  approvedScript?: ApprovedScript;
   claims: Claim[];
   competitorReferences: CompetitorReference[];
   scriptSections: ScriptSection[];

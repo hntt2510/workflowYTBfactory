@@ -24,6 +24,8 @@ export function generateIdeaLab(topic: string, profile: ChannelProfile, count = 
       noveltyScore: bucket.label === "stretch" ? 86 : bucket.label === "medium-difficulty" ? 78 : 70,
       audienceFitScore: 82,
       thumbnailPotentialScore: bucket.label === "low-risk evergreen" ? 72 : 84,
+      productionFeasibilityScore: bucket.productionDifficulty === "low" ? 90 : bucket.productionDifficulty === "medium" ? 72 : 54,
+      scoreExplanations: { novelty: "Uses a distinct viewer problem and avoids competitor wording.", audienceFit: `Matches ${profile.name}'s audience and topic focus.`, thumbnailPotential: "Creates one clear visual contrast without copying a competitor layout.", productionFeasibility: `Matches the ${bucket.productionDifficulty} production difficulty planned for this candidate.` },
       researchRisk: bucket.researchRisk,
       productionDifficulty: bucket.productionDifficulty,
       estimatedValidationCost: bucket.label === "stretch" ? 0.42 : bucket.label === "medium-difficulty" ? 0.28 : 0.18,

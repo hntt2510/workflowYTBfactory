@@ -35,6 +35,32 @@ describe("G02 checkpoint runtime", () => {
     expect(promptAction.invalidates).toEqual(["images", "handoff"]);
   });
 
+  it("registers each reference-analysis command with its real stage and retry policy", () => {
+    expect(actionDefinitions.filter((action) => ["RUN_TRANSCRIPT_CLEANING", "RUN_REFERENCE_SEGMENTATION", "GENERATE_COMPETITOR_DNA", "GENERATE_OPPORTUNITY_MAP"].includes(action.id)).map((action) => [action.id, action.stageId, action.retryPolicy])).toEqual([
+      ["RUN_TRANSCRIPT_CLEANING", "transcript-cleaning", "retry_missing_units"],
+      ["RUN_REFERENCE_SEGMENTATION", "reference-segmentation", "retry_failed"],
+      ["GENERATE_COMPETITOR_DNA", "competitor-dna", "retry_failed"],
+      ["GENERATE_OPPORTUNITY_MAP", "opportunity-map", "retry_failed"]
+    ]);
+  });
+
+  it("requires approved Story Architecture before Outline generation", () => {
+    const project = createFixtureProject({ topic: "Story", format: "short", targetLanguage: "Vietnamese", inputMode: "topic" });
+    const withIdea = { ...project, stages: project.stages.map((stage) => stage.id === "project-setup" || stage.id === "idea-lab" ? { ...stage, status: "approved" as const } : stage) };
+    expect(getActionState(withIdea, "GENERATE_OUTLINE")).toMatchObject({ state: "BLOCKED" });
+    const withStory = { ...withIdea, stages: withIdea.stages.map((stage) => stage.id === "story-architecture" ? { ...stage, status: "approved" as const } : stage) };
+    expect(getActionState(withStory, "GENERATE_OUTLINE").state).not.toBe("BLOCKED");
+  });
+
+  it("allows reviewing a Script draft but requires that review before explicit Script approval", () => {
+    const project = createFixtureProject({ topic: "Existing", format: "short", targetLanguage: "Vietnamese", inputMode: "existing_script", sourceScript: "A draft" });
+    const draft = { ...project, stages: project.stages.map((stage) => stage.id === "script" ? { ...stage, status: "needs_review" as const } : stage) };
+    expect(getActionState(draft, "REVIEW_SCRIPT").state).toBe("READY");
+    expect(getActionState(draft, "APPROVE_SCRIPT")).toMatchObject({ state: "BLOCKED" });
+    const reviewed = { ...draft, stages: draft.stages.map((stage) => stage.id === "script-review" ? { ...stage, status: "approved" as const } : stage) };
+    expect(getActionState(reviewed, "APPROVE_SCRIPT").state).toBe("READY");
+  });
+
   it("lets the latest successful retry supersede an older failed action run", () => {
     const project = createFixtureProject({ topic: "Retry", format: "short", targetLanguage: "Vietnamese", inputMode: "topic" });
     const runs = [

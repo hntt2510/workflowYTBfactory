@@ -1,0 +1,19 @@
+{
+  "jobId": "JOB-G03-CONTENT-INTELLIGENCE",
+  "type": "long",
+  "title": "G03 content intelligence from topic, reference, or existing script to approved script",
+  "status": "review_required",
+  "targetBranch": "main",
+  "baseCommit": "0b4e8143ec76bb1f82e1254f8e059cca8e26f2c4",
+  "assignedRole": "builder",
+  "description": "Stacked G03 implementation of persistent research, idea, story architecture, outline, script review, revision, and explicit approved-script contracts on the G02 ActionRun/checkpoint runtime.",
+  "businessContext": "Creators need a traceable content-intelligence pipeline that reaches an explicitly approved script without creating Director or visual-production behavior.",
+  "allowedPaths": ["apps/desktop/src/main/**", "apps/desktop/src/preload/**", "apps/desktop/src/renderer/**", "apps/desktop/test/**", "packages/domain/src/**", "packages/domain/test/**", "packages/db/src/**", "packages/db/test/**", "packages/providers/**", ".harness/jobs/JOB-G03-CONTENT-INTELLIGENCE.json", ".harness/state.json", ".harness/locks/JOB-G03-CONTENT-INTELLIGENCE.lock", ".harness/handoffs/JOB-G03-CONTENT-INTELLIGENCE.md"],
+  "forbiddenPaths": ["packages/generation-queue/**", "packages/media/**", "packages/capcut/**", "python/capcut_bridge/**", "OmniVoice/**", "docs/product/acceptance-criteria.md"],
+  "dependencies": ["G02 base commit 0b4e8143ec76bb1f82e1254f8e059cca8e26f2c4; G03 remains stacked until G02 is merged."],
+  "acceptanceCriteria": ["Topic, Reference, and Existing Script modes reach an explicitly approved current script without fake-completing inapplicable checkpoints.", "Research is consolidated in its checkpoint and preserves traceable transcript, segmentation, DNA, and opportunity artifacts.", "Idea Lab produces exactly six validated, differentiated candidates; selection is explicit and invalidates downstream content artifacts.", "Story Architecture, duration-aware Outline, structured versioned Script, separate Review, explicit Revision, user edits, and explicit Script Approval are persisted.", "All content generation uses the G02 ActionRun/checkpoint runtime with honest progress, retry, fingerprints, stale invalidation, no duplicate requests, and no automatic paid reruns.", "No Director, visual, image, voice, CapCut, FFmpeg, web-search, or crawler scope is introduced; structured text uses TextProvider.generateStructured().", "Full repository verification and Electron click-through evidence pass."],
+  "verificationCommands": ["pnpm --filter @lsf/providers test", "pnpm --filter @lsf/domain test", "pnpm --filter @lsf/db test", "pnpm --filter @lsf/desktop test", "pnpm test:unit", "pnpm typecheck", "pnpm lint", "pnpm --filter @lsf/desktop build", "git diff --check"],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["The G02 base receives a required review fix before final G03 review.", "A destructive migration or credential/paid live request is needed to continue.", "G03 cannot be implemented without entering forbidden Director, visual, media, or web-research scope."]
+}

@@ -339,12 +339,16 @@ export class WorkflowRunStore {
     if (row.stage_id === "reference-validation") return;
     const inputIds = JSON.parse(row.input_artifact_ids_json) as string[];
     const definition = getWorkflowStageDefinition(row.stage_id);
-    if (!inputIds.length && definition?.dependsOn.length && !this.isTopicIdeaRunWithoutReferences(row.project_id, row.stage_id)) {
+    if (!inputIds.length && definition?.dependsOn.length && !this.isTopicIdeaRunWithoutReferences(row.project_id, row.stage_id) && !this.isExistingScriptManualImport(row.project_id, row.stage_id)) {
       throw new Error("Stage run inputs are no longer approved.");
     }
     if (!inputIds.length) return;
     if (inputIds.some((artifactId) => {
       if (this.isCurrentApprovedArtifact(row.project_id, artifactId, new Set([runId]))) return false;
+      // Script Review is intentionally performed against the current reviewable
+      // script draft. A creator edit may supersede a prior draft, so this check
+      // must not require the superseded input artifact to stay approved.
+      if (row.stage_id === "script-review" && this.isCurrentReviewableScriptArtifact(row.project_id, artifactId)) return false;
       if (row.stage_id === "qa" && this.isCurrentReviewableArtifact(row.project_id, artifactId, new Set([runId]))) return false;
       return true;
     })) throw new Error("Stage run inputs are no longer approved.");
@@ -371,6 +375,21 @@ export class WorkflowRunStore {
     nextVisitedRunIds.add(run.id);
     if (run.stageId !== "reference-validation" && run.inputArtifactIds.some((inputArtifactId) => !this.isCurrentApprovedArtifact(projectId, inputArtifactId, nextVisitedRunIds))) return false;
     return true;
+  }
+
+  private isExistingScriptManualImport(projectId: string, stageId: string): boolean {
+    if (stageId !== "script") return false;
+    const row = this.db.prepare("SELECT payload_json FROM projects WHERE id = ?").get(projectId) as { payload_json?: string } | undefined;
+    const payload = parseJsonRecord(row?.payload_json);
+    return (payload.setup as { inputMode?: unknown } | undefined)?.inputMode === "existing_script";
+  }
+
+  private isCurrentReviewableScriptArtifact(projectId: string, artifactId: string): boolean {
+    const artifact = this.getArtifact(projectId, artifactId);
+    if (artifact?.stageId !== "script" || artifact.status !== "needs_review" || !artifact.stageRunId) return false;
+    const run = this.getRun(artifact.stageRunId);
+    if (!run || run.projectId !== projectId || run.status !== "needs_review" || !run.outputArtifactIds.includes(artifact.id)) return false;
+    return this.listArtifacts(projectId, "script").find((candidate) => candidate.status === "needs_review")?.id === artifact.id;
   }
 
   private isCurrentApprovedArtifact(projectId: string, artifactId: string, visitedRunIds: Set<string>): boolean {

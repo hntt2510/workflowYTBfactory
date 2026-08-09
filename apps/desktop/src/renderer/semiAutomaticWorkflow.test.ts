@@ -65,7 +65,7 @@ function referenceClient(project: FactoryProject, events: string[], failAt?: str
     runIdeaLab: runWhole("idea-lab"),
     runOriginalityReview: runWhole("originality-review"), approveOriginalityReview: approveWhole("originality-review"),
     runOutline: runWhole("outline"), approveOutline: approveWhole("outline"),
-    runScript: runWhole("script"), approveScript: approveWhole("script"),
+    runScript: runWhole("script"), runScriptReview: runWhole("script-review"),
     runFactReview: runWhole("fact-review"), approveFactReview: approveWhole("fact-review"),
     runRetentionReview: runWhole("retention-review"), approveRetentionReview: approveWhole("retention-review"),
     runScenePlan: runWhole("scene-plan"), approveScenePlan: approveWhole("scene-plan"),
