@@ -2,41 +2,29 @@ import { useEffect, useRef, useState } from "react";
 import { factoryClient } from "../../services/factoryClient";
 import { DataTable, DisabledAction, FormField, PageHeader, SectionCard, SettingsList, StatusBadge } from "../../components/ui";
 import type {
-  ImageModelCertificationResponse,
   ModelListStatus,
   ProviderCredentialSettings,
-  ProviderModelConfigurationInput,
   ProviderPresence,
   TextModelCertificationResponse,
   TextModelCertificationStatus
 } from "../../types";
-import { certificationTone, imageCertificationLabel, textCertificationLabel } from "../../certificationLabels";
+import { textCertificationLabel } from "../../certificationLabels";
 import { creatorStatusLabel } from "../../creatorStudioCopy";
-import { formatDate, safeRendererError } from "../../utils";
+import { formatDate } from "../../utils";
 
 export function ProvidersScreen(props: {
   presence: ProviderPresence;
-  stockPresence: ProviderPresence;
   settings: ProviderCredentialSettings | null;
   textCertification: TextModelCertificationResponse;
-  imageCertification: ImageModelCertificationResponse;
   setTextCertification: (certification: TextModelCertificationResponse) => void;
-  setImageCertification: (certification: ImageModelCertificationResponse) => void;
   setPresence: (presence: ProviderPresence) => void;
-  setStockPresence: (presence: ProviderPresence) => void;
   setSettings: (settings: ProviderCredentialSettings | null) => void;
   onRefresh: () => Promise<void>;
 }) {
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
-  const [imageModel, setImageModel] = useState("");
   const [textModel, setTextModel] = useState("");
-  const [videoModel, setVideoModel] = useState("");
-  const [ttsModel, setTtsModel] = useState("");
-  const [sttModel, setSttModel] = useState("");
-  const [pexelsApiKey, setPexelsApiKey] = useState("");
   const [message, setMessage] = useState("");
-  const [stockMessage, setStockMessage] = useState("");
   const [modelConfigMessage, setModelConfigMessage] = useState("");
   const [modelListStatus, setModelListStatus] = useState<ModelListStatus>("not_tested");
   const [modelListMessage, setModelListMessage] = useState("Endpoint not tested.");
@@ -44,18 +32,12 @@ export function ProvidersScreen(props: {
   const [savingCredential, setSavingCredential] = useState(false);
   const [savingModelConfiguration, setSavingModelConfiguration] = useState(false);
   const [certificationRunning, setCertificationRunning] = useState(false);
-  const [imageCertificationRunning, setImageCertificationRunning] = useState(false);
   const [certificationRetryUsed, setCertificationRetryUsed] = useState(false);
-  const [savingStock, setSavingStock] = useState(false);
   const modelRefreshRunning = useRef(false);
   const modelListingRunning = modelListStatus === "testing";
   const baseUrlValid = isValidProviderBaseUrl(baseUrl);
   const discoveredModelIds = models.map((model) => model.id);
   const discoveredModelIdSet = new Set(discoveredModelIds);
-  const selectedModels = { textModel, imageModel, videoModel, ttsModel, sttModel };
-  const selectedModelValues = Object.values(selectedModels).filter(Boolean);
-  const selectionsUseDiscoveredModels = selectedModelValues.every((model) => discoveredModelIdSet.has(model));
-  const canSaveModelConfiguration = props.presence.hasCredential && discoveredModelIds.length > 0 && selectionsUseDiscoveredModels;
   const displayedCertificationStatus: TextModelCertificationStatus = certificationRunning ? "testing" : props.textCertification.status;
   const certificationRetryExhausted = isRetryableCertificationError(props.textCertification.errorCategory) && certificationRetryUsed;
 
@@ -63,11 +45,7 @@ export function ProvidersScreen(props: {
     const settings = props.settings;
     if (!settings) return;
     setBaseUrl(settings.baseUrl);
-    setImageModel(settings.imageModel ?? "");
     setTextModel(settings.textModel ?? "");
-    setVideoModel(settings.videoModel ?? "");
-    setTtsModel(settings.ttsModel ?? "");
-    setSttModel(settings.sttModel ?? "");
     props.setPresence({ providerId: settings.providerId, hasCredential: settings.hasCredential });
     setCertificationRetryUsed(false);
   }, [props.settings, props.setPresence]);
@@ -106,23 +84,6 @@ export function ProvidersScreen(props: {
     await props.onRefresh();
   }
 
-  async function savePexelsCredential() {
-    setSavingStock(true);
-    setStockMessage("");
-    try {
-      await factoryClient.saveProviderCredential({ providerId: "pexels", baseUrl: "https://api.pexels.com/v1", apiKey: pexelsApiKey });
-      setPexelsApiKey("");
-      const presence = await factoryClient.testCredentialPresence("pexels");
-      props.setStockPresence(presence);
-      setStockMessage(presence.hasCredential ? "Pexels credential saved. Stock search can use this key when the stock adapter is wired." : "Pexels reference saved, but the keychain did not return the secret.");
-      await props.onRefresh();
-    } catch (error) {
-      setStockMessage(`Pexels credential save failed: ${safeRendererError(error)}`);
-    } finally {
-      setSavingStock(false);
-    }
-  }
-
   async function refreshModels() {
     if (modelRefreshRunning.current) return;
     modelRefreshRunning.current = true;
@@ -148,10 +109,6 @@ export function ProvidersScreen(props: {
       const settings = await factoryClient.saveCockpitTextModelConfiguration({ textModel });
       props.setSettings(settings);
       setTextModel(settings.textModel ?? "");
-      setImageModel(settings.imageModel ?? "");
-      setVideoModel(settings.videoModel ?? "");
-      setTtsModel(settings.ttsModel ?? "");
-      setSttModel(settings.sttModel ?? "");
       setModelConfigMessage("Model configuration saved. Selected models are not verified.");
       await props.onRefresh();
     } catch {
@@ -181,22 +138,6 @@ export function ProvidersScreen(props: {
     }
   }
 
-  async function runImageCertification() {
-    const model = imageModel || "No selected model";
-    const confirmed = window.confirm(`This test sends one real image request to 9Router and may consume provider quota.\n\nProvider: 9Router\nModel: ${model}\nEndpoint: /v1/images/generations\nRequests: 1`);
-    if (!confirmed) return;
-    setImageCertificationRunning(true);
-    try {
-      const result = await factoryClient.run9RouterImageCertification({ providerId: "9router", confirmation: "Run 1 image certification request" });
-      props.setImageCertification(result);
-      await props.onRefresh();
-    } catch {
-      props.setImageCertification({ status: "failed", message: "Image model certification failed before a safe response was returned.", errorCategory: "unknown_error" });
-    } finally {
-      setImageCertificationRunning(false);
-    }
-  }
-
   return (
     <>
       <PageHeader title="Text Provider" description="Cockpit text settings. API keys are write-only and stored through the secure credential provider." />
@@ -219,16 +160,7 @@ export function ProvidersScreen(props: {
           {models.length ? <DataTable label="Cockpit models"><thead><tr><th>Discovered</th></tr></thead><tbody>{models.map((model) => <tr key={model.id}><td>{model.id}</td></tr>)}</tbody></DataTable> : null}
         </div>
       </SectionCard>
-      <SectionCard title="Pexels stock media" description="Pexels API key for stock video/image lookup. The key is stored in the OS keychain; the search adapter is still pending.">
-        <div className="form-grid">
-          <FormField label="API key" htmlFor="pexels-api-key" hint={props.stockPresence.hasCredential ? "Credential saved. Leave blank unless replacing." : "Write-only input."}><input id="pexels-api-key" value={pexelsApiKey} onChange={(event) => setPexelsApiKey(event.target.value)} type="password" autoComplete="off" /></FormField>
-          <div className="capability-card"><strong>Stock status</strong><StatusBadge tone={props.stockPresence.hasCredential ? "success" : "warning"}>{props.stockPresence.hasCredential ? "Credential saved" : "Not configured"}</StatusBadge><small>Pexels will cover stock video/image search once the stock adapter is wired.</small></div>
-          <div className="button-row">{pexelsApiKey.trim() ? <button className="button primary" type="button" onClick={() => void savePexelsCredential()} disabled={savingStock}>{savingStock ? "Saving..." : "Save Pexels"}</button> : <DisabledAction reason="Enter a Pexels API key before saving or replacing the credential.">Save Pexels</DisabledAction>}</div>
-          {stockMessage ? <p className={stockMessage.includes("failed") ? "error-message" : "safe-message"}>{stockMessage}</p> : null}
-        </div>
-      </SectionCard>
-      <SectionCard title="Evidence image sources" description="Direct image URLs from Google results, Wikipedia, archive pages, or source pages can be pasted into project references now. Automated Google image search is not wired."><SettingsList items={[["Wikipedia/direct image URL", "Ready for manual references"], ["Google image search", "Manual source URL only"], ["Automated downloader", "Not wired yet"]]} /></SectionCard>
-      <SectionCard title="Other providers" description="Cards are read-only until provider adapters exist."><div className="provider-card-grid">{["Gemini", "OpenAI-compatible", "ElevenLabs", "Local", "Stock providers", "CapCut-assisted"].map((provider) => <div className="capability-card" key={provider}><strong>{provider}</strong><StatusBadge tone="warning">Unavailable</StatusBadge><small>No runtime adapter or persisted configuration is connected.</small></div>)}</div></SectionCard>
+      <SectionCard title="Legacy / không dùng trong quy trình hiện tại" description="Ảnh được tạo và duyệt thủ công qua GG Lab. Các adapter provider cũ vẫn tồn tại ở backend để tương thích, nhưng không có cấu hình hay chứng nhận nào có thể thao tác tại đây."><p className="safe-message">Không có provider image nào đang hoạt động trong giao diện creator.</p></SectionCard>
     </>
   );
 }
@@ -238,22 +170,11 @@ function ModelSelect(props: { label: string; id: string; value: string; modelIds
   return <FormField label={props.label} htmlFor={props.id} hint="Select from Discovered models only. Manual entry is disabled."><select id={props.id} value={valueInDiscovered ? props.value : ""} onChange={(event) => props.onChange(event.target.value)} disabled={!props.modelIds.length}><option value="">Select Discovered model</option>{props.modelIds.map((modelId) => <option key={modelId} value={modelId}>{modelId}</option>)}</select></FormField>;
 }
 
-function SelectedModelConfiguration(props: { selectedModels: Record<"textModel" | "imageModel" | "videoModel" | "ttsModel" | "sttModel", string>; textCertificationStatus: TextModelCertificationStatus; imageCertificationStatus: ImageModelCertificationResponse["status"] }) {
-  const rows = [["Text", props.selectedModels.textModel, textCertificationLabel(props.textCertificationStatus)], ["Image", props.selectedModels.imageModel, imageCertificationLabel(props.imageCertificationStatus)], ["Video", props.selectedModels.videoModel, "Not Verified"], ["TTS", props.selectedModels.ttsModel, "Not Verified"], ["STT", props.selectedModels.sttModel, "Not Verified"]].filter((row): row is [string, string, string] => Boolean(row[1]));
-  if (!rows.length) return <div className="capability-card"><strong>Selected</strong><StatusBadge tone="warning">Not verified</StatusBadge><small>No selected models.</small></div>;
-  return <DataTable label="Selected model configuration"><thead><tr><th>Capability</th><th>Selected</th><th>Status</th></tr></thead><tbody>{rows.map(([capability, modelId, status]) => <tr key={capability}><td>{capability}</td><td>{modelId}</td><td><StatusBadge tone={certificationTone(status)}>{status}</StatusBadge></td></tr>)}</tbody></DataTable>;
-}
-
 function TextModelCertificationPanel(props: { selectedModel: string; certification: TextModelCertificationResponse; displayedStatus: TextModelCertificationStatus; running: boolean; retryExhausted: boolean; hasCredential: boolean; onRun: () => void }) {
   const record = props.certification.record;
   const exact = record?.exactTextTest;
   const json = record?.strictJsonTest;
   return <div className="form-grid"><div className="section-heading"><h3>Text capability verification</h3><p>This sends two real Cockpit requests and may consume provider quota.</p></div><div className="form-grid"><div className="capability-card"><strong>Selected model</strong><StatusBadge tone={props.selectedModel ? "info" : "warning"}>{props.selectedModel || "Not selected"}</StatusBadge><small>{props.selectedModel ? "Selected" : "Select a discovered model first."}</small></div><div className="capability-card"><strong>Endpoint strategy</strong><StatusBadge tone="info">/v1/responses</StatusBadge><small>Requests: 2</small></div><div className="capability-card"><strong>Capability status</strong><StatusBadge tone={modelCertificationTone(props.displayedStatus)}>{textCertificationLabel(props.displayedStatus)}</StatusBadge><small>{props.certification.message}</small></div><SettingsList items={[["Last tested time", record?.testedAt ? formatDate(record.testedAt) : "Not tested"], ["Text probe", exact ? testResultLabel(exact) : "Not tested"], ["Structured output", json ? testResultLabel(json) : "Not tested"], ["Returned model ID", record?.returnedModelId ?? "Not returned"]]} /><div className="button-row">{props.hasCredential && props.selectedModel && !props.running && !props.retryExhausted ? <button className="button primary" type="button" onClick={props.onRun}>Test connection</button> : <DisabledAction reason={!props.hasCredential ? "Save Cockpit settings first." : !props.selectedModel ? "Select and save a text model first." : props.retryExhausted ? "One manual retry was already used for this network or timeout failure." : "Text capability verification is already running."}>Test connection</DisabledAction>}</div></div></div>;
-}
-
-function ImageModelCertificationPanel(props: { selectedModel: string; configurationSaved: boolean; certification: ImageModelCertificationResponse; running: boolean; hasCredential: boolean; onRun: () => void }) {
-  const displayedStatus = props.running ? "Testing" : imageCertificationLabel(props.certification.status);
-  return <div className="form-grid"><div className="section-heading"><h3>Image Model Certification</h3><p>This test sends one real image request to 9Router and may consume provider quota.</p></div><div className="form-grid"><div className="capability-card"><strong>Selected model</strong><StatusBadge tone={props.selectedModel ? "info" : "warning"}>{props.selectedModel || "Not selected"}</StatusBadge><small>{props.selectedModel ? "Selected" : "Refresh models, then select and save an image model first."}</small></div><div className="capability-card"><strong>Endpoint strategy</strong><StatusBadge tone="info">/v1/images/generations</StatusBadge><small>Requests: 1</small></div><div className="capability-card"><strong>Certification status</strong><StatusBadge tone={certificationTone(displayedStatus)}>{displayedStatus}</StatusBadge><small>{props.certification.message}</small></div><SettingsList items={[["Last tested time", props.certification.record?.testedAt ? formatDate(props.certification.record.testedAt) : "Not tested"], ["Result", props.running ? "Testing" : imageCertificationLabel(props.certification.status)], ["Model at last test", props.certification.record?.configuredModelId ?? "Not tested"]]} /><div className="button-row">{props.hasCredential && props.selectedModel && props.configurationSaved && !props.running ? <button className="button primary" type="button" onClick={props.onRun}>Run 1 image certification request</button> : <DisabledAction reason={!props.hasCredential ? "Save a 9Router credential first." : !props.selectedModel ? "Refresh models, then select an Image model." : !props.configurationSaved ? "Save model configuration before running certification." : "Image certification is already testing."}>Run 1 image certification request</DisabledAction>}</div></div></div>;
 }
 
 function testResultLabel(result: { status: "passed" | "failed"; skipped?: boolean; errorCategory?: string }): string {

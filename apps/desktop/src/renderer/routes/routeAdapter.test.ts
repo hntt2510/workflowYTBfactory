@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { canonicalRoute, routeForStage, routeFromHash } from "./routeAdapter";
 
 describe("creator route adapter", () => {
-  it("redirects legacy project creation hashes to the canonical wizard", () => {
-    expect(routeFromHash("#new-project")).toBe("create");
-    expect(canonicalRoute("new-project")).toBe("create");
+  it("keeps both project creation screens addressable for the UI audit", () => {
+    expect(routeFromHash("#new-project")).toBe("new-project");
+    expect(canonicalRoute("new-project")).toBe("new-project");
   });
 
   it("opens a project at the visible phase for its current stage", () => {

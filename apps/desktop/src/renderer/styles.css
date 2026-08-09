@@ -1096,6 +1096,36 @@ body {
   border-right: 1px solid var(--studio-line);
   background: #13100e;
   box-shadow: 20px 0 60px rgba(0, 0, 0, 0.22);
+  min-height: 0;
+}
+
+.studio-shell .sidebar-navigation {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+
+.studio-shell .sidebar-section + .sidebar-section { margin-top: 8px; }
+
+.studio-shell .nav-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.nav-legacy-badge {
+  margin-left: 6px;
+  color: #9b8170;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.nav-disabled-reason {
+  display: block;
+  margin-top: 2px;
+  color: #9b8170;
+  font-size: 9px;
 }
 
 .studio-shell .sidebar.collapsed {

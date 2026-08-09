@@ -1,9 +1,6 @@
 import { allRoutes, type RouteId } from "../navigation";
 import { getWorkflowStageDefinition } from "@lsf/domain";
 
-const legacyRouteAliases: Record<string, RouteId> = {
-  "new-project": "create"
-};
 const legacyStageRoutes: Record<string, RouteId> = {
   "reference-validation": "reference-intake", "transcript-cleaning": "reference-intake", "reference-segmentation": "reference-intake",
   "competitor-dna": "idea-lab", "opportunity-map": "idea-lab", "originality-review": "idea-lab",
@@ -15,12 +12,11 @@ const legacyStageRoutes: Record<string, RouteId> = {
 
 export function routeFromHash(hash = window.location.hash): RouteId {
   const rawRoute = hash.replace(/^#/, "");
-  const aliasedRoute = legacyRouteAliases[rawRoute] ?? rawRoute;
-  return allRoutes.some((route) => route.id === aliasedRoute) ? aliasedRoute as RouteId : "dashboard";
+  return allRoutes.some((route) => route.id === rawRoute) ? rawRoute as RouteId : "dashboard";
 }
 
 export function canonicalRoute(route: RouteId): RouteId {
-  return legacyRouteAliases[route] ?? route;
+  return route;
 }
 
 export function routeForStage(stageId?: string): RouteId {

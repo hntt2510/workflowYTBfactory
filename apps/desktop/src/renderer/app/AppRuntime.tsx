@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import type { FactoryProject } from "@lsf/domain";
 import { resolveWorkflowProgress, seedChannelProfiles } from "@lsf/domain";
 import { SectionCard } from "../components/ui";
 import { AppShell, LoadingScreen } from "../layouts/AppShell";
 import { canonicalRoute, routeForStage, routeFromHash } from "../routes/routeAdapter";
 import { RouteScreen } from "../routes/RouteScreen";
-import { factoryClient } from "../services/factoryClient";
+import { factoryClient, isBrowserPreview } from "../services/factoryClient";
 import type {
   BootstrapData,
   ImageModelCertificationResponse,
@@ -68,7 +68,6 @@ export function AppRuntime() {
     setProviderSettings(settings);
     setProviderPresence({ providerId: settings.providerId, hasCredential: settings.hasCredential });
     setTextCertification(await factoryClient.loadTextProviderCapability());
-    setImageCertification(await factoryClient.load9RouterImageCertification());
     setStockPresence(await factoryClient.hasProviderCredential("pexels"));
     if (selectedProject) setSelectedProject(await factoryClient.loadProject(selectedProject.id));
   }
@@ -179,9 +178,20 @@ export function AppRuntime() {
 
   return (
     <AppShell collapsed={sidebarCollapsed} onToggleSidebar={() => setSidebarCollapsed((value) => !value)} route={route} selectedProject={selectedProject} selectedProfile={selectedProfile} projects={projectSummaries} queue={bootstrap.queue} onOpenProject={openProject} setRoute={navigate}>
+      {isBrowserPreview ? <SectionCard><div className="warning-state"><strong>Browser Preview — cấu hình provider bảo mật yêu cầu Electron.</strong><p>API key, lưu credential và Test connection không hoạt động trong browser preview.</p></div></SectionCard> : null}
       {error ? <SectionCard><div className="error-state"><strong>Application bootstrap failed</strong><p>{error}</p></div></SectionCard> : null}
       {loading ? <LoadingScreen /> : null}
-      {!loading ? <RouteScreen route={route} setRoute={navigate} bootstrap={bootstrap} providerPresence={providerPresence} stockPresence={stockPresence} providerSettings={providerSettings} textCertification={textCertification} imageCertification={imageCertification} localTtsSettings={localTtsSettings} selectedProject={selectedProject} selectedProfile={selectedProfile} profiles={profiles} projectSummaries={projectSummaries} onOpenProject={openProject} onDeleteProject={deleteProject} onCreateProject={createDemoProject} onRefresh={refresh} setSelectedProject={setSelectedProject} setProviderPresence={setProviderPresence} setStockPresence={setStockPresence} setProviderSettings={setProviderSettings} setTextCertification={setTextCertification} setImageCertification={setImageCertification} startSemiAutomatic={startSemiAutomatic} semiAutomaticProgress={semiAutomaticProgress} semiAutomaticRunning={semiAutomaticRunning} semiAutomaticError={semiAutomaticError} /> : null}
+      {!loading ? <RouteErrorBoundary route={route} setRoute={navigate}><RouteScreen route={route} setRoute={navigate} bootstrap={bootstrap} providerPresence={providerPresence} stockPresence={stockPresence} providerSettings={providerSettings} textCertification={textCertification} imageCertification={imageCertification} localTtsSettings={localTtsSettings} selectedProject={selectedProject} selectedProfile={selectedProfile} profiles={profiles} projectSummaries={projectSummaries} onOpenProject={openProject} onDeleteProject={deleteProject} onCreateProject={createDemoProject} onRefresh={refresh} setSelectedProject={setSelectedProject} setProviderPresence={setProviderPresence} setStockPresence={setStockPresence} setProviderSettings={setProviderSettings} setTextCertification={setTextCertification} setImageCertification={setImageCertification} startSemiAutomatic={startSemiAutomatic} semiAutomaticProgress={semiAutomaticProgress} semiAutomaticRunning={semiAutomaticRunning} semiAutomaticError={semiAutomaticError} /></RouteErrorBoundary> : null}
     </AppShell>
   );
+}
+
+class RouteErrorBoundary extends Component<{ route: RouteId; setRoute: (route: RouteId) => void; children: ReactNode }, { hasError: boolean }> {
+  static getDerivedStateFromError(): { hasError: boolean } { return { hasError: true }; }
+  state: { hasError: boolean } = { hasError: false };
+  componentDidUpdate(previous: Readonly<{ route: RouteId }>) { if (previous.route !== this.props.route && this.state.hasError) this.setState({ hasError: false }); }
+  render() {
+    if (this.state.hasError) return <SectionCard><div className="error-state"><strong>Màn hình chưa khả dụng</strong><p>Tuyến {this.props.route} không thể hiển thị dữ liệu của dự án hiện tại. Hãy chọn một tuyến khác hoặc mở lại dự án.</p><button className="button secondary" type="button" onClick={() => this.props.setRoute("project-overview")}>Về tổng quan dự án</button></div></SectionCard>;
+    return this.props.children;
+  }
 }

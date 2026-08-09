@@ -824,9 +824,11 @@ export function IdeaLabScreen(props: { project: FactoryProject; setSelectedProje
   const [artifacts, setArtifacts] = useState<OpportunityMapArtifact[]>([]);
   const [originalityArtifacts, setOriginalityArtifacts] = useState<OriginalityReviewArtifact[]>([]);
   const [message, setMessage] = useState("");
-  const opportunity = resolveStageEligibilities(props.project, { textVerified: props.textCertification.status === "verified" }).find((stage) => stage.stageId === "opportunity-map")!;
-  const ideaLab = resolveStageEligibilities(props.project, { textVerified: props.textCertification.status === "verified" }).find((stage) => stage.stageId === "idea-lab")!;
-  const originalityReview = resolveStageEligibilities(props.project, { textVerified: props.textCertification.status === "verified" }).find((stage) => stage.stageId === "originality-review")!;
+  const textEligibilities = resolveStageEligibilities(props.project, { textVerified: props.textCertification.status === "verified" });
+  const ideaLab = textEligibilities.find((stage) => stage.stageId === "idea-lab")!;
+  // These two stages are legacy-only and are intentionally absent from a preproduction project.
+  const opportunity = textEligibilities.find((stage) => stage.stageId === "opportunity-map") ?? ideaLab;
+  const originalityReview = textEligibilities.find((stage) => stage.stageId === "originality-review") ?? ideaLab;
   const topicMode = props.project.setup.inputMode === "topic" && props.project.competitorReferences.length === 0;
   const [editingIdea, setEditingIdea] = useState<FactoryProject["ideas"][number] | null>(null);
   useEffect(() => { void factoryClient.listOpportunityMapArtifacts({ projectId: props.project.id }).then(setArtifacts).catch(() => setArtifacts([])); }, [props.project]);

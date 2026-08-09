@@ -87,8 +87,8 @@ export function RouteScreen(props: RouteScreenProps) {
   if (props.route === "channel-profiles") return <ChannelProfilesScreen profiles={props.profiles} onRefresh={props.onRefresh} />;
   if (props.route === "production-queue") return <QueueScreen queue={props.bootstrap.queue} selectedProject={props.selectedProject} onRunDemo={props.onRefresh} />;
   if (props.route === "asset-library") return <AssetLibraryScreen selectedProject={props.selectedProject} />;
-  if (props.route === "providers") return <ProvidersScreen presence={props.providerPresence} stockPresence={props.stockPresence} settings={props.providerSettings} textCertification={props.textCertification} imageCertification={props.imageCertification} setTextCertification={props.setTextCertification} setImageCertification={props.setImageCertification} setPresence={props.setProviderPresence} setStockPresence={props.setStockPresence} setSettings={props.setProviderSettings} onRefresh={props.onRefresh} />;
-  if (props.route === "settings") return <SettingsScreen bootstrap={props.bootstrap} setRoute={props.setRoute} />;
+  if (props.route === "providers") return <ProvidersScreen presence={props.providerPresence} settings={props.providerSettings} textCertification={props.textCertification} setTextCertification={props.setTextCertification} setPresence={props.setProviderPresence} setSettings={props.setProviderSettings} onRefresh={props.onRefresh} />;
+  if (props.route === "settings") return <SettingsScreen bootstrap={props.bootstrap} presence={props.providerPresence} setRoute={props.setRoute} />;
   if (props.route === "diagnostics") return <DiagnosticsScreen bootstrap={props.bootstrap} presence={props.providerPresence} />;
   if (!props.selectedProject) {
     return (
@@ -131,5 +131,6 @@ export function RouteScreen(props: RouteScreenProps) {
   if (props.route === "final-preview") return <FinalPreviewScreen project={props.selectedProject} localTtsSettings={props.localTtsSettings} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} startSemiAutomatic={props.startSemiAutomatic} />;
   if (props.route === "advanced-pipeline") return <AdvancedPipelineScreen project={props.selectedProject} setRoute={props.setRoute} />;
   if (props.route === "competitor-dna") return <CompetitorDnaScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} textCertification={props.textCertification} startSemiAutomatic={props.startSemiAutomatic} />;
-  return <ExportScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} />;
+  if (props.route === "export") return <ExportScreen project={props.selectedProject} setSelectedProject={props.setSelectedProject} setRoute={props.setRoute} />;
+  return <EmptyState title="Tuyến chưa được triển khai" detail="Tuyến này được đăng ký cho đợt kiểm tra giao diện nhưng chưa có màn hình thực thi." action={<button className="button secondary" type="button" onClick={() => props.setRoute("dashboard")}>Về trang chủ</button>} />;
 }

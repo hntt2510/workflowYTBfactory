@@ -1,37 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { advancedRoutes, allRoutes, creatorWorkspaceRoutes, projectRoutes, routeLabel, workspaceRoutes } from "./navigation";
+import { allRoutes, routeHandlerIntent, routeLabel, routeRegistry, sidebarRouteGroups } from "./navigation";
 
-describe("renderer navigation model", () => {
-  it("exposes required workspace screens", () => {
-    expect(workspaceRoutes.map((route) => route.id)).toEqual([
-      "dashboard",
-      "projects",
-      "asset-library",
-      "settings"
-    ]);
+describe("renderer audit navigation registry", () => {
+  it("registers every reachable route exactly once with an intentional handler", () => {
+    const expected = ["dashboard", "projects", "create", "new-project", "project-overview", "content", "reference-intake", "competitor-dna", "idea-lab", "script", "director", "scenes", "shots", "visuals", "assets", "scene-review", "build", "voice", "timeline", "qa", "final-preview", "export", "production", "production-queue", "asset-library", "channel-profiles", "providers", "settings", "diagnostics", "advanced-pipeline"];
+    expect(routeRegistry.map((route) => route.id).sort()).toEqual(expected.sort());
+    expect(new Set(routeRegistry.map((route) => route.id)).size).toBe(expected.length);
+    expect(Object.keys(routeHandlerIntent).sort()).toEqual(expected.sort());
   });
 
-  it("marks project workflow routes as project-scoped", () => {
-    expect(projectRoutes.every((route) => route.requiresProject)).toBe(true);
-    expect(projectRoutes.map((route) => route.id)).toEqual(["project-overview", "final-preview", "export"]);
-    expect(advancedRoutes.map((route) => route.id)).toContain("advanced-pipeline");
-    expect(advancedRoutes.map((route) => route.id)).toContain("reference-intake");
-    expect(advancedRoutes.map((route) => route.id)).toContain("competitor-dna");
-    expect(advancedRoutes.map((route) => route.id)).toContain("shots");
+  it("derives the verbose audit sidebar from the registry without hiding project routes", () => {
+    const sidebarIds = sidebarRouteGroups.flatMap((group) => group.items.map((route) => route.id));
+    expect(sidebarIds.sort()).toEqual(allRoutes.map((route) => route.id).sort());
+    expect(sidebarRouteGroups.flatMap((group) => group.items).filter((route) => route.requiresProject)).not.toHaveLength(0);
+    expect(sidebarRouteGroups.flatMap((group) => group.items).find((route) => route.id === "providers")?.label).toContain("Cockpit");
   });
 
-  it("labels every route", () => {
-    for (const route of allRoutes) {
-      expect(routeLabel(route.id)).toBe(route.label);
-    }
-  });
-
-  it("keeps the simplified create route addressable by hash navigation", () => {
-    expect(allRoutes.map((route) => route.id)).toContain("create");
-  });
-
-  it("exposes the compact creator journey and legacy review hash", () => {
-    expect(creatorWorkspaceRoutes.map((route) => route.id)).toEqual(["content", "director", "assets", "build"]);
-    expect(allRoutes.map((route) => route.id)).toContain("scene-review");
+  it("labels every route from the same registry", () => {
+    for (const route of allRoutes) expect(routeLabel(route.id)).toBe(route.label);
   });
 });

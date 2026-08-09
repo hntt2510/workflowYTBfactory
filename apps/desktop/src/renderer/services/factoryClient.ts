@@ -47,7 +47,7 @@ const browserRuntime = {
 function webFallback(): LongShortFactoryApi {
   let projects: FactoryProject[] = [];
   let providerSettings: ProviderCredentialSettings = {
-    providerId: "9router",
+    providerId: "cockpit",
     baseUrl: "Electron main process unavailable",
     hasCredential: false
   };
@@ -99,10 +99,10 @@ function webFallback(): LongShortFactoryApi {
       return { ok: true };
     },
     async saveProviderCredential(_input: ProviderCredentialInput): Promise<{ providerId: string; credentialRef: string }> {
-      return { providerId: "9router", credentialRef: "browser-preview" };
+      return { providerId: "cockpit", credentialRef: "browser-preview" };
     },
     async loadProviderCredentialSettings(providerId: string): Promise<ProviderCredentialSettings> {
-      return providerId === "9router" ? providerSettings : { providerId, baseUrl: "Electron main process unavailable", hasCredential: false };
+      return providerId === "cockpit" ? providerSettings : { providerId, baseUrl: "Electron main process unavailable", hasCredential: false };
     },
     async hasProviderCredential(providerId: string): Promise<ProviderPresence> {
       return { providerId, hasCredential: false };
@@ -448,4 +448,5 @@ function toSummary(project: FactoryProject): ProjectSummary {
   };
 }
 
+export const isBrowserPreview = !window.longShortFactory;
 export const factoryClient: LongShortFactoryApi = window.longShortFactory ?? webFallback();

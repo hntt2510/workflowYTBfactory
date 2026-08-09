@@ -33,6 +33,18 @@
 - Verify Cockpit credentials are never sent to renderer responses or logs.
 - Verify legacy 9Router image/TTS references remain disconnected from the `preproduction` workflow contract.
 
+## Final UI discoverability and provider cleanup
+
+- Replaced the disconnected navigation arrays with one `routeRegistry`. It registers all 30 reachable `RouteId` values, their Vietnamese audit label, sidebar group, project requirement, visibility, and legacy flag. The sidebar is derived exclusively from this registry and scrolls while preserving collapsed mode.
+- Every route is visible during the audit. Project-required routes remain visible while disabled and explain that a project must be opened first. The `new-project` advanced wizard is now separately addressable instead of being silently canonicalized to `create`.
+- Added direct `Text Provider / Cockpit` sidebar navigation and an `AI / Text Provider` Settings card with Cockpit state plus `Mở cài đặt Text Provider` navigation.
+- Providers now exposes only actionable Cockpit text configuration. The old image certification/action and provider setup cards are removed from creator UI; manual GG Lab image work is described as the active path. CapCut and FFmpeg Settings cards are marked legacy/not used by the current pre-production workflow.
+- Added a browser-preview warning that secure provider configuration, credential persistence, and connection testing require Electron.
+- Made Export an explicit RouteScreen branch and added a clear safe unavailable screen rather than using Export as a catch-all. A preproduction Idea Lab view now tolerates legacy-only stage absence.
+- Renderer-facing audit of `app`, `features`, `layouts`, and `routes`: zero `9Router`/`NineRouter` occurrences. Remaining names in `services/factoryClient.ts` and renderer API types are browser-fallback/type compatibility only and do not render creator-facing text or controls.
+- Electron click-through executed against the local dev app: audited all 30 sidebar routes with and without a selected project, confirmed every enabled item changed to its matching hash and no click left a blank app; opened Cockpit from both sidebar and Settings; returned Home and reloaded with all 30 sidebar items still present. Browser control used an Electron remote-debug session; no Cockpit credential was entered or tested.
+- Final verification passed: all job commands; `pnpm test:unit` reported 63 files / 396 tests. Desktop build emitted only Vite's bundle-size warning.
+
 ## Remaining external work
 
 - Independent reviewer and QA evidence are required before integration.

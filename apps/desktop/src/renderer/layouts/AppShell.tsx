@@ -25,7 +25,7 @@ import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import type { ChannelProfile, FactoryProject } from "@lsf/domain";
 import { creatorPhaseDefinitions, creatorRouteLabel, creatorStageLabel, creatorStatusLabel } from "../creatorStudioCopy";
-import { type RouteId, workspaceRoutes } from "../navigation";
+import { sidebarRouteGroups, type RouteDefinition, type RouteId } from "../navigation";
 import type { ProjectSummary, QueueSnapshot } from "../types";
 import { currentStage } from "../utils";
 
@@ -110,9 +110,13 @@ function Sidebar(props: {
         <span className="brand-mark"><Boxes size={19} /></span>
         <span>Long/Short Factory</span>
       </div>
-      <nav aria-label="Điều hướng không gian làm việc">
-        <p className="nav-heading">Không gian</p>
-        <NavGroup items={workspaceRoutes} route={props.route} setRoute={props.setRoute} collapsed={props.collapsed} />
+      <nav className="sidebar-navigation" aria-label="Điều hướng ứng dụng">
+        {sidebarRouteGroups.map((group) => (
+          <div className="sidebar-section" key={group.id}>
+            <p className="nav-heading">{group.label}</p>
+            <NavGroup items={group.items} route={props.route} setRoute={props.setRoute} collapsed={props.collapsed} hasProject={Boolean(props.selectedProject)} />
+          </div>
+        ))}
       </nav>
       <div className="sidebar-footer">
         <span className="sidebar-footer-dot" />
@@ -196,19 +200,20 @@ function phaseRouteMatches(phaseId: string, route: RouteId): boolean {
 }
 
 function NavGroup(props: {
-  items: Array<{ id: RouteId; label: string }>;
+  items: readonly RouteDefinition[];
   route: RouteId;
   setRoute: (route: RouteId) => void;
   collapsed: boolean;
+  hasProject: boolean;
 }) {
   return (
     <div className="nav-group">
       {props.items.map((item) => {
         const Icon = routeIcons[item.id];
         return (
-          <button className={`nav-button ${props.route === item.id ? "active" : ""}`} key={item.id} title={props.collapsed ? item.label : undefined} type="button" onClick={() => props.setRoute(item.id)}>
+          <button className={`nav-button ${props.route === item.id ? "active" : ""}`} data-route={item.id} key={item.id} title={item.requiresProject && !props.hasProject ? "Cần mở dự án trước." : props.collapsed ? item.label : undefined} type="button" disabled={item.requiresProject && !props.hasProject} onClick={() => props.setRoute(item.id)}>
             <Icon size={17} />
-            <span>{item.label}</span>
+            <span>{item.label}{item.legacy ? <small className="nav-legacy-badge">Legacy</small> : null}{item.requiresProject && !props.hasProject ? <small className="nav-disabled-reason">Cần mở dự án trước.</small> : null}</span>
           </button>
         );
       })}
