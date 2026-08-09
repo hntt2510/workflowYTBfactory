@@ -1,0 +1,18 @@
+{
+  "jobId": "JOB-G01-5-TEXT-PROVIDER-COCKPIT",
+  "type": "long",
+  "title": "G01.5 generic text provider and Cockpit migration",
+  "status": "ready",
+  "targetBranch": "main",
+  "assignedRole": "builder",
+  "description": "Decouple active G01 pre-production text stages from 9Router through a small provider-neutral TextProvider contract and a Cockpit OpenAI-compatible adapter.",
+  "businessContext": "Creators use a locally configured Cockpit server for text generation. New pre-production projects must use verified text capability without a 9Router credential or certification.",
+  "allowedPaths": ["apps/desktop/src/main/**", "apps/desktop/src/preload/**", "apps/desktop/src/renderer/**", "apps/desktop/test/**", "packages/domain/src/**", "packages/domain/test/**", "packages/providers/**", "packages/db/src/**", "packages/db/test/**", "packages/prompts/**", "docs/G01_5_TEXT_PROVIDER.md", ".harness/jobs/JOB-G01-5-TEXT-PROVIDER-COCKPIT.json", ".harness/state.json", ".harness/locks/JOB-G01-5-TEXT-PROVIDER-COCKPIT.lock", ".harness/handoffs/JOB-G01-5-TEXT-PROVIDER-COCKPIT.md"],
+  "forbiddenPaths": ["packages/generation-queue/**", "packages/media/**", "packages/capcut/**", "python/capcut_bridge/**", "OmniVoice/**", "docs/product/acceptance-criteria.md"],
+  "dependencies": ["G01 merged to main", "Existing secure credential/keychain abstraction", "Typed Electron preload boundary", "Cockpit OpenAI-compatible /v1/models and /v1/responses API"],
+  "acceptanceCriteria": ["Active G01 text stages depend on a small generic TextProvider abstraction, not NineRouterClient or provider endpoint details.", "CockpitTextProvider safely normalizes configured base URLs and uses OpenAI-compatible /responses and /models with bearer authentication, timeout/abort support, defensive response parsing, and normalized safe errors.", "Provider-neutral settings persist Cockpit base URL, selected model, and only a secret reference; old 9Router settings are retained as legacy and are never copied into Cockpit credentials.", "Creator-facing configuration shows provider-neutral text capability, configured-secret state, test connection, refresh models, and no active 9Router certification instruction.", "Structured generation centrally extracts text, parses JSON, validates supplied schemas, and returns normalized parse/validation errors without weakening stage schemas.", "Deterministic provider, persistence/configuration, renderer/provider-settings, and representative G01 workflow integration tests cover required success and failure cases.", "Typecheck, lint, desktop build, targeted tests, and broader unit tests pass; no G02+ action/progress runtime or media/CapCut redesign is implemented."],
+  "verificationCommands": ["pnpm --filter @lsf/providers test", "pnpm --filter @lsf/domain test", "pnpm --filter @lsf/db test", "pnpm --filter @lsf/desktop test", "pnpm test:unit", "pnpm typecheck", "pnpm lint", "pnpm --filter @lsf/desktop build", "git diff --check"],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": ["Cockpit API behavior differs from the documented OpenAI-compatible models or responses contracts.", "A secure credential migration would need to read, copy, or reinterpret an existing 9Router secret.", "An active G01 text stage cannot be migrated without changing G02+ action/progress architecture.", "Latest-main baseline verification fails in an unrelated area."]
+}
