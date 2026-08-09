@@ -2,12 +2,19 @@ import { randomUUID } from "node:crypto";
 import type { ProviderCredentialStore, StructuredLogger, TextCertificationStore } from "@lsf/db";
 import { redactString } from "@lsf/db";
 import { textCertificationJsonPayloadSchema, textModelCertificationResponseSchema, type TextCertificationErrorCategory, type TextModelCertificationRecord } from "@lsf/domain";
-import { CockpitTextProvider, TextProviderError, type TextProvider } from "@lsf/providers";
+import { CockpitTextProvider, parseStructuredText, TextProviderError, type TextProvider } from "@lsf/providers";
 import { fingerprintBaseUrl } from "./nineRouterTextCertificationService";
 
 export const activeTextProviderId = "cockpit";
 const endpointStrategy = "responses";
 const implementationVersion = "text-capability-v1" as const;
+
+export interface LegacyTextClient { createResponseText(input: { model: string; input: string; timeoutMs?: number; idempotencyKey?: string }): Promise<{ text: string; returnedModelId?: string }>; }
+
+/** Compatibility only for existing injected test doubles; production always receives TextProvider. */
+export function adaptLegacyTextClient(client: LegacyTextClient): Pick<TextProvider, "generateStructured"> {
+  return { generateStructured: async (input) => parseStructuredText({ ...input, response: await client.createResponseText(input), providerId: "test" }) };
+}
 
 export async function listActiveTextModels(input: { credentialStore: ProviderCredentialStore; logger: StructuredLogger; timeoutMs?: number }) {
   const settings = input.credentialStore.loadProviderCredentialSettings(activeTextProviderId);

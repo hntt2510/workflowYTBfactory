@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { ProviderCredentialStore, TextCertificationStore } from "@lsf/db";
 import { cleanedTranscriptOutputSchema, type CleanedTranscriptOutput } from "@lsf/domain";
 import { TextProviderError, type TextProvider } from "@lsf/providers";
-import { loadActiveTextCapability, resolveActiveTextProvider } from "./textProviderService";
+import { adaptLegacyTextClient, type LegacyTextClient, loadActiveTextCapability, resolveActiveTextProvider } from "./textProviderService";
 
 const providerId = "cockpit";
 export const transcriptCleaningRunnerVersion = "transcript-cleaning-v3";
@@ -82,9 +82,8 @@ export interface TranscriptCleaningResult {
   chunks: TranscriptCleaningChunkProgress[];
 }
 
-interface TextClient {
-  createResponseText(input: { model: string; input: string; timeoutMs?: number; idempotencyKey?: string }): Promise<{ text: string; returnedModelId?: string }>;
-}
+type TextClient = Pick<TextProvider, "generateStructured"> | LegacyTextClient;
+const transcriptChunkOutputSchema = cleanedTranscriptOutputSchema.omit({ rawTranscript: true });
 
 export function planTranscriptCleaning(transcript: string, options: { maxChunkCharacters?: number } = {}): TranscriptCleaningPlan {
   const sourceCharacterCount = transcript.length;
@@ -186,7 +185,8 @@ export async function runTranscriptCleaning(input: {
   let configured: { provider: TextProvider; model: string };
   try { configured = await resolveActiveTextProvider({ credentialStore: input.credentialStore, certificationStore: input.certificationStore }); }
   catch { throw new TranscriptCleaningError("certification_missing", "Verified Cockpit text capability is required before Transcript Cleaning can run."); }
-  const client = input.createClient?.({ baseUrl: "", apiKey: "" });
+  const injected = input.createClient?.({ baseUrl: "", apiKey: "" });
+  const client = injected && ("generateStructured" in injected ? injected : adaptLegacyTextClient(injected));
   const resumeByIndex = new Map((input.resumeChunks ?? []).map((chunk) => [chunk.chunkIndex, chunk]));
   const progress: TranscriptCleaningChunkProgress[] = [];
   const completed: Array<{ chunk: TranscriptCleaningChunk; output: CleanedTranscriptOutput }> = [];
@@ -240,16 +240,12 @@ export async function runTranscriptCleaning(input: {
         if (estimateInputTokens(prompt) > maxProviderInputTokens) {
           throw new TranscriptCleaningError("input_token_budget_exceeded", `Transcript Cleaning chunk ${chunk.chunkIndex + 1} exceeds the configured provider input token budget.`);
         }
+        const metadata = { mode: plan.mode, chunkCount: plan.chunks.length, selectedModel: settings.textModel, configuredTimeoutMs };
         const response = client
-          ? await client.createResponseText({ model: configured.model, input: prompt, timeoutMs: Math.min(perChunkTimeoutMs, remainingMs), ...(chunk.chunkFingerprint ? { idempotencyKey: chunk.chunkFingerprint } : {}) })
-          : await configured.provider.generateText({ model: configured.model, input: prompt, timeoutMs: Math.min(perChunkTimeoutMs, remainingMs) });
+          ? await client.generateStructured({ model: configured.model, input: prompt, timeoutMs: Math.min(perChunkTimeoutMs, remainingMs), schema: transcriptChunkOutputSchema, normalize: (value) => normalizeChunkEnvelope(value, input.referenceId, input.sourceTranscriptVersionId, chunk, metadata) })
+          : await configured.provider.generateStructured({ model: configured.model, input: prompt, timeoutMs: Math.min(perChunkTimeoutMs, remainingMs), schema: transcriptChunkOutputSchema, normalize: (value) => normalizeChunkEnvelope(value, input.referenceId, input.sourceTranscriptVersionId, chunk, metadata) });
         if (response.returnedModelId) returnedModelId = response.returnedModelId;
-        output = parseChunkOutput(response.text, input.referenceId, input.sourceTranscriptVersionId, chunk, {
-          mode: plan.mode,
-          chunkCount: plan.chunks.length,
-          selectedModel: settings.textModel,
-          configuredTimeoutMs
-        });
+        output = validateChunkOutput(response.data, input.referenceId, input.sourceTranscriptVersionId, chunk, metadata);
       } catch (error) {
         const mapped = mapProviderError(error);
         if (mapped && isRetryable(mapped) && attemptCount < maxTranscriptCleaningAttempts) {
@@ -418,15 +414,14 @@ function normalizeSegment(segment: unknown, reasonAliases: Record<string, string
   return normalized;
 }
 
-function parseChunkOutput(
-  text: string,
+function normalizeChunkEnvelope(
+  value: unknown,
   referenceId: string,
   sourceTranscriptVersionId: string,
   chunk: TranscriptCleaningChunk,
   expected: { mode: TranscriptCleaningPlan["mode"]; chunkCount: number; selectedModel: string; configuredTimeoutMs: number }
-): CleanedTranscriptOutput {
-  const parsed = parseProviderJson(text);
-  const normalized = normalizeChunkProviderOutput(parsed, chunk);
+): unknown {
+  const normalized = normalizeChunkProviderOutput(value, chunk);
   if (isRecord(normalized)) {
     if (!("referenceId" in normalized)) normalized.referenceId = referenceId;
     if (!("sourceTranscriptVersionId" in normalized)) normalized.sourceTranscriptVersionId = sourceTranscriptVersionId;
@@ -449,13 +444,16 @@ function parseChunkOutput(
       };
     }
   }
-  const result = cleanedTranscriptOutputSchema.omit({ rawTranscript: true }).safeParse(normalized);
-  if (!result.success) {
-    const issue = result.error.issues[0];
-    const location = issue?.path.length ? issue.path.join(".") : "response";
-    throw new TranscriptCleaningError("output_schema_invalid", `Transcript Cleaning returned invalid ${location}: ${issue?.message ?? "schema mismatch"}.`);
-  }
-  const output = result.data;
+  return normalized;
+}
+
+function validateChunkOutput(
+  output: Omit<CleanedTranscriptOutput, "rawTranscript">,
+  referenceId: string,
+  sourceTranscriptVersionId: string,
+  chunk: TranscriptCleaningChunk,
+  expected: { mode: TranscriptCleaningPlan["mode"]; chunkCount: number; selectedModel: string; configuredTimeoutMs: number }
+): CleanedTranscriptOutput {
   if (output.referenceId !== referenceId || output.sourceTranscriptVersionId !== sourceTranscriptVersionId) {
     throw new TranscriptCleaningError("output_content_invalid", "Transcript Cleaning output does not match the requested reference version.");
   }
@@ -519,6 +517,7 @@ async function reportProgress(callback: ((progress: TranscriptCleaningChunkProgr
 
 function mapProviderError(error: unknown): TranscriptCleaningErrorCategory | undefined {
   if (!(error instanceof TextProviderError)) return undefined;
+  if (error.code === "invalid_response" && error.message.includes("empty")) return "empty_response";
   if (error.code === "timeout") return "provider_timeout";
   if (error.code === "provider_unavailable") return "provider_transport_error";
   if (error.code === "model_not_found") return "endpoint_unreachable";
@@ -535,38 +534,6 @@ function isRetryable(category: TranscriptCleaningErrorCategory): boolean {
   return category === "provider_timeout" || category === "provider_transport_error" || category === "provider_http_error";
 }
 
-function parseProviderJson(text: string): unknown {
-  const trimmed = text.replace(/^\uFEFF/, "").trim();
-  if (!trimmed) throw new TranscriptCleaningError("empty_response", "Transcript Cleaning provider returned an empty response.");
-  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  const unfenced = (fenced?.[1] ?? trimmed).trim();
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(unfenced);
-  } catch {
-    const start = unfenced.indexOf("{");
-    const end = unfenced.lastIndexOf("}");
-    if (start < 0 || end <= start) throw new TranscriptCleaningError("invalid_response_json", "Transcript Cleaning returned invalid JSON.");
-    try {
-      parsed = JSON.parse(unfenced.slice(start, end + 1));
-    } catch {
-      throw new TranscriptCleaningError("invalid_response_json", "Transcript Cleaning returned invalid JSON.");
-    }
-  }
-  for (let depth = 0; depth < 3; depth += 1) {
-    if (!isRecord(parsed)) break;
-    const record = parsed;
-    const wrappers = ["data", "result", "response", "output"] as const;
-    const wrapper = wrappers.find((key) => {
-      const value = record[key];
-      if (!isRecord(value)) return false;
-      return Object.keys(record).length === 1 || "cleanedTranscript" in value || "sourceTranscriptVersionId" in value;
-    });
-    if (!wrapper) break;
-    parsed = parsed[wrapper];
-  }
-  return parsed;
-}
 
 function hasMeaningfulCleaningChange(source: string, output: string): boolean {
   if (source === output) return false;

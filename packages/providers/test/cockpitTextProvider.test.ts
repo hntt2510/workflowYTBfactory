@@ -66,10 +66,16 @@ describe("CockpitTextProvider", () => {
   it("validates structured JSON centrally", async () => {
     const schema = z.object({ status: z.literal("OK") });
     const valid = provider(new Response(JSON.stringify({ output_text: "```json\n{\"status\":\"OK\"}\n```" })));
-    await expect(valid.client.generateStructured({ model: "gpt", input: "json", schema })).resolves.toEqual({ status: "OK" });
+    await expect(valid.client.generateStructured({ model: "gpt", input: "json", schema })).resolves.toEqual({ data: { status: "OK" } });
     const invalidJson = provider(new Response(JSON.stringify({ output_text: "not-json" })));
     await expect(invalidJson.client.generateStructured({ model: "gpt", input: "json", schema })).rejects.toMatchObject({ code: "invalid_json" });
     const wrongSchema = provider(new Response(JSON.stringify({ output_text: "{\"status\":\"NO\"}" })));
     await expect(wrongSchema.client.generateStructured({ model: "gpt", input: "json", schema })).rejects.toMatchObject({ code: "schema_validation_failed" });
+  });
+
+  it("normalizes structured JSON before validation and retains returned model metadata", async () => {
+    const schema = z.object({ status: z.literal("OK") });
+    const { client } = provider(new Response(JSON.stringify({ output_text: "{\"value\":\"OK\"}", model: "gpt-returned" })));
+    await expect(client.generateStructured({ model: "gpt", input: "json", schema, normalize: (value) => ({ status: (value as { value?: unknown }).value }) })).resolves.toEqual({ data: { status: "OK" }, returnedModelId: "gpt-returned" });
   });
 });

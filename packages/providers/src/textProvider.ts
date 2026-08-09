@@ -30,12 +30,17 @@ export interface TextProviderHealth {
   modelsAvailable: boolean;
 }
 
+export interface TextProviderStructuredResult<T> {
+  data: T;
+  returnedModelId?: string;
+}
+
 export interface TextProvider {
   readonly providerId: string;
   healthCheck(input?: { timeoutMs?: number }): Promise<TextProviderHealth>;
   listModels(input?: { timeoutMs?: number }): Promise<TextProviderModel[]>;
   generateText(input: { model: string; input: string; timeoutMs?: number }): Promise<{ text: string; returnedModelId?: string }>;
-  generateStructured<T>(input: { model: string; input: string; schema: ZodType<T>; timeoutMs?: number }): Promise<T>;
+  generateStructured<T>(input: { model: string; input: string; schema: ZodType<T>; normalize?: (value: unknown) => unknown; timeoutMs?: number }): Promise<TextProviderStructuredResult<T>>;
 }
 
 export interface CockpitTextProviderConfig {
@@ -80,23 +85,15 @@ export class CockpitTextProvider implements TextProvider {
     return { text, ...(model ? { returnedModelId: model } : {}) };
   }
 
-  async generateStructured<T>(input: { model: string; input: string; schema: ZodType<T>; timeoutMs?: number }): Promise<T> {
-    let response: { text: string };
+  async generateStructured<T>(input: { model: string; input: string; schema: ZodType<T>; normalize?: (value: unknown) => unknown; timeoutMs?: number }): Promise<TextProviderStructuredResult<T>> {
+    let response: { text: string; returnedModelId?: string };
     try {
       response = await this.generateText(input);
     } catch (error) {
       if (error instanceof TextProviderError) throw error;
       throw this.error("request_failed", "Cockpit structured generation failed.", "generate_structured", input.model);
     }
-    let json: unknown;
-    try {
-      json = JSON.parse(stripJsonFence(response.text));
-    } catch {
-      throw this.error("invalid_json", "Cockpit structured response was not valid JSON.", "generate_structured", input.model);
-    }
-    const parsed = input.schema.safeParse(json);
-    if (!parsed.success) throw this.error("schema_validation_failed", "Cockpit structured response did not match the required schema.", "generate_structured", input.model);
-    return parsed.data;
+    return parseStructuredText({ ...input, response, providerId: this.providerId });
   }
 
   private async requestJson(path: "models" | "responses", operation: TextProviderError["context"]["operation"], timeoutMs?: number, init: RequestInit = {}, model?: string): Promise<unknown> {
@@ -130,6 +127,26 @@ export class CockpitTextProvider implements TextProvider {
   private error(code: TextProviderErrorCode, message: string, operation: TextProviderError["context"]["operation"], model?: string, httpStatus?: number): TextProviderError {
     return new TextProviderError(code, message, { providerId: this.providerId, operation, ...(model ? { model } : {}), ...(httpStatus ? { httpStatus } : {}) });
   }
+}
+
+/** Central structured transport boundary shared by production adapters and test seams. */
+export function parseStructuredText<T>(input: { response: { text: string; returnedModelId?: string }; model: string; schema: ZodType<T>; normalize?: (value: unknown) => unknown; providerId: string }): TextProviderStructuredResult<T> {
+  let json: unknown;
+  const text = input.response.text.replace(/^\uFEFF/, "").trim();
+  if (!text) throw new TextProviderError("invalid_response", "Structured response was empty.", { providerId: input.providerId, operation: "generate_structured", model: input.model });
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  const candidate = (fenced?.[1] ?? text).trim();
+  try { json = JSON.parse(candidate); }
+  catch { throw new TextProviderError("invalid_json", "Structured response was not valid JSON.", { providerId: input.providerId, operation: "generate_structured", model: input.model }); }
+  for (let depth = 0; depth < 3 && isRecord(json); depth += 1) {
+    const record = json;
+    const wrapper = ["data", "result", "response", "output"].find((key) => isRecord(record[key]) && (Object.keys(record).length === 1 || Object.keys(record[key]).length > 0));
+    if (!wrapper) break;
+    json = record[wrapper];
+  }
+  const parsed = input.schema.safeParse(input.normalize ? input.normalize(json) : json);
+  if (!parsed.success) throw new TextProviderError("schema_validation_failed", "Structured response did not match the required schema.", { providerId: input.providerId, operation: "generate_structured", model: input.model });
+  return { data: parsed.data, ...(input.response.returnedModelId ? { returnedModelId: input.response.returnedModelId } : {}) };
 }
 
 export function normalizeCockpitBaseUrl(value: string): string {

@@ -17,21 +17,22 @@ async function setup() {
 
 const segments = [{ id: "segment-1", order: 0, startCharacter: 0, endCharacter: 12, type: "hook" as const, text: "Hello world.", function: "Opening", includedForDna: true }];
 function output(evidenceSegmentIds = ["segment-1"], uncertainties: unknown[] = []) { return { referenceId: "ref-1", segmentationArtifactId: "artifact-seg-1", hookPattern: { abstraction: "Open with a direct question", evidenceSegmentIds }, promisePattern: { abstraction: "Promise a clear answer", evidenceSegmentIds }, narrativeStructure: [{ phase: "opening", function: "Establish the topic", evidenceSegmentIds }], pacingPattern: { description: "Fast opening", evidenceSegmentIds }, conflictAndRevealPattern: { description: "Introduce a tension before the answer", evidenceSegmentIds }, proofPattern: { description: "Use a concrete example", evidenceSegmentIds }, emotionalArc: [], retentionDevices: [], transitionPatterns: [{ abstraction: "Move directly into evidence", evidenceSegmentIds }], reusablePrinciples: [{ principle: "State the payoff early", evidenceSegmentIds }], forbiddenToCopy: [{ element: "Exact phrasing", reason: "Original expression", evidenceSegmentIds }], excludedContentSummary: { sponsorSegmentCount: 0, selfPromotionSegmentCount: 0, excludedSegmentIds: [] }, uncertainties }; }
+function structuredClient(value: unknown, onInput?: (input: { input: string }) => void) { return { generateStructured: async <T>(input: { schema: { parse: (value: unknown) => T }; normalize?: (value: unknown) => unknown; input: string }) => { onInput?.(input); return { data: input.schema.parse(input.normalize ? input.normalize(value) : value) }; } }; }
 
 describe("competitor DNA service", () => {
   it("accepts evidence-backed abstractions from approved segments", async () => {
     const { db, credentialStore, certificationStore } = await setup();
-    const result = await runCompetitorDna({ referenceId: "ref-1", segmentationArtifactId: "artifact-seg-1", cleanedTranscript: "Hello world.", segments, credentialStore, certificationStore, createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify(output()) }) }) });
+    const result = await runCompetitorDna({ referenceId: "ref-1", segmentationArtifactId: "artifact-seg-1", cleanedTranscript: "Hello world.", segments, credentialStore, certificationStore, createClient: () => structuredClient(output()) });
     expect(result.output.hookPattern.evidenceSegmentIds).toEqual(["segment-1"]); db.close();
   });
   it("fails closed for invented evidence IDs", async () => {
     const { db, credentialStore, certificationStore } = await setup();
-    await expect(runCompetitorDna({ referenceId: "ref-1", segmentationArtifactId: "artifact-seg-1", cleanedTranscript: "Hello world.", segments, credentialStore, certificationStore, createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify(output(["invented"])) }) }) })).rejects.toMatchObject({ category: "invalid_output" }); db.close();
+    await expect(runCompetitorDna({ referenceId: "ref-1", segmentationArtifactId: "artifact-seg-1", cleanedTranscript: "Hello world.", segments, credentialStore, certificationStore, createClient: () => structuredClient(output(["invented"])) })).rejects.toMatchObject({ category: "invalid_output" }); db.close();
   });
 
   it("normalizes descriptive uncertainty objects without weakening evidence validation", async () => {
     const { db, credentialStore, certificationStore } = await setup();
-    const result = await runCompetitorDna({ referenceId: "ref-1", segmentationArtifactId: "artifact-seg-1", cleanedTranscript: "Hello world.", segments, credentialStore, certificationStore, createClient: () => ({ createResponseText: async () => ({ text: JSON.stringify(output(["segment-1"], [{ description: "The source does not establish the publication date." }])) }) }) });
+    const result = await runCompetitorDna({ referenceId: "ref-1", segmentationArtifactId: "artifact-seg-1", cleanedTranscript: "Hello world.", segments, credentialStore, certificationStore, createClient: () => structuredClient(output(["segment-1"], [{ description: "The source does not establish the publication date." }])) });
     expect(result.output.uncertainties).toEqual(["The source does not establish the publication date."]);
     db.close();
   });
@@ -48,7 +49,7 @@ describe("competitor DNA service", () => {
       originalityRules: ["copied wording", "No guarantees"],
       credentialStore,
       certificationStore,
-      createClient: () => ({ createResponseText: async (request) => { capturedPrompt = request.input; return { text: JSON.stringify(output()) }; } })
+      createClient: () => structuredClient(output(), (request) => { capturedPrompt = request.input; })
     });
     expect(capturedPrompt).toContain("one top-level JSON object");
     expect(capturedPrompt).toContain('"hookPattern"');

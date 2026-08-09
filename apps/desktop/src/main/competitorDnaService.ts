@@ -10,7 +10,7 @@ export class CompetitorDnaError extends Error {
   constructor(readonly category: "capability_not_verified" | "credential_missing" | "provider_failed" | "invalid_json" | "invalid_output", message: string) { super(message); }
 }
 
-interface TextClient { createResponseText(input: { model: string; input: string; timeoutMs?: number }): Promise<{ text: string; returnedModelId?: string }>; }
+type TextClient = Pick<TextProvider, "generateStructured">;
 
 interface CompetitorDnaChannelProfile {
   id: string;
@@ -25,34 +25,29 @@ export async function runCompetitorDna(input: { referenceId: string; segmentatio
   let configured: { provider: TextProvider; model: string };
   try { configured = await resolveActiveTextProvider({ credentialStore: input.credentialStore, certificationStore: input.certificationStore }); }
   catch (error) { throw new CompetitorDnaError(error instanceof TextProviderError ? "capability_not_verified" : "credential_missing", "Verified Cockpit text capability is required before Competitor DNA can run."); }
-  let response: { text: string; returnedModelId?: string };
-  try { const client = input.createClient?.({ baseUrl: "", apiKey: "" }); response = client ? await client.createResponseText({ model: configured.model, input: prompt(input), timeoutMs: competitorDnaTimeoutMs }) : await configured.provider.generateText({ model: configured.model, input: prompt(input), timeoutMs: competitorDnaTimeoutMs }); }
-  catch { throw new CompetitorDnaError("provider_failed", "Competitor DNA text provider request failed."); }
-  let parsed: unknown; try { parsed = JSON.parse(response.text.trim()); } catch { throw new CompetitorDnaError("invalid_json", "Competitor DNA returned invalid JSON."); }
-  const result = competitorDnaOutputSchema.safeParse(normalizeCompetitorDnaOutput(parsed));
-  if (!result.success) {
-    const issueSummary = result.error.issues.slice(0, 6).map((issue) => `${issue.path.join(".") || "root"}:${issue.code}`).join(", ");
-    throw new CompetitorDnaError("invalid_output", `Competitor DNA returned an invalid structured output${issueSummary ? ` (${issueSummary})` : ""}.`);
-  }
-  if (result.data.referenceId !== input.referenceId || result.data.segmentationArtifactId !== input.segmentationArtifactId) throw new CompetitorDnaError("invalid_output", "Competitor DNA returned output for a different reference or segmentation artifact.");
+  let response: { data: CompetitorDnaOutput; returnedModelId?: string };
+  try { const client = input.createClient?.({ baseUrl: "", apiKey: "" }); response = client ? await client.generateStructured({ model: configured.model, input: prompt(input), timeoutMs: competitorDnaTimeoutMs, schema: competitorDnaOutputSchema, normalize: normalizeCompetitorDnaOutput }) : await configured.provider.generateStructured({ model: configured.model, input: prompt(input), timeoutMs: competitorDnaTimeoutMs, schema: competitorDnaOutputSchema, normalize: normalizeCompetitorDnaOutput }); }
+  catch (error) { if (error instanceof TextProviderError && error.code === "invalid_json") throw new CompetitorDnaError("invalid_json", "Competitor DNA returned invalid JSON."); if (error instanceof TextProviderError && error.code === "schema_validation_failed") throw new CompetitorDnaError("invalid_output", "Competitor DNA returned an invalid structured output."); throw new CompetitorDnaError("provider_failed", "Competitor DNA text provider request failed."); }
+  const result = response.data;
+  if (result.referenceId !== input.referenceId || result.segmentationArtifactId !== input.segmentationArtifactId) throw new CompetitorDnaError("invalid_output", "Competitor DNA returned output for a different reference or segmentation artifact.");
   const includedSegments = input.segments.filter((segment) => segment.includedForDna);
   const includedIds = new Set(includedSegments.map((segment) => segment.id));
   const excludedSegments = input.segments.filter((segment) => !segment.includedForDna);
-  const evidence = [result.data.hookPattern, result.data.promisePattern, ...result.data.narrativeStructure, result.data.pacingPattern, result.data.conflictAndRevealPattern, result.data.proofPattern, ...result.data.emotionalArc, ...result.data.retentionDevices, ...result.data.transitionPatterns, ...result.data.reusablePrinciples, ...result.data.forbiddenToCopy];
+  const evidence = [result.hookPattern, result.promisePattern, ...result.narrativeStructure, result.pacingPattern, result.conflictAndRevealPattern, result.proofPattern, ...result.emotionalArc, ...result.retentionDevices, ...result.transitionPatterns, ...result.reusablePrinciples, ...result.forbiddenToCopy];
   if (evidence.some((item) => item.evidenceSegmentIds.some((id) => !includedIds.has(id)))) throw new CompetitorDnaError("invalid_output", "Competitor DNA cited a segment that is not included for DNA evidence.");
   const expectedSponsorCount = excludedSegments.filter((segment) => segment.type === "sponsor").length;
   const expectedSelfPromotionCount = excludedSegments.filter((segment) => segment.type === "self_promotion").length;
   const expectedExcludedIds = excludedSegments.map((segment) => segment.id);
-  if (result.data.excludedContentSummary.sponsorSegmentCount !== expectedSponsorCount
-    || result.data.excludedContentSummary.selfPromotionSegmentCount !== expectedSelfPromotionCount
-    || JSON.stringify(result.data.excludedContentSummary.excludedSegmentIds) !== JSON.stringify(expectedExcludedIds)) {
-    const actual = result.data.excludedContentSummary;
+  if (result.excludedContentSummary.sponsorSegmentCount !== expectedSponsorCount
+    || result.excludedContentSummary.selfPromotionSegmentCount !== expectedSelfPromotionCount
+    || JSON.stringify(result.excludedContentSummary.excludedSegmentIds) !== JSON.stringify(expectedExcludedIds)) {
+  const actual = result.excludedContentSummary;
     throw new CompetitorDnaError("invalid_output", `Competitor DNA excluded-content summary does not match segmentation (expected sponsor=${expectedSponsorCount}, selfPromotion=${expectedSelfPromotionCount}, excluded=${expectedExcludedIds.length}; received sponsor=${actual.sponsorSegmentCount}, selfPromotion=${actual.selfPromotionSegmentCount}, excluded=${actual.excludedSegmentIds.length}).`);
   }
   const source = input.cleanedTranscript.toLowerCase();
   const phrases = evidence.flatMap((item) => ["abstraction" in item ? item.abstraction : "description" in item ? item.description : "function" in item ? item.function : "principle" in item ? item.principle : "element" in item ? item.element : ""]);
   if (phrases.some((phrase) => phrase.length >= 40 && source.includes(phrase.toLowerCase()))) throw new CompetitorDnaError("invalid_output", "Competitor DNA copied a long phrase instead of describing an abstraction.");
-  return { output: result.data, ...(response.returnedModelId ? { returnedModelId: response.returnedModelId } : {}) };
+  return { output: result, ...(response.returnedModelId ? { returnedModelId: response.returnedModelId } : {}) };
 }
 
 function prompt(input: { referenceId: string; segmentationArtifactId: string; cleanedTranscript: string; segments: ReferenceSegmentationOutput["segments"]; channelProfile?: CompetitorDnaChannelProfile; originalityRules?: string[] }): string {

@@ -1,7 +1,7 @@
 import type { ProviderCredentialStore, TextCertificationStore } from "@lsf/db";
-import { validateReferenceSegmentationOutput, type ReferenceSegmentationOutput } from "@lsf/domain";
+import { referenceSegmentationOutputSchema, validateReferenceSegmentationOutput, type ReferenceSegmentationOutput } from "@lsf/domain";
 import { TextProviderError, type TextProvider } from "@lsf/providers";
-import { resolveActiveTextProvider } from "./textProviderService";
+import { adaptLegacyTextClient, type LegacyTextClient, resolveActiveTextProvider } from "./textProviderService";
 
 export const referenceSegmentationTimeoutMs = 300_000;
 export const defaultSegmentationChunkCharacters = 6_000;
@@ -12,9 +12,7 @@ export class ReferenceSegmentationError extends Error {
   }
 }
 
-interface TextClient {
-  createResponseText(input: { model: string; input: string }): Promise<{ text: string; returnedModelId?: string }>;
-}
+type TextClient = Pick<TextProvider, "generateStructured"> | LegacyTextClient;
 
 export async function runReferenceSegmentation(input: {
   referenceId: string;
@@ -28,28 +26,25 @@ export async function runReferenceSegmentation(input: {
   let configured: { provider: TextProvider; model: string };
   try { configured = await resolveActiveTextProvider({ credentialStore: input.credentialStore, certificationStore: input.certificationStore }); }
   catch (error) { throw new ReferenceSegmentationError(error instanceof TextProviderError ? "capability_not_verified" : "credential_missing", "Verified Cockpit text capability is required before Reference Segmentation can run."); }
-  const client = input.createClient?.({ baseUrl: "", apiKey: "" });
+  const injected = input.createClient?.({ baseUrl: "", apiKey: "" });
+  const client = injected && ("generateStructured" in injected ? injected : adaptLegacyTextClient(injected));
   const chunks = splitTranscript(input.cleanedTranscript, input.maxChunkCharacters ?? defaultSegmentationChunkCharacters);
   const chunkOutputs: Array<{ chunk: SegmentationChunk; output: ReferenceSegmentationOutput }> = [];
   let returnedModelId: string | undefined;
 
   for (const chunk of chunks) {
-    let response: { text: string; returnedModelId?: string };
+    let response: { data: ReferenceSegmentationOutput; returnedModelId?: string };
     try {
       response = client
-        ? await client.createResponseText({ model: configured.model, input: buildPrompt({ ...input, cleanedTranscript: chunk.text, sourceStart: chunk.sourceStart, sourceEnd: chunk.sourceEnd, totalTranscriptLength: input.cleanedTranscript.length }) })
-        : await configured.provider.generateText({ model: configured.model, input: buildPrompt({ ...input, cleanedTranscript: chunk.text, sourceStart: chunk.sourceStart, sourceEnd: chunk.sourceEnd, totalTranscriptLength: input.cleanedTranscript.length }), timeoutMs: referenceSegmentationTimeoutMs });
+        ? await client.generateStructured({ model: configured.model, input: buildPrompt({ ...input, cleanedTranscript: chunk.text, sourceStart: chunk.sourceStart, sourceEnd: chunk.sourceEnd, totalTranscriptLength: input.cleanedTranscript.length }), schema: referenceSegmentationOutputSchema, timeoutMs: referenceSegmentationTimeoutMs })
+        : await configured.provider.generateStructured({ model: configured.model, input: buildPrompt({ ...input, cleanedTranscript: chunk.text, sourceStart: chunk.sourceStart, sourceEnd: chunk.sourceEnd, totalTranscriptLength: input.cleanedTranscript.length }), schema: referenceSegmentationOutputSchema, timeoutMs: referenceSegmentationTimeoutMs });
     } catch (error) {
+      if (error instanceof TextProviderError && error.code === "invalid_json") throw new ReferenceSegmentationError("invalid_json", "Reference Segmentation returned invalid JSON.");
+      if (error instanceof TextProviderError && error.code === "schema_validation_failed") throw new ReferenceSegmentationError("invalid_output", "Reference Segmentation returned invalid structured output.");
       throw new ReferenceSegmentationError("provider_failed", "Reference Segmentation provider request failed.");
     }
     if (response.returnedModelId) returnedModelId = response.returnedModelId;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(response.text.trim());
-    } catch {
-      throw new ReferenceSegmentationError("invalid_json", "Reference Segmentation returned invalid JSON.");
-    }
-    const validation = validateReferenceSegmentationOutput(parsed, chunk.text, input.referenceId);
+    const validation = validateReferenceSegmentationOutput(response.data, chunk.text, input.referenceId);
     if (!validation.output) throw new ReferenceSegmentationError("invalid_output", validation.errors[0] ?? "Reference Segmentation returned invalid structured output.");
     if (validation.output.cleanedTranscriptArtifactId !== input.cleanedTranscriptArtifactId) throw new ReferenceSegmentationError("invalid_output", "Reference Segmentation cited a different cleaned transcript artifact.");
     chunkOutputs.push({ chunk, output: validation.output });

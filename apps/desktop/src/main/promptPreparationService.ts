@@ -1,12 +1,13 @@
 import type { ProviderCredentialStore, TextCertificationStore } from "@lsf/db";
 import { promptPreparationOutputSchema, resolveCharacterCompositionLock, type AssetConcept, type CharacterVersion, type ShotMotionPlan } from "@lsf/domain";
 import { TextProviderError, type TextProvider } from "@lsf/providers";
-import { resolveActiveTextProvider } from "./textProviderService";
+import { adaptLegacyTextClient, type LegacyTextClient, resolveActiveTextProvider } from "./textProviderService";
 
 export class PromptPreparationError extends Error { constructor(readonly category: "capability_not_verified" | "credential_missing" | "provider_failed" | "invalid_json" | "invalid_output", message: string) { super(message); } }
 export const promptPreparationTimeoutMs = 120_000;
 export const promptPreparationBatchSize = 4;
-interface TextClient { createResponseText(input: { model: string; input: string; timeoutMs?: number }): Promise<{ text: string; returnedModelId?: string }>; }
+type TextClient = Pick<TextProvider, "generateStructured"> | LegacyTextClient;
+const promptBatchOutputSchema = promptPreparationOutputSchema.pick({ prompts: true });
 
 type PromptShot = { id: string; sceneId?: string; purpose?: string; durationFrames?: number; visualMode: string; framing: string; cameraAngle: string; cameraMovement: string; subjectAction: string; continuityRefs: string[]; semanticBeat?: string | undefined; assetConceptIds?: string[] | undefined; motion?: ShotMotionPlan | undefined };
 
@@ -25,15 +26,18 @@ export async function runPromptPreparation(input: { shots: PromptShot[]; aspectR
   let configured: { provider: TextProvider; model: string };
   try { configured = await resolveActiveTextProvider({ credentialStore: input.credentialStore, certificationStore: input.certificationStore }); }
   catch (error) { throw new PromptPreparationError(error instanceof TextProviderError ? "capability_not_verified" : "credential_missing", "Verified Cockpit text capability is required before Prompt Preparation can run."); }
-  const client = input.createClient?.({ baseUrl: "", apiKey: "" });
+  const injected = input.createClient?.({ baseUrl: "", apiKey: "" });
+  const client = injected && ("generateStructured" in injected ? injected : adaptLegacyTextClient(injected));
   const batches = Array.from({ length: Math.ceil(aiShots.length / promptPreparationBatchSize) }, (_, index) => aiShots.slice(index * promptPreparationBatchSize, (index + 1) * promptPreparationBatchSize));
-  let responses: Array<{ text: string; returnedModelId?: string }>;
+  let responses: Array<{ data: ReturnType<typeof promptBatchOutputSchema.parse>; returnedModelId?: string }>;
   try {
-    responses = await Promise.all(batches.map((batch) => client ? client.createResponseText({ model: configured.model, timeoutMs: promptPreparationTimeoutMs, input: buildPromptRequest(batch, input.aspectRatio, input.character, input.assetConcepts) }) : configured.provider.generateText({ model: configured.model, timeoutMs: promptPreparationTimeoutMs, input: buildPromptRequest(batch, input.aspectRatio, input.character, input.assetConcepts) })));
-  } catch {
+    responses = await Promise.all(batches.map((batch) => client ? client.generateStructured({ model: configured.model, timeoutMs: promptPreparationTimeoutMs, input: buildPromptRequest(batch, input.aspectRatio, input.character, input.assetConcepts), schema: promptBatchOutputSchema }) : configured.provider.generateStructured({ model: configured.model, timeoutMs: promptPreparationTimeoutMs, input: buildPromptRequest(batch, input.aspectRatio, input.character, input.assetConcepts), schema: promptBatchOutputSchema })));
+  } catch (error) {
+    if (error instanceof TextProviderError && error.code === "invalid_json") throw new PromptPreparationError("invalid_json", "Prompt Preparation returned invalid JSON.");
+    if (error instanceof TextProviderError && error.code === "schema_validation_failed") throw new PromptPreparationError("invalid_output", "Prompt Preparation returned an invalid structured output.");
     throw new PromptPreparationError("provider_failed", "Prompt Preparation text provider request failed.");
   }
-  const prompts = responses.flatMap((response, index) => parsePromptBatch(response.text, batches[index]!, input.aspectRatio));
+  const prompts = responses.flatMap((response) => response.data.prompts);
   const ids = new Set(aiShots.map((shot) => shot.id));
   if (prompts.some((prompt) => !ids.has(prompt.shotId) || prompt.aspectRatio !== input.aspectRatio) || new Set(prompts.map((prompt) => prompt.shotId)).size !== prompts.length || prompts.length !== aiShots.length) throw new PromptPreparationError("invalid_output", "Prompt Preparation must return exactly one correctly sized prompt for every approved AI-routed shot.");
   const shotMap = new Map(aiShots.map((shot) => [shot.id, shot]));
@@ -57,7 +61,6 @@ export async function runPromptPreparation(input: { shots: PromptShot[]; aspectR
   const returnedModelId = responses.find((response) => response.returnedModelId)?.returnedModelId;
   return { output, ...(returnedModelId ? { returnedModelId } : {}) };
 }
-
 function promptContractSuffix(character: CharacterVersion | undefined, concepts: AssetConcept[]): string {
   const parts: string[] = [];
   if (character) {
@@ -143,14 +146,4 @@ function compileScenePromptPackages(shots: PromptShot[], prompts: ReturnType<typ
     const promptText = `Create scene ${sceneId} for a ${aspectRatio} YouTube explainer as exactly ${generatedFrameNumbers.length} new separate image files. ${locks.join(" ")}${compositionLock} Use the first generated frame as the base reference and use each preceding approved frame for continuity. Do not create a contact sheet, do not combine frames, and do not add text, logos, or watermarks unless the storyboard explicitly requires them. ${frameInstructions.join(" ")} For REUSE_EXISTING frames, do not generate a file; reuse the named approved frame in the edit. Continue without asking for confirmation between frames.`;
     return { sceneId, promptVersionId: `scene-prompt-${sceneId}-v1`, targetTool: "GG Lab", compilationMode: "scene_prompt", promptText, frameNumbers: frameManifest.map((frame) => frame.displayNumber), generatedFrameNumbers, referenceInstructions: ["Attach the approved character master reference when the teacher appears.", "Use the previous generated frame in this scene as the internal reference for continuity."], continuityLocks: locks, prohibitedChanges: [...new Set(frameManifest.flatMap((frame) => frame.prohibitedChanges))], expectedAspectRatio: aspectRatio, frameManifest };
   });
-}
-
-function parsePromptBatch(text: string, shots: Array<{ id: string }>, aspectRatio: "16:9" | "9:16") {
-  let parsed: unknown;
-  try { parsed = JSON.parse(text.trim()); } catch { throw new PromptPreparationError("invalid_json", "Prompt Preparation returned invalid JSON."); }
-  const result = promptPreparationOutputSchema.safeParse(parsed);
-  if (!result.success) throw new PromptPreparationError("invalid_output", "Prompt Preparation returned an invalid structured output.");
-  const ids = new Set(shots.map((shot) => shot.id));
-  if (result.data.prompts.some((prompt) => !ids.has(prompt.shotId) || prompt.aspectRatio !== aspectRatio) || new Set(result.data.prompts.map((prompt) => prompt.shotId)).size !== result.data.prompts.length || result.data.prompts.length !== shots.length) throw new PromptPreparationError("invalid_output", "Prompt Preparation must return exactly one correctly sized prompt for every approved AI-routed shot.");
-  return result.data.prompts;
 }
