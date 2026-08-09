@@ -405,9 +405,13 @@ export interface LongShortFactoryApi {
   testCredentialPresence: (providerId: string) => Promise<ProviderPresence>;
   deleteProviderCredential: (providerId: string) => Promise<{ providerId: string; deleted: boolean }>;
   list9RouterModels: () => Promise<NineRouterModelListResult>;
+  listCockpitTextModels: () => Promise<NineRouterModelListResult>;
   save9RouterModelConfiguration: (input: ProviderModelConfigurationInput) => Promise<ProviderCredentialSettings>;
+  saveCockpitTextModelConfiguration: (input: { providerId?: "cockpit"; textModel: string }) => Promise<ProviderCredentialSettings>;
   load9RouterTextCertification: () => Promise<TextModelCertificationResponse>;
+  loadTextProviderCapability: () => Promise<TextModelCertificationResponse>;
   run9RouterTextCertification: (input: { providerId?: "9router"; confirmation: "Run 2 certification requests" }) => Promise<TextModelCertificationResponse>;
+  runCockpitTextCapability: (input: { providerId?: "cockpit"; confirmation: "Run 2 text capability requests" }) => Promise<TextModelCertificationResponse>;
   load9RouterImageCertification: () => Promise<ImageModelCertificationResponse>;
   run9RouterImageCertification: (input: { providerId?: "9router"; confirmation: "Run 1 image certification request" }) => Promise<ImageModelCertificationResponse>;
   loadLocalTtsSettings: () => Promise<LocalTtsSettings>;

@@ -2,5 +2,5 @@
   "schemaVersion": 1,
   "updatedAt": "2026-08-09T00:00:00.000+07:00",
   "activeJobs": [],
-  "notes": "JOB-G01-SCOPE-RESET merged to main at e54d2aac. JOB-G01-5-TEXT-PROVIDER-COCKPIT is ready; its implementation must use a generic TextProvider and Cockpit adapter without starting G02."
+  "notes": "JOB-G01-SCOPE-RESET merged to main at e54d2aac. JOB-G01-5-TEXT-PROVIDER-COCKPIT is ready for independent review and QA; it adds Cockpit TextProvider migration without starting G02."
 }

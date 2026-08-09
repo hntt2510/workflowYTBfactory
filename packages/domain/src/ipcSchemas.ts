@@ -187,6 +187,12 @@ export const textCertificationErrorCategorySchema = z.enum([
   "invalid_json",
   "json_schema_mismatch",
   "unknown_error"
+  , "provider_unavailable"
+  , "authentication_failed"
+  , "model_not_found"
+  , "invalid_response"
+  , "schema_validation_failed"
+  , "request_failed"
 ]);
 
 export const listNineRouterModelsRequestSchema = z.object({
@@ -205,6 +211,18 @@ export const save9RouterModelConfigurationRequestSchema = z.object({
 export const run9RouterTextCertificationRequestSchema = z.object({
   providerId: z.literal("9router").optional(),
   confirmation: z.literal("Run 2 certification requests")
+}).strict();
+
+export const listCockpitTextModelsRequestSchema = z.object({ providerId: z.literal("cockpit").optional() }).strict();
+
+export const saveCockpitTextModelConfigurationRequestSchema = z.object({
+  providerId: z.literal("cockpit").optional(),
+  textModel: modelIdSchema
+}).strict();
+
+export const runCockpitTextCapabilityRequestSchema = z.object({
+  providerId: z.literal("cockpit").optional(),
+  confirmation: z.literal("Run 2 text capability requests")
 }).strict();
 
 export const localTtsSettingsSchema = z.object({
@@ -1132,13 +1150,13 @@ export const textCertificationJsonPayloadSchema = z.object({
 
 export const textModelCertificationRecordSchema = z.object({
   id: idSchema,
-  providerId: z.literal("9router"),
+  providerId: z.enum(["9router", "cockpit"]),
   configuredModelId: modelIdSchema,
   returnedModelId: modelIdSchema.optional(),
   baseUrlFingerprint: z.string().length(64).regex(/^[a-f0-9]+$/),
   credentialVersionRef: idSchema.optional(),
   endpointStrategy: z.literal("responses"),
-  implementationVersion: z.literal("text-certification-v1"),
+  implementationVersion: z.enum(["text-certification-v1", "text-capability-v1"]),
   exactTextTest: textCertificationTestResultSchema,
   strictJsonTest: textCertificationTestResultSchema,
   overallStatus: z.enum(["verified", "failed", "stale"]),
@@ -1158,6 +1176,7 @@ export type LocalTtsSettings = z.infer<typeof localTtsSettingsSchema>;
 export type GenerateLocalTtsRequest = z.infer<typeof generateLocalTtsRequestSchema>;
 export type ModelListStatus = z.infer<typeof modelListStatusSchema>;
 export type Save9RouterModelConfigurationRequest = z.infer<typeof save9RouterModelConfigurationRequestSchema>;
+export type SaveCockpitTextModelConfigurationRequest = z.infer<typeof saveCockpitTextModelConfigurationRequestSchema>;
 export type TextCertificationErrorCategory = z.infer<typeof textCertificationErrorCategorySchema>;
 export type TextModelCertificationStatus = z.infer<typeof textModelCertificationStatusSchema>;
 export type TextModelCertificationRecord = z.infer<typeof textModelCertificationRecordSchema>;

@@ -46,10 +46,10 @@ export function AppRuntime() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [bootstrap, setBootstrap] = useState<BootstrapData>(fallbackBootstrap);
   const [selectedProject, setSelectedProject] = useState<FactoryProject | null>(null);
-  const [providerPresence, setProviderPresence] = useState<ProviderPresence>({ providerId: "9router", hasCredential: false });
+  const [providerPresence, setProviderPresence] = useState<ProviderPresence>({ providerId: "cockpit", hasCredential: false });
   const [stockPresence, setStockPresence] = useState<ProviderPresence>({ providerId: "pexels", hasCredential: false });
   const [providerSettings, setProviderSettings] = useState<ProviderCredentialSettings | null>(null);
-  const [textCertification, setTextCertification] = useState<TextModelCertificationResponse>({ status: "not_tested", message: "Text model has not been certified." });
+  const [textCertification, setTextCertification] = useState<TextModelCertificationResponse>({ status: "not_tested", message: "Text capability has not been verified." });
   const [imageCertification, setImageCertification] = useState<ImageModelCertificationResponse>({ status: "not_tested", message: "Image model has not been certified." });
   const [localTtsSettings, setLocalTtsSettings] = useState<LocalTtsSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,10 +64,10 @@ export function AppRuntime() {
     const data = await factoryClient.bootstrap();
     setBootstrap(data);
     setLocalTtsSettings(await factoryClient.loadLocalTtsSettings());
-    const settings = await factoryClient.loadProviderCredentialSettings("9router");
+    const settings = await factoryClient.loadProviderCredentialSettings("cockpit");
     setProviderSettings(settings);
     setProviderPresence({ providerId: settings.providerId, hasCredential: settings.hasCredential });
-    setTextCertification(await factoryClient.load9RouterTextCertification());
+    setTextCertification(await factoryClient.loadTextProviderCapability());
     setImageCertification(await factoryClient.load9RouterImageCertification());
     setStockPresence(await factoryClient.hasProviderCredential("pexels"));
     if (selectedProject) setSelectedProject(await factoryClient.loadProject(selectedProject.id));

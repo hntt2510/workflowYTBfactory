@@ -62,6 +62,7 @@ import {
   devStockTestRequestSchema,
   devStockTestResponseSchema,
   listNineRouterModelsRequestSchema,
+  listCockpitTextModelsRequestSchema,
   localTtsGeneratedResponseSchema,
   localTtsSettingsResponseSchema,
   localTtsSettingsSchema,
@@ -193,6 +194,8 @@ import {
   run9RouterTextCertificationRequestSchema,
   run9RouterImageCertificationRequestSchema,
   save9RouterModelConfigurationRequestSchema,
+  saveCockpitTextModelConfigurationRequestSchema,
+  runCockpitTextCapabilityRequestSchema,
   saveProviderCredentialRequestSchema,
   setReferenceIncludedRequestSchema,
   seedChannelProfiles,
@@ -221,6 +224,7 @@ import { PersistentGenerationQueue } from "@lsf/generation-queue";
 import { NineRouterClient } from "@lsf/providers";
 import { listNineRouterModels } from "./nineRouterModelService";
 import { loadNineRouterTextCertification, runNineRouterTextCertification } from "./nineRouterTextCertificationService";
+import { listActiveTextModels, loadActiveTextCapability, runActiveTextCapability } from "./textProviderService";
 import { defaultPerChunkTimeoutMs, runTranscriptCleaning, TranscriptCleaningError, transcriptCleaningPromptTemplateId, transcriptCleaningPromptVersion, transcriptCleaningRunnerVersion } from "./transcriptCleaningService";
 import { runReferenceSegmentation, ReferenceSegmentationError } from "./referenceSegmentationService";
 import { competitorDnaRunnerVersion, runCompetitorDna, CompetitorDnaError } from "./competitorDnaService";
@@ -5212,6 +5216,7 @@ ipcMain.handle("delete-provider-credential", async (_event, input: unknown) => {
     textCertificationStore.markTextCertificationsStale("9router");
     imageCertificationStore.markStale();
   }
+  if (providerId === "cockpit") textCertificationStore.markTextCertificationsStale("cockpit");
   return providerCredentialDeletedResponseSchema.parse({
     providerId,
     deleted
@@ -5224,7 +5229,7 @@ ipcMain.handle("load-provider-credential-settings", (_event, input: unknown) => 
   return providerCredentialSettingsResponseSchema.parse(
     settings ?? {
       providerId,
-      baseUrl: "http://127.0.0.1:20128/v1",
+      baseUrl: providerId === "cockpit" ? "" : "http://127.0.0.1:20128/v1",
       hasCredential: false
     }
   );
@@ -5258,6 +5263,29 @@ ipcMain.handle("save-9router-model-configuration", (_event, input: unknown) => {
 ipcMain.handle("list-9router-models", async (_event, input: unknown) => {
   listNineRouterModelsRequestSchema.parse(input ?? {});
   return nineRouterModelListResponseSchema.parse(await listNineRouterModels({ credentialStore, logger }));
+});
+
+ipcMain.handle("list-cockpit-text-models", async (_event, input: unknown) => {
+  listCockpitTextModelsRequestSchema.parse(input ?? {});
+  return nineRouterModelListResponseSchema.parse(await listActiveTextModels({ credentialStore, logger }));
+});
+
+ipcMain.handle("save-cockpit-text-model-configuration", (_event, input: unknown) => {
+  const parsed = saveCockpitTextModelConfigurationRequestSchema.parse(input ?? {});
+  const previous = credentialStore.loadProviderCredentialSettings("cockpit");
+  credentialStore.saveProviderModelConfiguration("cockpit", { textModel: parsed.textModel });
+  const settings = credentialStore.loadProviderCredentialSettings("cockpit");
+  if (previous?.textModel !== settings?.textModel) textCertificationStore.markTextCertificationsStale("cockpit");
+  return providerCredentialSettingsResponseSchema.parse(settings);
+});
+
+ipcMain.handle("load-text-provider-capability", async () =>
+  textModelCertificationResponseSchema.parse(await loadActiveTextCapability({ credentialStore, certificationStore: textCertificationStore }))
+);
+
+ipcMain.handle("run-cockpit-text-capability", async (_event, input: unknown) => {
+  runCockpitTextCapabilityRequestSchema.parse(input ?? {});
+  return textModelCertificationResponseSchema.parse(await runActiveTextCapability({ credentialStore, certificationStore: textCertificationStore, logger }));
 });
 
 ipcMain.handle("load-9router-text-certification", async () =>

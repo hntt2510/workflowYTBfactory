@@ -120,6 +120,9 @@ function webFallback(): LongShortFactoryApi {
         message: "Electron main process unavailable."
       };
     },
+    async listCockpitTextModels() {
+      return { status: "network_error" as const, models: [], message: "Electron main process unavailable." };
+    },
     async save9RouterModelConfiguration(input: ProviderModelConfigurationInput): Promise<ProviderCredentialSettings> {
       providerSettings = {
         ...providerSettings,
@@ -131,6 +134,10 @@ function webFallback(): LongShortFactoryApi {
       };
       return providerSettings;
     },
+    async saveCockpitTextModelConfiguration(input: { textModel: string }): Promise<ProviderCredentialSettings> {
+      providerSettings = { ...providerSettings, providerId: "cockpit", textModel: input.textModel };
+      return providerSettings;
+    },
     async load9RouterTextCertification(): Promise<TextModelCertificationResponse> {
       return {
         status: "not_tested",
@@ -138,12 +145,18 @@ function webFallback(): LongShortFactoryApi {
         errorCategory: "credential_missing"
       };
     },
+    async loadTextProviderCapability(): Promise<TextModelCertificationResponse> {
+      return { status: "not_tested", message: "Electron main process unavailable.", errorCategory: "credential_missing" };
+    },
     async run9RouterTextCertification(): Promise<TextModelCertificationResponse> {
       return {
         status: "failed",
         message: "Electron main process unavailable.",
         errorCategory: "network_error"
       };
+    },
+    async runCockpitTextCapability(): Promise<TextModelCertificationResponse> {
+      return { status: "failed", message: "Electron main process unavailable.", errorCategory: "network_error" };
     },
     async load9RouterImageCertification(): Promise<ImageModelCertificationResponse> { return { status: "not_tested", message: "Electron main process unavailable." }; },
     async run9RouterImageCertification(): Promise<ImageModelCertificationResponse> { return { status: "failed", message: "Electron main process unavailable.", errorCategory: "credential_missing" }; },

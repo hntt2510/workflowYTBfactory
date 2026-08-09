@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import type { ProviderCredentialStore, TextCertificationStore } from "@lsf/db";
 import { cleanedTranscriptOutputSchema, type CleanedTranscriptOutput } from "@lsf/domain";
-import { NineRouterClient, NineRouterTextResponseError } from "@lsf/providers";
-import { loadNineRouterTextCertification } from "./nineRouterTextCertificationService";
+import { TextProviderError, type TextProvider } from "@lsf/providers";
+import { loadActiveTextCapability, resolveActiveTextProvider } from "./textProviderService";
 
-const providerId = "9router";
+const providerId = "cockpit";
 export const transcriptCleaningRunnerVersion = "transcript-cleaning-v3";
 export const transcriptCleaningPromptTemplateId = "02_transcript_cleaner";
 export const transcriptCleaningPromptVersion = "v3";
@@ -142,7 +142,7 @@ export async function runTranscriptCleaning(input: {
   createClient?: (config: { baseUrl: string; apiKey: string }) => TextClient;
 }): Promise<TranscriptCleaningResult> {
   if (!input.transcript.trim()) throw new TranscriptCleaningError("output_content_invalid", "Transcript Cleaning requires a non-empty raw transcript.");
-  const certification = await loadNineRouterTextCertification({
+  const certification = await loadActiveTextCapability({
     credentialStore: input.credentialStore,
     certificationStore: input.certificationStore
   });
@@ -152,9 +152,9 @@ export async function runTranscriptCleaning(input: {
 
   const settings = input.credentialStore.loadProviderCredentialSettings(providerId);
   const apiKey = await input.credentialStore.resolveProviderSecret(providerId);
-  if (!settings) throw new TranscriptCleaningError("credential_missing", "9Router provider settings are missing.");
+  if (!settings) throw new TranscriptCleaningError("credential_missing", "Cockpit text provider settings are missing.");
   if (!settings.textModel) throw new TranscriptCleaningError("model_missing", "Select a text model before running Transcript Cleaning.");
-  if (!apiKey) throw new TranscriptCleaningError("credential_missing", "9Router credential is missing or unavailable.");
+  if (!apiKey) throw new TranscriptCleaningError("credential_missing", "Cockpit credential is missing or unavailable.");
   if (settings.textModel !== input.model) throw new TranscriptCleaningError("model_missing", "The selected text model changed; reload the workflow before retrying.");
 
   const basePlan = input.maxChunkCharacters === undefined
@@ -183,7 +183,10 @@ export async function runTranscriptCleaning(input: {
   const aggregateDeadline = Date.now() + (input.aggregateTimeoutMs ?? defaultAggregateTimeoutMs);
   const maxProviderInputTokens = input.maxProviderInputTokens ?? defaultMaxProviderInputTokens;
   const retryBaseDelayMs = input.retryBaseDelayMs ?? defaultRetryBaseDelayMs;
-  const client = input.createClient?.({ baseUrl: settings.baseUrl, apiKey }) ?? new NineRouterClient({ baseUrl: settings.baseUrl, apiKey });
+  let configured: { provider: TextProvider; model: string };
+  try { configured = await resolveActiveTextProvider({ credentialStore: input.credentialStore, certificationStore: input.certificationStore }); }
+  catch { throw new TranscriptCleaningError("certification_missing", "Verified Cockpit text capability is required before Transcript Cleaning can run."); }
+  const client = input.createClient?.({ baseUrl: "", apiKey: "" });
   const resumeByIndex = new Map((input.resumeChunks ?? []).map((chunk) => [chunk.chunkIndex, chunk]));
   const progress: TranscriptCleaningChunkProgress[] = [];
   const completed: Array<{ chunk: TranscriptCleaningChunk; output: CleanedTranscriptOutput }> = [];
@@ -237,12 +240,9 @@ export async function runTranscriptCleaning(input: {
         if (estimateInputTokens(prompt) > maxProviderInputTokens) {
           throw new TranscriptCleaningError("input_token_budget_exceeded", `Transcript Cleaning chunk ${chunk.chunkIndex + 1} exceeds the configured provider input token budget.`);
         }
-        const response = await client.createResponseText({
-          model: settings.textModel,
-          input: prompt,
-          timeoutMs: Math.min(perChunkTimeoutMs, remainingMs),
-          ...(chunk.chunkFingerprint ? { idempotencyKey: chunk.chunkFingerprint } : {})
-        });
+        const response = client
+          ? await client.createResponseText({ model: configured.model, input: prompt, timeoutMs: Math.min(perChunkTimeoutMs, remainingMs), ...(chunk.chunkFingerprint ? { idempotencyKey: chunk.chunkFingerprint } : {}) })
+          : await configured.provider.generateText({ model: configured.model, input: prompt, timeoutMs: Math.min(perChunkTimeoutMs, remainingMs) });
         if (response.returnedModelId) returnedModelId = response.returnedModelId;
         output = parseChunkOutput(response.text, input.referenceId, input.sourceTranscriptVersionId, chunk, {
           mode: plan.mode,
@@ -518,12 +518,12 @@ async function reportProgress(callback: ((progress: TranscriptCleaningChunkProgr
 }
 
 function mapProviderError(error: unknown): TranscriptCleaningErrorCategory | undefined {
-  if (!(error instanceof NineRouterTextResponseError)) return undefined;
-  if (error.status === "timeout") return "provider_timeout";
-  if (error.status === "network_error") return "provider_transport_error";
-  if (error.status === "endpoint_not_found") return "endpoint_unreachable";
-  if (error.status === "unauthorized") return "credential_missing";
-  if (error.status === "invalid_response_shape") return "invalid_response_json";
+  if (!(error instanceof TextProviderError)) return undefined;
+  if (error.code === "timeout") return "provider_timeout";
+  if (error.code === "provider_unavailable") return "provider_transport_error";
+  if (error.code === "model_not_found") return "endpoint_unreachable";
+  if (error.code === "authentication_failed") return "credential_missing";
+  if (error.code === "invalid_response" || error.code === "invalid_json") return "invalid_response_json";
   return "provider_http_error";
 }
 

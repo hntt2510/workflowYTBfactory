@@ -31,7 +31,7 @@ export class TextCertificationStore {
       );
   }
 
-  loadLatestTextCertification(providerId: "9router"): TextModelCertificationRecord | null {
+  loadLatestTextCertification(providerId: TextModelCertificationRecord["providerId"]): TextModelCertificationRecord | null {
     const row = this.db
       .prepare(
         `SELECT payload_json FROM text_model_certifications
@@ -44,12 +44,12 @@ export class TextCertificationStore {
   }
 
   loadLatestMatchingTextCertification(input: {
-    providerId: "9router";
+    providerId: TextModelCertificationRecord["providerId"];
     configuredModelId: string;
     baseUrlFingerprint: string;
     credentialVersionRef?: string;
     endpointStrategy: "responses";
-    implementationVersion: "text-certification-v1";
+    implementationVersion: TextModelCertificationRecord["implementationVersion"];
   }): TextModelCertificationRecord | null {
     const row = this.db
       .prepare(
@@ -74,7 +74,7 @@ export class TextCertificationStore {
     return row ? textModelCertificationRecordSchema.parse(JSON.parse(row.payload_json)) : null;
   }
 
-  markTextCertificationsStale(providerId: "9router"): number {
+  markTextCertificationsStale(providerId: TextModelCertificationRecord["providerId"]): number {
     const rows = this.db
       .prepare(
         `SELECT id, payload_json FROM text_model_certifications

@@ -1,9 +1,8 @@
 import type { ProviderCredentialStore, TextCertificationStore } from "@lsf/db";
 import { validateReferenceSegmentationOutput, type ReferenceSegmentationOutput } from "@lsf/domain";
-import { NineRouterClient, NineRouterTextResponseError } from "@lsf/providers";
-import { loadNineRouterTextCertification } from "./nineRouterTextCertificationService";
+import { TextProviderError, type TextProvider } from "@lsf/providers";
+import { resolveActiveTextProvider } from "./textProviderService";
 
-const providerId = "9router";
 export const referenceSegmentationTimeoutMs = 300_000;
 export const defaultSegmentationChunkCharacters = 6_000;
 
@@ -26,17 +25,10 @@ export async function runReferenceSegmentation(input: {
   maxChunkCharacters?: number;
   createClient?: (config: { baseUrl: string; apiKey: string }) => TextClient;
 }): Promise<{ output: ReferenceSegmentationOutput; returnedModelId?: string }> {
-  const certification = await loadNineRouterTextCertification({ credentialStore: input.credentialStore, certificationStore: input.certificationStore });
-  if (certification.status !== "verified") {
-    throw new ReferenceSegmentationError("capability_not_verified", "A verified text-model certification is required before Reference Segmentation can run.");
-  }
-  const settings = input.credentialStore.loadProviderCredentialSettings(providerId);
-  const apiKey = await input.credentialStore.resolveProviderSecret(providerId);
-  if (!settings?.textModel || !apiKey) {
-    throw new ReferenceSegmentationError("credential_missing", "The selected text model or credential is unavailable.");
-  }
-
-  const client = input.createClient?.({ baseUrl: settings.baseUrl, apiKey }) ?? new NineRouterClient({ baseUrl: settings.baseUrl, apiKey, timeoutMs: referenceSegmentationTimeoutMs });
+  let configured: { provider: TextProvider; model: string };
+  try { configured = await resolveActiveTextProvider({ credentialStore: input.credentialStore, certificationStore: input.certificationStore }); }
+  catch (error) { throw new ReferenceSegmentationError(error instanceof TextProviderError ? "capability_not_verified" : "credential_missing", "Verified Cockpit text capability is required before Reference Segmentation can run."); }
+  const client = input.createClient?.({ baseUrl: "", apiKey: "" });
   const chunks = splitTranscript(input.cleanedTranscript, input.maxChunkCharacters ?? defaultSegmentationChunkCharacters);
   const chunkOutputs: Array<{ chunk: SegmentationChunk; output: ReferenceSegmentationOutput }> = [];
   let returnedModelId: string | undefined;
@@ -44,11 +36,10 @@ export async function runReferenceSegmentation(input: {
   for (const chunk of chunks) {
     let response: { text: string; returnedModelId?: string };
     try {
-      response = await client.createResponseText({ model: settings.textModel, input: buildPrompt({ ...input, cleanedTranscript: chunk.text, sourceStart: chunk.sourceStart, sourceEnd: chunk.sourceEnd, totalTranscriptLength: input.cleanedTranscript.length }) });
+      response = client
+        ? await client.createResponseText({ model: configured.model, input: buildPrompt({ ...input, cleanedTranscript: chunk.text, sourceStart: chunk.sourceStart, sourceEnd: chunk.sourceEnd, totalTranscriptLength: input.cleanedTranscript.length }) })
+        : await configured.provider.generateText({ model: configured.model, input: buildPrompt({ ...input, cleanedTranscript: chunk.text, sourceStart: chunk.sourceStart, sourceEnd: chunk.sourceEnd, totalTranscriptLength: input.cleanedTranscript.length }), timeoutMs: referenceSegmentationTimeoutMs });
     } catch (error) {
-      if (error instanceof NineRouterTextResponseError) {
-        throw new ReferenceSegmentationError("provider_failed", `Reference Segmentation provider request failed: ${error.status}.`);
-      }
       throw new ReferenceSegmentationError("provider_failed", "Reference Segmentation provider request failed.");
     }
     if (response.returnedModelId) returnedModelId = response.returnedModelId;

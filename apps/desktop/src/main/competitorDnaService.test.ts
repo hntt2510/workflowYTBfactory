@@ -10,8 +10,8 @@ async function setup() {
   const db = openFactoryDatabase(join(mkdtempSync(join(tmpdir(), "lsf-dna-")), "factory.sqlite"));
   const credentialStore = new ProviderCredentialStore(db, new MemoryKeychain());
   const certificationStore = new TextCertificationStore(db);
-  await credentialStore.saveProviderCredential({ providerId: "9router", baseUrl: "http://127.0.0.1:20128/v1", textModel: "dna-v1" }, "sk-secret");
-  certificationStore.saveTextCertificationRecord({ id: "cert-1", providerId: "9router", configuredModelId: "dna-v1", baseUrlFingerprint: fingerprintBaseUrl("http://127.0.0.1:20128/v1")!, credentialVersionRef: credentialStore.loadProviderCredentialVersionRef("9router"), endpointStrategy: "responses", implementationVersion: "text-certification-v1", exactTextTest: { status: "passed", latencyMs: 1 }, strictJsonTest: { status: "passed", latencyMs: 1 }, overallStatus: "verified", testedAt: "2026-07-30T00:00:00.000Z" });
+  await credentialStore.saveProviderCredential({ providerId: "cockpit", baseUrl: "http://127.0.0.1:20128/v1", textModel: "dna-v1" }, "sk-secret");
+  certificationStore.saveTextCertificationRecord({ id: "cert-1", providerId: "cockpit", configuredModelId: "dna-v1", baseUrlFingerprint: fingerprintBaseUrl("http://127.0.0.1:20128/v1")!, credentialVersionRef: credentialStore.loadProviderCredentialVersionRef("cockpit"), endpointStrategy: "responses", implementationVersion: "text-capability-v1", exactTextTest: { status: "passed", latencyMs: 1 }, strictJsonTest: { status: "passed", latencyMs: 1 }, overallStatus: "verified", testedAt: "2026-07-30T00:00:00.000Z" });
   return { db, credentialStore, certificationStore };
 }
 

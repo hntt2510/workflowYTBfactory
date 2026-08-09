@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { MemoryKeychain, openFactoryDatabase, ProviderCredentialStore, TextCertificationStore } from "@lsf/db";
-import { NineRouterTextResponseError } from "@lsf/providers";
+import { TextProviderError } from "@lsf/providers";
 import { fingerprintBaseUrl } from "./nineRouterTextCertificationService";
 import { runTranscriptCleaning } from "./transcriptCleaningService";
 
@@ -11,13 +11,13 @@ async function setup() {
   const db = openFactoryDatabase(join(mkdtempSync(join(tmpdir(), "lsf-clean-")), "factory.sqlite"));
   const credentialStore = new ProviderCredentialStore(db, new MemoryKeychain());
   const certificationStore = new TextCertificationStore(db);
-  await credentialStore.saveProviderCredential({ providerId: "9router", baseUrl: "http://127.0.0.1:20128/v1", textModel: "cleaner-v1" }, "sk-secret");
-  const credentialVersionRef = credentialStore.loadProviderCredentialVersionRef("9router");
+  await credentialStore.saveProviderCredential({ providerId: "cockpit", baseUrl: "http://127.0.0.1:20128/v1", textModel: "cleaner-v1" }, "sk-secret");
+  const credentialVersionRef = credentialStore.loadProviderCredentialVersionRef("cockpit");
   certificationStore.saveTextCertificationRecord({
-    id: "cert-1", providerId: "9router", configuredModelId: "cleaner-v1",
+    id: "cert-1", providerId: "cockpit", configuredModelId: "cleaner-v1",
     baseUrlFingerprint: fingerprintBaseUrl("http://127.0.0.1:20128/v1")!,
     ...(credentialVersionRef ? { credentialVersionRef } : {}), endpointStrategy: "responses",
-    implementationVersion: "text-certification-v1", exactTextTest: { status: "passed", latencyMs: 1 },
+    implementationVersion: "text-capability-v1", exactTextTest: { status: "passed", latencyMs: 1 },
     strictJsonTest: { status: "passed", latencyMs: 1 }, overallStatus: "verified", testedAt: "2026-07-30T00:00:00.000Z"
   });
   return { db, credentialStore, certificationStore };
@@ -103,7 +103,7 @@ describe("transcript cleaning service", () => {
       credentialStore, certificationStore, retryBaseDelayMs: 0,
       createClient: () => ({ createResponseText: async () => {
         calls += 1;
-        throw new NineRouterTextResponseError("timeout", "timed out");
+        throw new TextProviderError("timeout", "timed out", { providerId: "cockpit", operation: "generate_text" });
       } })
     })).rejects.toMatchObject({ category: "provider_timeout" });
     expect(calls).toBe(3);
@@ -119,7 +119,7 @@ describe("transcript cleaning service", () => {
       credentialStore, certificationStore, retryBaseDelayMs: 0,
       createClient: () => ({ createResponseText: async ({ input }) => {
         calls += 1;
-        if (calls === 1) throw new NineRouterTextResponseError("server_error", "temporary failure");
+        if (calls === 1) throw new TextProviderError("request_failed", "temporary failure", { providerId: "cockpit", operation: "generate_text" });
         const chunk = chunkFromPrompt(input);
         return { text: output("ref-1", chunk, `${chunk.trim()} cleaned.`, "chunked", chunkCountFromPrompt(input)) };
       } })
@@ -141,7 +141,7 @@ describe("transcript cleaning service", () => {
       createClient: () => ({ createResponseText: async ({ input }) => {
         firstRunCalls += 1;
         const chunk = chunkFromPrompt(input);
-        if (firstRunCalls > 1) throw new NineRouterTextResponseError("unauthorized", "stop this chunk");
+        if (firstRunCalls > 1) throw new TextProviderError("authentication_failed", "stop this chunk", { providerId: "cockpit", operation: "generate_text" });
         return { text: output("ref-1", chunk, `${chunk.trim()} cleaned.`, "chunked", chunkCountFromPrompt(input)) };
       } })
     })).rejects.toMatchObject({ category: "credential_missing" });
@@ -203,7 +203,7 @@ describe("transcript cleaning service", () => {
       credentialStore, certificationStore, retryBaseDelayMs: 0,
       createClient: () => ({ createResponseText: async () => {
         calls += 1;
-        throw new NineRouterTextResponseError("invalid_response_shape", "malformed provider response");
+        throw new TextProviderError("invalid_response", "malformed provider response", { providerId: "cockpit", operation: "generate_text" });
       } })
     })).rejects.toMatchObject({ category: "invalid_response_json" });
     expect(calls).toBe(1);

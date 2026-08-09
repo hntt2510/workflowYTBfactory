@@ -2,7 +2,7 @@
   "jobId": "JOB-G01-5-TEXT-PROVIDER-COCKPIT",
   "type": "long",
   "title": "G01.5 generic text provider and Cockpit migration",
-  "status": "ready",
+  "status": "review_required",
   "targetBranch": "main",
   "assignedRole": "builder",
   "description": "Decouple active G01 pre-production text stages from 9Router through a small provider-neutral TextProvider contract and a Cockpit OpenAI-compatible adapter.",

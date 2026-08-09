@@ -1,7 +1,7 @@
 import type { ProviderCredentialStore, TextCertificationStore } from "@lsf/db";
 import { promptPreparationOutputSchema, resolveCharacterCompositionLock, type AssetConcept, type CharacterVersion, type ShotMotionPlan } from "@lsf/domain";
-import { NineRouterClient, NineRouterTextResponseError } from "@lsf/providers";
-import { loadNineRouterTextCertification } from "./nineRouterTextCertificationService";
+import { TextProviderError, type TextProvider } from "@lsf/providers";
+import { resolveActiveTextProvider } from "./textProviderService";
 
 export class PromptPreparationError extends Error { constructor(readonly category: "capability_not_verified" | "credential_missing" | "provider_failed" | "invalid_json" | "invalid_output", message: string) { super(message); } }
 export const promptPreparationTimeoutMs = 120_000;
@@ -22,17 +22,16 @@ export async function runPromptPreparation(input: { shots: PromptShot[]; aspectR
   }
   if (imageShots.length === 0) return { output: promptPreparationOutputSchema.parse({ prompts: [], scenePrompts: [] }) };
   const aiShots = imageShots.filter((shot) => shot.visualMode === "ai_image" || shot.visualMode === "ai_video");
-  const certification = await loadNineRouterTextCertification({ credentialStore: input.credentialStore, certificationStore: input.certificationStore });
-  if (certification.status !== "verified") throw new PromptPreparationError("capability_not_verified", "A verified text-model certification is required before Prompt Preparation can run.");
-  const settings = input.credentialStore.loadProviderCredentialSettings("9router"); const apiKey = await input.credentialStore.resolveProviderSecret("9router");
-  if (!settings?.textModel || !apiKey) throw new PromptPreparationError("credential_missing", "The selected text model or credential is unavailable.");
-  const client = input.createClient?.({ baseUrl: settings.baseUrl, apiKey }) ?? new NineRouterClient({ baseUrl: settings.baseUrl, apiKey, timeoutMs: promptPreparationTimeoutMs });
+  let configured: { provider: TextProvider; model: string };
+  try { configured = await resolveActiveTextProvider({ credentialStore: input.credentialStore, certificationStore: input.certificationStore }); }
+  catch (error) { throw new PromptPreparationError(error instanceof TextProviderError ? "capability_not_verified" : "credential_missing", "Verified Cockpit text capability is required before Prompt Preparation can run."); }
+  const client = input.createClient?.({ baseUrl: "", apiKey: "" });
   const batches = Array.from({ length: Math.ceil(aiShots.length / promptPreparationBatchSize) }, (_, index) => aiShots.slice(index * promptPreparationBatchSize, (index + 1) * promptPreparationBatchSize));
   let responses: Array<{ text: string; returnedModelId?: string }>;
   try {
-    responses = await Promise.all(batches.map((batch) => client.createResponseText({ model: settings.textModel!, timeoutMs: promptPreparationTimeoutMs, input: buildPromptRequest(batch, input.aspectRatio, input.character, input.assetConcepts) })));
-  } catch (error) {
-    throw new PromptPreparationError("provider_failed", error instanceof NineRouterTextResponseError ? `Prompt Preparation provider request failed: ${error.status}.` : "Prompt Preparation provider request failed.");
+    responses = await Promise.all(batches.map((batch) => client ? client.createResponseText({ model: configured.model, timeoutMs: promptPreparationTimeoutMs, input: buildPromptRequest(batch, input.aspectRatio, input.character, input.assetConcepts) }) : configured.provider.generateText({ model: configured.model, timeoutMs: promptPreparationTimeoutMs, input: buildPromptRequest(batch, input.aspectRatio, input.character, input.assetConcepts) })));
+  } catch {
+    throw new PromptPreparationError("provider_failed", "Prompt Preparation text provider request failed.");
   }
   const prompts = responses.flatMap((response, index) => parsePromptBatch(response.text, batches[index]!, input.aspectRatio));
   const ids = new Set(aiShots.map((shot) => shot.id));

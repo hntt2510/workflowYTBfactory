@@ -27,7 +27,7 @@ export function ProvidersScreen(props: {
   setSettings: (settings: ProviderCredentialSettings | null) => void;
   onRefresh: () => Promise<void>;
 }) {
-  const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:20128/v1");
+  const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [imageModel, setImageModel] = useState("");
   const [textModel, setTextModel] = useState("");
@@ -81,9 +81,9 @@ export function ProvidersScreen(props: {
     setSavingCredential(true);
     setMessage("");
     try {
-      await factoryClient.saveProviderCredential({ providerId: "9router", baseUrl, apiKey });
+      await factoryClient.saveProviderCredential({ providerId: "cockpit", baseUrl, apiKey });
       setApiKey("");
-      const settings = await factoryClient.loadProviderCredentialSettings("9router");
+      const settings = await factoryClient.loadProviderCredentialSettings("cockpit");
       props.setSettings(settings);
       const presence = { providerId: settings.providerId, hasCredential: settings.hasCredential };
       props.setPresence(presence);
@@ -97,8 +97,8 @@ export function ProvidersScreen(props: {
   }
 
   async function deleteCredential() {
-    await factoryClient.deleteProviderCredential("9router");
-    const settings = await factoryClient.loadProviderCredentialSettings("9router");
+    await factoryClient.deleteProviderCredential("cockpit");
+    const settings = await factoryClient.loadProviderCredentialSettings("cockpit");
     props.setSettings(settings);
     const presence = { providerId: settings.providerId, hasCredential: settings.hasCredential };
     props.setPresence(presence);
@@ -129,7 +129,7 @@ export function ProvidersScreen(props: {
     setModelListStatus("testing");
     setModelListMessage("Testing endpoint...");
     try {
-      const result = await factoryClient.list9RouterModels();
+      const result = await factoryClient.listCockpitTextModels();
       setModelListStatus(result.status);
       setModelListMessage(result.message);
       if (result.status === "models_discovered" || result.status === "empty_model_list") setModels(result.models);
@@ -145,15 +145,7 @@ export function ProvidersScreen(props: {
     setSavingModelConfiguration(true);
     setModelConfigMessage("");
     try {
-      const input: ProviderModelConfigurationInput = {
-        providerId: "9router",
-        ...(textModel ? { textModel } : {}),
-        ...(imageModel ? { imageModel } : {}),
-        ...(videoModel ? { videoModel } : {}),
-        ...(ttsModel ? { ttsModel } : {}),
-        ...(sttModel ? { sttModel } : {})
-      };
-      const settings = await factoryClient.save9RouterModelConfiguration(input);
+      const settings = await factoryClient.saveCockpitTextModelConfiguration({ textModel });
       props.setSettings(settings);
       setTextModel(settings.textModel ?? "");
       setImageModel(settings.imageModel ?? "");
@@ -171,13 +163,13 @@ export function ProvidersScreen(props: {
 
   async function runTextCertification() {
     const model = textModel || "No selected model";
-    const confirmed = window.confirm(`This test sends real requests to 9Router and may consume provider quota.\n\nProvider: 9Router\nModel: ${model}\nEndpoint: /v1/responses\nRequests: 2`);
+    const confirmed = window.confirm(`This test sends real requests to Cockpit and may consume provider quota.\n\nProvider: Cockpit\nModel: ${model}\nEndpoint: /v1/responses\nRequests: 2`);
     if (!confirmed) return;
     const retryingTransientFailure = isRetryableCertificationError(props.textCertification.errorCategory);
     setCertificationRunning(true);
     try {
       props.setTextCertification({ status: "testing", message: "Text model certification is running." });
-      const result = await factoryClient.run9RouterTextCertification({ providerId: "9router", confirmation: "Run 2 certification requests" });
+      const result = await factoryClient.runCockpitTextCapability({ providerId: "cockpit", confirmation: "Run 2 text capability requests" });
       if (retryingTransientFailure) setCertificationRetryUsed(true);
       props.setTextCertification(result);
       await props.onRefresh();
@@ -207,34 +199,24 @@ export function ProvidersScreen(props: {
 
   return (
     <>
-      <PageHeader title="Providers" description="Secure provider settings. Existing keys are never rendered back to the UI." />
-      <SectionCard title="9Router">
+      <PageHeader title="Text Provider" description="Cockpit text settings. API keys are write-only and stored through the secure credential provider." />
+      <SectionCard title="Cockpit" description="OpenAI-compatible text generation via /v1/models and /v1/responses.">
         <div className="form-grid">
-          <FormField label="Base URL" htmlFor="provider-base-url"><input id="provider-base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} /></FormField>
-          <FormField label="API key" htmlFor="provider-api-key" hint={props.presence.hasCredential ? "Credential saved. Leave blank unless replacing." : "Write-only input."}><input id="provider-api-key" value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" autoComplete="off" /></FormField>
-          <ModelSelect label="Text model" id="provider-text-model" value={textModel} modelIds={discoveredModelIds} onChange={setTextModel} />
-          <ModelSelect label="Image model" id="provider-image-model" value={imageModel} modelIds={discoveredModelIds} onChange={setImageModel} />
-          <ModelSelect label="Video model" id="provider-video-model" value={videoModel} modelIds={discoveredModelIds} onChange={setVideoModel} />
-          <ModelSelect label="TTS model" id="provider-tts-model" value={ttsModel} modelIds={discoveredModelIds} onChange={setTtsModel} />
-          <ModelSelect label="STT model" id="provider-stt-model" value={sttModel} modelIds={discoveredModelIds} onChange={setSttModel} />
-          <FormField label="Concurrency" htmlFor="provider-concurrency" hint="Provider-specific concurrency persistence is not implemented; queue default remains five workers."><input id="provider-concurrency" value="5" disabled readOnly /></FormField>
-          <FormField label="Timeout" htmlFor="provider-timeout" hint="Timeout settings are not persisted yet."><input id="provider-timeout" value="Not configured" disabled readOnly /></FormField>
-          <FormField label="Retry limit" htmlFor="provider-retry-limit" hint="Queue retry policy is coded in the generation queue, not editable here yet."><input id="provider-retry-limit" value="2 automatic retries" disabled readOnly /></FormField>
-          <div className="capability-card"><strong>Credential status</strong><StatusBadge tone={props.presence.hasCredential ? "success" : "warning"}>{props.presence.hasCredential ? "Credential saved" : "Not configured"}</StatusBadge></div>
+          <FormField label="Base URL" htmlFor="provider-base-url" hint="Example: http://localhost:55773/v1"><input id="provider-base-url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} /></FormField>
+          <FormField label="API key" htmlFor="provider-api-key" hint={props.presence.hasCredential ? "Credential configured. Leave blank unless replacing it." : "Write-only input."}><input id="provider-api-key" value={apiKey} onChange={(event) => setApiKey(event.target.value)} type="password" autoComplete="off" /></FormField>
+          <ModelSelect label="Model" id="provider-text-model" value={textModel} modelIds={discoveredModelIds} onChange={setTextModel} />
+          <div className="capability-card"><strong>Text provider status</strong><StatusBadge tone={props.presence.hasCredential ? "success" : "warning"}>{props.presence.hasCredential ? "API key configured" : "Not configured"}</StatusBadge></div>
           <div className="button-row">
-            {apiKey.trim() ? <button className="button primary" type="button" onClick={() => void saveCredential()} disabled={savingCredential}>{savingCredential ? "Saving..." : "Save credential"}</button> : <DisabledAction reason="Enter a new API key before saving or replacing the credential.">Save credential</DisabledAction>}
-            {props.presence.hasCredential ? <button className="button danger" type="button" onClick={() => void deleteCredential()}>Delete credential</button> : <DisabledAction reason="No provider credential is saved yet.">Delete credential</DisabledAction>}
-            {props.presence.hasCredential && baseUrlValid && !modelListingRunning ? <button className="button secondary" type="button" onClick={() => void refreshModels()}>Refresh models</button> : <DisabledAction reason={!props.presence.hasCredential ? "Save a 9Router credential first." : !baseUrlValid ? "Saved base URL must be valid before model listing." : "Model listing is already running."}>Refresh models</DisabledAction>}
-            {canSaveModelConfiguration && !savingModelConfiguration ? <button className="button primary" type="button" onClick={() => void saveModelConfiguration()}>Save model configuration</button> : <DisabledAction reason={!props.presence.hasCredential ? "Save a 9Router credential first." : !discoveredModelIds.length ? "Refresh models before selecting discovered IDs." : !selectionsUseDiscoveredModels ? "Selections must come from the current discovered model list." : "Model configuration is already saving."}>Save model configuration</DisabledAction>}
-            <DisabledAction reason="Paid capability tests require provider execution and confirmation flow.">Test capability</DisabledAction>
+            {apiKey.trim() ? <button className="button primary" type="button" onClick={() => void saveCredential()} disabled={savingCredential}>{savingCredential ? "Saving..." : "Save Cockpit settings"}</button> : <DisabledAction reason="Enter an API key before saving or replacing the credential.">Save Cockpit settings</DisabledAction>}
+            {props.presence.hasCredential ? <button className="button danger" type="button" onClick={() => void deleteCredential()}>Delete API key</button> : null}
+            {props.presence.hasCredential && baseUrlValid && !modelListingRunning ? <button className="button secondary" type="button" onClick={() => void refreshModels()}>Refresh models</button> : <DisabledAction reason={!props.presence.hasCredential ? "Save Cockpit settings first." : !baseUrlValid ? "Use a valid Cockpit base URL." : "Model listing is already running."}>Refresh models</DisabledAction>}
+            {textModel && discoveredModelIdSet.has(textModel) && !savingModelConfiguration ? <button className="button primary" type="button" onClick={() => void saveModelConfiguration()}>Save model</button> : <DisabledAction reason="Refresh models and choose a discovered model first.">Save model</DisabledAction>}
           </div>
           {message ? <p className={message.includes("failed") ? "error-message" : "safe-message"}>{message}</p> : null}
           {modelConfigMessage ? <p className={modelConfigMessage.includes("failed") ? "error-message" : "safe-message"}>{modelConfigMessage}</p> : null}
-          <div className="capability-card"><strong>Model listing</strong><StatusBadge tone={modelListTone(modelListStatus)}>{creatorStatusLabel(modelListStatus)}</StatusBadge><small>{modelListMessage}</small></div>
-          <SelectedModelConfiguration selectedModels={selectedModels} textCertificationStatus={displayedCertificationStatus} imageCertificationStatus={props.imageCertification.status} />
+          <div className="capability-card"><strong>Model discovery</strong><StatusBadge tone={modelListTone(modelListStatus)}>{creatorStatusLabel(modelListStatus)}</StatusBadge><small>{modelListMessage}</small></div>
           <TextModelCertificationPanel selectedModel={textModel} certification={props.textCertification} displayedStatus={displayedCertificationStatus} running={certificationRunning} retryExhausted={certificationRetryExhausted} hasCredential={props.presence.hasCredential} onRun={() => void runTextCertification()} />
-          <ImageModelCertificationPanel selectedModel={imageModel} configurationSaved={props.settings?.imageModel === imageModel} certification={props.imageCertification} running={imageCertificationRunning} hasCredential={props.presence.hasCredential} onRun={() => void runImageCertification()} />
-          {models.length ? <DataTable label="9Router Discovered models"><thead><tr><th>Discovered</th></tr></thead><tbody>{models.map((model) => <tr key={model.id}><td>{model.id}</td></tr>)}</tbody></DataTable> : null}
+          {models.length ? <DataTable label="Cockpit models"><thead><tr><th>Discovered</th></tr></thead><tbody>{models.map((model) => <tr key={model.id}><td>{model.id}</td></tr>)}</tbody></DataTable> : null}
         </div>
       </SectionCard>
       <SectionCard title="Pexels stock media" description="Pexels API key for stock video/image lookup. The key is stored in the OS keychain; the search adapter is still pending.">
@@ -266,7 +248,7 @@ function TextModelCertificationPanel(props: { selectedModel: string; certificati
   const record = props.certification.record;
   const exact = record?.exactTextTest;
   const json = record?.strictJsonTest;
-  return <div className="form-grid"><div className="section-heading"><h3>Text Model Certification</h3><p>This test sends real requests to 9Router and may consume provider quota.</p></div><div className="form-grid"><div className="capability-card"><strong>Selected model</strong><StatusBadge tone={props.selectedModel ? "info" : "warning"}>{props.selectedModel || "Not selected"}</StatusBadge><small>{props.selectedModel ? "Selected" : "Select a discovered Text model first."}</small></div><div className="capability-card"><strong>Endpoint strategy</strong><StatusBadge tone="info">/v1/responses</StatusBadge><small>Requests: 2</small></div><div className="capability-card"><strong>Certification status</strong><StatusBadge tone={modelCertificationTone(props.displayedStatus)}>{textCertificationLabel(props.displayedStatus)}</StatusBadge><small>{props.certification.message}</small></div><SettingsList items={[["Last tested time", record?.testedAt ? formatDate(record.testedAt) : "Not tested"], ["Test A result", exact ? testResultLabel(exact) : "Not tested"], ["Test A latency", exact ? `${exact.latencyMs} ms` : "Not tested"], ["Test B result", json ? testResultLabel(json) : "Not tested"], ["Test B latency", json ? `${json.latencyMs} ms` : "Not tested"], ["Returned model ID", record?.returnedModelId ?? "Not returned"]]} /><div className="button-row">{props.hasCredential && props.selectedModel && !props.running && !props.retryExhausted ? <button className="button primary" type="button" onClick={props.onRun}>Run 2 certification requests</button> : <DisabledAction reason={!props.hasCredential ? "Save a 9Router credential first." : !props.selectedModel ? "Select and save a Text model first." : props.retryExhausted ? "One manual retry was already used for this network or timeout failure." : "Text certification is already testing."}>Run 2 certification requests</DisabledAction>}</div></div></div>;
+  return <div className="form-grid"><div className="section-heading"><h3>Text capability verification</h3><p>This sends two real Cockpit requests and may consume provider quota.</p></div><div className="form-grid"><div className="capability-card"><strong>Selected model</strong><StatusBadge tone={props.selectedModel ? "info" : "warning"}>{props.selectedModel || "Not selected"}</StatusBadge><small>{props.selectedModel ? "Selected" : "Select a discovered model first."}</small></div><div className="capability-card"><strong>Endpoint strategy</strong><StatusBadge tone="info">/v1/responses</StatusBadge><small>Requests: 2</small></div><div className="capability-card"><strong>Capability status</strong><StatusBadge tone={modelCertificationTone(props.displayedStatus)}>{textCertificationLabel(props.displayedStatus)}</StatusBadge><small>{props.certification.message}</small></div><SettingsList items={[["Last tested time", record?.testedAt ? formatDate(record.testedAt) : "Not tested"], ["Text probe", exact ? testResultLabel(exact) : "Not tested"], ["Structured output", json ? testResultLabel(json) : "Not tested"], ["Returned model ID", record?.returnedModelId ?? "Not returned"]]} /><div className="button-row">{props.hasCredential && props.selectedModel && !props.running && !props.retryExhausted ? <button className="button primary" type="button" onClick={props.onRun}>Test connection</button> : <DisabledAction reason={!props.hasCredential ? "Save Cockpit settings first." : !props.selectedModel ? "Select and save a text model first." : props.retryExhausted ? "One manual retry was already used for this network or timeout failure." : "Text capability verification is already running."}>Test connection</DisabledAction>}</div></div></div>;
 }
 
 function ImageModelCertificationPanel(props: { selectedModel: string; configurationSaved: boolean; certification: ImageModelCertificationResponse; running: boolean; hasCredential: boolean; onRun: () => void }) {
