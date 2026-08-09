@@ -2066,6 +2066,7 @@ ipcMain.handle("start-project-action", async (_event, input: unknown) => {
   const now = new Date().toISOString();
   const fingerprint = canonicalSha256({ actionId: action.id, stageId: action.stageId, stage: project.stages.find((stage) => stage.id === action.stageId)?.status ?? "not_started" });
   const channelByAction: Partial<Record<ActionId, string>> = {
+    GENERATE_RESEARCH_ANALYSIS: "run-competitor-dna",
     GENERATE_IDEAS: "run-idea-lab",
     GENERATE_SCRIPT: "run-script",
     GENERATE_DIRECTOR_PLAN: "run-scene-plan",

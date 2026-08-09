@@ -30,12 +30,15 @@ export const checkpointDefinitions: readonly CheckpointDefinition[] = [
   { id: "handoff", label: "Bàn giao", order: 9, stageIds: ["production-handoff"], required: true, route: "project-overview" }
 ];
 
-export type ActionId = "SAVE_BRIEF" | "GENERATE_IDEAS" | "GENERATE_SCRIPT" | "GENERATE_DIRECTOR_PLAN" | "GENERATE_STORYBOARD" | "PREPARE_GG_LAB_PROMPTS" | "IMPORT_IMAGES" | "APPROVE_IMAGES" | "GENERATE_HANDOFF";
+export type ActionId = "SAVE_BRIEF" | "GENERATE_RESEARCH_ANALYSIS" | "GENERATE_IDEAS" | "SELECT_IDEA" | "GENERATE_SCRIPT" | "REVISE_SCRIPT" | "GENERATE_DIRECTOR_PLAN" | "GENERATE_STORYBOARD" | "PREPARE_GG_LAB_PROMPTS" | "IMPORT_IMAGES" | "APPROVE_IMAGES" | "GENERATE_HANDOFF";
 export interface ActionDefinition { id: ActionId; checkpointId: CheckpointId; stageId: string; label: string; kind: "command" | "user_input"; }
 export const actionDefinitions: readonly ActionDefinition[] = [
   { id: "SAVE_BRIEF", checkpointId: "brief", stageId: "project-setup", label: "Lưu Brief", kind: "user_input" },
+  { id: "GENERATE_RESEARCH_ANALYSIS", checkpointId: "research", stageId: "reference-intake", label: "Phân tích tham khảo", kind: "command" },
   { id: "GENERATE_IDEAS", checkpointId: "idea", stageId: "idea-lab", label: "Tạo ý tưởng", kind: "command" },
+  { id: "SELECT_IDEA", checkpointId: "idea", stageId: "idea-lab", label: "Chọn ý tưởng", kind: "user_input" },
   { id: "GENERATE_SCRIPT", checkpointId: "script", stageId: "script", label: "Tạo kịch bản", kind: "command" },
+  { id: "REVISE_SCRIPT", checkpointId: "script", stageId: "script", label: "Sửa kịch bản", kind: "user_input" },
   { id: "GENERATE_DIRECTOR_PLAN", checkpointId: "director", stageId: "scene-plan", label: "Tạo kế hoạch đạo diễn", kind: "command" },
   { id: "GENERATE_STORYBOARD", checkpointId: "storyboard", stageId: "shot-plan", label: "Tạo storyboard", kind: "command" },
   { id: "PREPARE_GG_LAB_PROMPTS", checkpointId: "prompts", stageId: "prompt-preparation", label: "Chuẩn bị prompt GG Lab", kind: "command" },
