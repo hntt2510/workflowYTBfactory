@@ -2,7 +2,7 @@
   "jobId": "JOB-G01-SCOPE-RESET",
   "type": "long",
   "title": "G01 pre-production workflow scope reset",
-  "status": "review_required",
+  "status": "qa_required",
   "targetBranch": "main",
   "assignedRole": "builder",
   "description": "Establish one registry-driven YouTube Pre-production / Director Factory workflow and detach legacy production capabilities from the default project journey without deleting compatibility code.",
