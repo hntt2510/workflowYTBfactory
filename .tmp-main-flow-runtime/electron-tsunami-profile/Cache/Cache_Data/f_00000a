@@ -1,0 +1,264 @@
+export const seedChannelProfiles = [
+  {
+    id: "insurance-made-simple",
+    name: "Insurance Made Simple",
+    mainKeyword: "Life insurance",
+    secondaryKeywords: [
+      "Term life insurance",
+      "Whole life insurance",
+      "Life insurance explained",
+      "Life insurance for beginners",
+      "Insurance policy",
+      "Life insurance mistakes",
+      "Life insurance quotes",
+      "Affordable life insurance",
+      "Family protection",
+      "Coverage basics"
+    ],
+    niche: "Life insurance education for beginners.",
+    contentType: "Long-form insurance explainer videos based on keyword research, competitor research, and search intent. Target video length: 6-10 minutes. Evergreen, educational, search-based content.",
+    targetAudience: "US/UK viewers trying to understand life insurance before buying or comparing policies. Beginners, families, young parents, homeowners, people comparing term and whole life, people searching for affordable life insurance, and people confused about policy, quote, coverage, and beneficiary terms.",
+    language: "English",
+    tone: "Clear, calm, trustworthy, simple, educational, practical, neutral, not salesy, not fear-based, not personal financial advice.",
+    visualStyle: "Clean 2D explainer animation. Simple professional visuals using family icons, shield icons, policy documents, checklists, simple charts, house icons, calendar icons, soft money icons, blue/green/white/gray palette. Avoid luxury lifestyle visuals, exaggerated money visuals, scam-like thumbnails, too much red warning color, complex financial charts, fear-based imagery.",
+    imageStyleModel: {
+      name: "Model 1 - Clean 2D Explainer Infographic Animation",
+      description: "Simple flat 2D vector illustrations, clean lines, minimal shading, soft professional colors, clear educational composition, modern infographic style, beginner-friendly financial explainer visuals."
+    },
+    voiceStyle: "Calm professional male explainer narrator. Clear, calm, professional, trustworthy, neutral, easy to listen to, not dramatic, not salesy.",
+    ttsEmotionStyle: ["calm", "clear", "formal", "warm", "emphasis", "serious", "pause 0.5s", "pause 1s"],
+    ttsUsage: [
+      "Use calm for main explanation.",
+      "Use clear for definitions.",
+      "Use formal for important policy information.",
+      "Use warm for family/protection sections.",
+      "Use emphasis for common mistakes.",
+      "Use serious for claim denial or policy mistakes.",
+      "Use pause 0.5s between short ideas.",
+      "Use pause 1s before important transitions."
+    ],
+    coreHashtags: ["#LifeInsurance", "#InsuranceExplained", "#InsuranceMadeSimple"],
+    secondaryHashtags: [
+      "#TermLifeInsurance",
+      "#WholeLifeInsurance",
+      "#FinancialEducation",
+      "#InsuranceTips",
+      "#FamilyProtection"
+    ],
+    avoidList: [
+      "Do not give personal financial advice.",
+      "Do not sound like an insurance agent trying to sell.",
+      "Do not use fear-based pressure.",
+      "Avoid luxury flex imagery.",
+      "Avoid scam-like visuals.",
+      "Avoid exaggerated money promises.",
+      "Avoid complex charts.",
+      "Avoid misleading claims."
+    ],
+    routerSignals: [
+      "life insurance",
+      "term life",
+      "whole life",
+      "policy",
+      "premium",
+      "beneficiary",
+      "coverage",
+      "quotes",
+      "claim",
+      "riders",
+      "affordable insurance",
+      "family protection",
+      "insurance mistakes"
+    ],
+    safetyRules: [
+      "No personal financial advice.",
+      "No guaranteed outcomes.",
+      "Use educational framing and qualifications."
+    ]
+  },
+  {
+    id: "bible-mysteries-revealed",
+    name: "Bible Mysteries Revealed",
+    mainKeyword: "Bible mysteries",
+    secondaryKeywords: [
+      "Biblical history",
+      "Bible stories",
+      "Hidden Bible meanings",
+      "Bible prophecy",
+      "Strange Bible stories",
+      "Old Testament mysteries",
+      "New Testament connections",
+      "Biblical symbolism",
+      "Ancient Bible history",
+      "Christian mysteries",
+      "Bible explained"
+    ],
+    niche: "Bible mysteries and biblical history documentaries.",
+    contentType: "Long-form biblical documentary explanation videos based on competitor research, keyword research, and search intent. Target video length: 8-12 minutes. Structure: mystery question, biblical context, story, symbolic meaning, related scripture/history connection, deeper conclusion.",
+    targetAudience: "US/UK viewers interested in Bible stories, Christian mysteries, biblical symbolism, prophecy, ancient history, and deeper scripture explanations.",
+    language: "English",
+    tone: "Serious, mysterious, respectful, educational, thoughtful, calm, documentary-style, not overly preachy, not mocking religion, not sensationalized, not claiming uncertain theories as absolute truth.",
+    visualStyle: "Simple flat 2D Bible animation. Clean vector-like illustration, simplified biblical characters, ancient desert landscapes, old scrolls, temple silhouettes, biblical maps, candles and warm light, ancient city backgrounds, soft clouds, divine light, minimal facial details, limited soft colors, minimal shading, clear storytelling composition. Avoid fantasy visuals, horror angels/demons, gore, overly realistic faces, disrespectful religious framing, shocking thumbnails, childish cartoon exaggeration.",
+    imageStyleModel: {
+      name: "Model 2 - Simple Flat 2D Bible Animation",
+      description: "Simple flat 2D biblical animation, clean vector-like illustration, simplified biblical characters, minimal facial details, soft warm colors, ancient Middle Eastern setting, minimal shading, clear documentary storytelling composition, respectful religious visual style."
+    },
+    voiceStyle: "Calm serious male documentary narrator. Deep, calm, serious, slow, respectful, documentary-like, not too dramatic, not ad-like, not too preachy.",
+    ttsEmotionStyle: ["serious", "calm", "formal", "whisper", "emphasis", "warm", "pause 0.5s", "pause 1s"],
+    ttsUsage: [
+      "Use serious for mystery openings and important story moments.",
+      "Use calm for explanation.",
+      "Use formal for historical/scripture context.",
+      "Use whisper for mystery, hidden meaning, prophecy.",
+      "Use emphasis for key details.",
+      "Use warm for faith, hope, mercy, human meaning.",
+      "Use pause 0.5s between ideas.",
+      "Use pause 1s before important reveals."
+    ],
+    coreHashtags: ["#BibleMysteries", "#BibleStories", "#BiblicalHistory"],
+    secondaryHashtags: [
+      "#BibleExplained",
+      "#ChristianMysteries",
+      "#BibleProphecy",
+      "#OldTestament",
+      "#NewTestament"
+    ],
+    avoidList: [
+      "Do not copy competitor wording.",
+      "Do not overclaim uncertain interpretations.",
+      "Avoid photorealism.",
+      "Avoid cinematic realism.",
+      "Avoid dramatic movie lighting.",
+      "Avoid heavy texture.",
+      "Avoid watermark.",
+      "Avoid logo.",
+      "Avoid readable text.",
+      "Avoid anime.",
+      "Avoid 3D render if using Model 2."
+    ],
+    routerSignals: [
+      "bible",
+      "jesus",
+      "moses",
+      "david",
+      "abraham",
+      "old testament",
+      "new testament",
+      "prophecy",
+      "scripture",
+      "biblical",
+      "christian",
+      "gospel",
+      "exodus",
+      "genesis",
+      "temple",
+      "ark",
+      "messiah",
+      "aaron",
+      "breastpiece"
+    ],
+    safetyRules: [
+      "Distinguish scripture, historical evidence, tradition, and interpretation.",
+      "Do not claim uncertain interpretations as absolute truth.",
+      "Use respectful religious framing."
+    ]
+  },
+  {
+    id: "viral-case-files",
+    name: "Viral Case Files",
+    mainKeyword: "Viral lawsuits",
+    secondaryKeywords: [
+      "Internet scandals",
+      "Viral lawsuits explained",
+      "YouTuber lawsuits",
+      "Creator drama",
+      "Business scandals",
+      "Influencer controversy",
+      "Lawsuit explained",
+      "Internet drama",
+      "Viral case study",
+      "Online controversy",
+      "Brand scandal",
+      "Copyright drama",
+      "AI controversy",
+      "Creator economy drama"
+    ],
+    niche: "Viral Lawsuits & Internet Scandals Explained.",
+    contentType: "Long-form documentary explanation videos based on trend research, public sources, competitor research, and high-demand viral cases. Target video length: 8-12 minutes. Main format: long-form 8-12 minutes. Secondary format: Shorts cut from long-form videos. Content split: 40% lawsuits, 25% business scandals, 25% creator drama, 10% platform / AI / copyright.",
+    targetAudience: "US viewers interested in internet drama, lawsuits, creator economy, brand scandals, and viral controversies.",
+    language: "English",
+    tone: "Documentary, neutral, clear, slightly dramatic, source-based, analytical, fast but understandable, not gossip-only, not defamatory, not blindly taking sides, not harassment-driven. Use wording like: according to public reports, court filings claim, the company stated, the creator responded, what remains unclear, based on available information.",
+    visualStyle: "Stylized 2D mystery documentary illustration. Animated case-file visuals, simplified evidence boards, cartoon-style timeline graphics, blurred social media post mockups, court document illustrations, digital trail maps, red connection lines, character silhouettes, comment icons, notification icons, dark navy/gray/red/white palette. Avoid real screenshots with personal information, doxxing details, photorealistic crime boards, heavy true crime horror vibe, gore, defamatory thumbnails.",
+    imageStyleModel: {
+      name: "Model 5 - Mystery Explained Illustration",
+      description: "Stylized 2D mystery documentary illustration, cartoon-like investigative visuals, simplified case files, red string connections, timeline graphics, blurred social media post mockups, court document overlays, dark navy background with red accents, clean composition, minimal realistic detail, slightly dramatic but clearly illustrated, animated explainer aesthetic, not photorealistic."
+    },
+    voiceStyle: "Serious fast-paced male documentary narrator. Clear, serious, slightly tense, neutral, story-driven, not gossip, not comedic, not attacking people.",
+    ttsEmotionStyle: [
+      "serious",
+      "clear",
+      "neutral",
+      "analytical",
+      "suspenseful",
+      "emphasis",
+      "pause 0.5s",
+      "pause 1s"
+    ],
+    ttsUsage: [
+      "Use serious for opening.",
+      "Use clear for timeline explanation.",
+      "Use neutral for claims, lawsuits, accusations.",
+      "Use analytical for causes and impact.",
+      "Use suspenseful for turning points.",
+      "Use emphasis for important facts.",
+      "Use pause 0.5s between timeline beats.",
+      "Use pause 1s before conclusions/reveals."
+    ],
+    coreHashtags: ["#ViralCaseFiles", "#InternetDrama", "#LawsuitExplained"],
+    secondaryHashtags: [
+      "#ViralScandal",
+      "#CreatorDrama",
+      "#BusinessScandal",
+      "#YouTubeDrama",
+      "#OnlineControversy",
+      "#CopyrightDrama",
+      "#AIControversy"
+    ],
+    positioning: "Not gossip. Not legal advice. Just the case, the timeline, the public evidence, and what still remains unclear.",
+    avoidList: [
+      "Do not present allegations as proven facts.",
+      "Do not defame.",
+      "Do not harass.",
+      "Do not include doxxing details.",
+      "Avoid real personal info.",
+      "Avoid real screenshots with private data.",
+      "Avoid heavy true-crime gore.",
+      "Avoid inflammatory claims."
+    ],
+    routerSignals: [
+      "lawsuit",
+      "court filing",
+      "complaint",
+      "settlement",
+      "scandal",
+      "controversy",
+      "creator drama",
+      "influencer",
+      "youtuber",
+      "brand backlash",
+      "copyright",
+      "ai lawsuit",
+      "allegations",
+      "public response",
+      "internet drama",
+      "platform"
+    ],
+    safetyRules: [
+      "Attribute allegations.",
+      "Do not present claims as proven before adjudication.",
+      "Avoid defamation and private data."
+    ]
+  }
+];
+
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbInNlZWRQcm9maWxlcy50cyJdLCJzb3VyY2VzQ29udGVudCI6WyJpbXBvcnQgdHlwZSB7IENoYW5uZWxQcm9maWxlIH0gZnJvbSBcIi4vdHlwZXNcIjtcblxuZXhwb3J0IGNvbnN0IHNlZWRDaGFubmVsUHJvZmlsZXM6IENoYW5uZWxQcm9maWxlW10gPSBbXG4gIHtcbiAgICBpZDogXCJpbnN1cmFuY2UtbWFkZS1zaW1wbGVcIixcbiAgICBuYW1lOiBcIkluc3VyYW5jZSBNYWRlIFNpbXBsZVwiLFxuICAgIG1haW5LZXl3b3JkOiBcIkxpZmUgaW5zdXJhbmNlXCIsXG4gICAgc2Vjb25kYXJ5S2V5d29yZHM6IFtcbiAgICAgIFwiVGVybSBsaWZlIGluc3VyYW5jZVwiLFxuICAgICAgXCJXaG9sZSBsaWZlIGluc3VyYW5jZVwiLFxuICAgICAgXCJMaWZlIGluc3VyYW5jZSBleHBsYWluZWRcIixcbiAgICAgIFwiTGlmZSBpbnN1cmFuY2UgZm9yIGJlZ2lubmVyc1wiLFxuICAgICAgXCJJbnN1cmFuY2UgcG9saWN5XCIsXG4gICAgICBcIkxpZmUgaW5zdXJhbmNlIG1pc3Rha2VzXCIsXG4gICAgICBcIkxpZmUgaW5zdXJhbmNlIHF1b3Rlc1wiLFxuICAgICAgXCJBZmZvcmRhYmxlIGxpZmUgaW5zdXJhbmNlXCIsXG4gICAgICBcIkZhbWlseSBwcm90ZWN0aW9uXCIsXG4gICAgICBcIkNvdmVyYWdlIGJhc2ljc1wiXG4gICAgXSxcbiAgICBuaWNoZTogXCJMaWZlIGluc3VyYW5jZSBlZHVjYXRpb24gZm9yIGJlZ2lubmVycy5cIixcbiAgICBjb250ZW50VHlwZTpcbiAgICAgIFwiTG9uZy1mb3JtIGluc3VyYW5jZSBleHBsYWluZXIgdmlkZW9zIGJhc2VkIG9uIGtleXdvcmQgcmVzZWFyY2gsIGNvbXBldGl0b3IgcmVzZWFyY2gsIGFuZCBzZWFyY2ggaW50ZW50LiBUYXJnZXQgdmlkZW8gbGVuZ3RoOiA2LTEwIG1pbnV0ZXMuIEV2ZXJncmVlbiwgZWR1Y2F0aW9uYWwsIHNlYXJjaC1iYXNlZCBjb250ZW50LlwiLFxuICAgIHRhcmdldEF1ZGllbmNlOlxuICAgICAgXCJVUy9VSyB2aWV3ZXJzIHRyeWluZyB0byB1bmRlcnN0YW5kIGxpZmUgaW5zdXJhbmNlIGJlZm9yZSBidXlpbmcgb3IgY29tcGFyaW5nIHBvbGljaWVzLiBCZWdpbm5lcnMsIGZhbWlsaWVzLCB5b3VuZyBwYXJlbnRzLCBob21lb3duZXJzLCBwZW9wbGUgY29tcGFyaW5nIHRlcm0gYW5kIHdob2xlIGxpZmUsIHBlb3BsZSBzZWFyY2hpbmcgZm9yIGFmZm9yZGFibGUgbGlmZSBpbnN1cmFuY2UsIGFuZCBwZW9wbGUgY29uZnVzZWQgYWJvdXQgcG9saWN5LCBxdW90ZSwgY292ZXJhZ2UsIGFuZCBiZW5lZmljaWFyeSB0ZXJtcy5cIixcbiAgICBsYW5ndWFnZTogXCJFbmdsaXNoXCIsXG4gICAgdG9uZTpcbiAgICAgIFwiQ2xlYXIsIGNhbG0sIHRydXN0d29ydGh5LCBzaW1wbGUsIGVkdWNhdGlvbmFsLCBwcmFjdGljYWwsIG5ldXRyYWwsIG5vdCBzYWxlc3ksIG5vdCBmZWFyLWJhc2VkLCBub3QgcGVyc29uYWwgZmluYW5jaWFsIGFkdmljZS5cIixcbiAgICB2aXN1YWxTdHlsZTpcbiAgICAgIFwiQ2xlYW4gMkQgZXhwbGFpbmVyIGFuaW1hdGlvbi4gU2ltcGxlIHByb2Zlc3Npb25hbCB2aXN1YWxzIHVzaW5nIGZhbWlseSBpY29ucywgc2hpZWxkIGljb25zLCBwb2xpY3kgZG9jdW1lbnRzLCBjaGVja2xpc3RzLCBzaW1wbGUgY2hhcnRzLCBob3VzZSBpY29ucywgY2FsZW5kYXIgaWNvbnMsIHNvZnQgbW9uZXkgaWNvbnMsIGJsdWUvZ3JlZW4vd2hpdGUvZ3JheSBwYWxldHRlLiBBdm9pZCBsdXh1cnkgbGlmZXN0eWxlIHZpc3VhbHMsIGV4YWdnZXJhdGVkIG1vbmV5IHZpc3VhbHMsIHNjYW0tbGlrZSB0aHVtYm5haWxzLCB0b28gbXVjaCByZWQgd2FybmluZyBjb2xvciwgY29tcGxleCBmaW5hbmNpYWwgY2hhcnRzLCBmZWFyLWJhc2VkIGltYWdlcnkuXCIsXG4gICAgaW1hZ2VTdHlsZU1vZGVsOiB7XG4gICAgICBuYW1lOiBcIk1vZGVsIDEgLSBDbGVhbiAyRCBFeHBsYWluZXIgSW5mb2dyYXBoaWMgQW5pbWF0aW9uXCIsXG4gICAgICBkZXNjcmlwdGlvbjpcbiAgICAgICAgXCJTaW1wbGUgZmxhdCAyRCB2ZWN0b3IgaWxsdXN0cmF0aW9ucywgY2xlYW4gbGluZXMsIG1pbmltYWwgc2hhZGluZywgc29mdCBwcm9mZXNzaW9uYWwgY29sb3JzLCBjbGVhciBlZHVjYXRpb25hbCBjb21wb3NpdGlvbiwgbW9kZXJuIGluZm9ncmFwaGljIHN0eWxlLCBiZWdpbm5lci1mcmllbmRseSBmaW5hbmNpYWwgZXhwbGFpbmVyIHZpc3VhbHMuXCJcbiAgICB9LFxuICAgIHZvaWNlU3R5bGU6XG4gICAgICBcIkNhbG0gcHJvZmVzc2lvbmFsIG1hbGUgZXhwbGFpbmVyIG5hcnJhdG9yLiBDbGVhciwgY2FsbSwgcHJvZmVzc2lvbmFsLCB0cnVzdHdvcnRoeSwgbmV1dHJhbCwgZWFzeSB0byBsaXN0ZW4gdG8sIG5vdCBkcmFtYXRpYywgbm90IHNhbGVzeS5cIixcbiAgICB0dHNFbW90aW9uU3R5bGU6IFtcImNhbG1cIiwgXCJjbGVhclwiLCBcImZvcm1hbFwiLCBcIndhcm1cIiwgXCJlbXBoYXNpc1wiLCBcInNlcmlvdXNcIiwgXCJwYXVzZSAwLjVzXCIsIFwicGF1c2UgMXNcIl0sXG4gICAgdHRzVXNhZ2U6IFtcbiAgICAgIFwiVXNlIGNhbG0gZm9yIG1haW4gZXhwbGFuYXRpb24uXCIsXG4gICAgICBcIlVzZSBjbGVhciBmb3IgZGVmaW5pdGlvbnMuXCIsXG4gICAgICBcIlVzZSBmb3JtYWwgZm9yIGltcG9ydGFudCBwb2xpY3kgaW5mb3JtYXRpb24uXCIsXG4gICAgICBcIlVzZSB3YXJtIGZvciBmYW1pbHkvcHJvdGVjdGlvbiBzZWN0aW9ucy5cIixcbiAgICAgIFwiVXNlIGVtcGhhc2lzIGZvciBjb21tb24gbWlzdGFrZXMuXCIsXG4gICAgICBcIlVzZSBzZXJpb3VzIGZvciBjbGFpbSBkZW5pYWwgb3IgcG9saWN5IG1pc3Rha2VzLlwiLFxuICAgICAgXCJVc2UgcGF1c2UgMC41cyBiZXR3ZWVuIHNob3J0IGlkZWFzLlwiLFxuICAgICAgXCJVc2UgcGF1c2UgMXMgYmVmb3JlIGltcG9ydGFudCB0cmFuc2l0aW9ucy5cIlxuICAgIF0sXG4gICAgY29yZUhhc2h0YWdzOiBbXCIjTGlmZUluc3VyYW5jZVwiLCBcIiNJbnN1cmFuY2VFeHBsYWluZWRcIiwgXCIjSW5zdXJhbmNlTWFkZVNpbXBsZVwiXSxcbiAgICBzZWNvbmRhcnlIYXNodGFnczogW1xuICAgICAgXCIjVGVybUxpZmVJbnN1cmFuY2VcIixcbiAgICAgIFwiI1dob2xlTGlmZUluc3VyYW5jZVwiLFxuICAgICAgXCIjRmluYW5jaWFsRWR1Y2F0aW9uXCIsXG4gICAgICBcIiNJbnN1cmFuY2VUaXBzXCIsXG4gICAgICBcIiNGYW1pbHlQcm90ZWN0aW9uXCJcbiAgICBdLFxuICAgIGF2b2lkTGlzdDogW1xuICAgICAgXCJEbyBub3QgZ2l2ZSBwZXJzb25hbCBmaW5hbmNpYWwgYWR2aWNlLlwiLFxuICAgICAgXCJEbyBub3Qgc291bmQgbGlrZSBhbiBpbnN1cmFuY2UgYWdlbnQgdHJ5aW5nIHRvIHNlbGwuXCIsXG4gICAgICBcIkRvIG5vdCB1c2UgZmVhci1iYXNlZCBwcmVzc3VyZS5cIixcbiAgICAgIFwiQXZvaWQgbHV4dXJ5IGZsZXggaW1hZ2VyeS5cIixcbiAgICAgIFwiQXZvaWQgc2NhbS1saWtlIHZpc3VhbHMuXCIsXG4gICAgICBcIkF2b2lkIGV4YWdnZXJhdGVkIG1vbmV5IHByb21pc2VzLlwiLFxuICAgICAgXCJBdm9pZCBjb21wbGV4IGNoYXJ0cy5cIixcbiAgICAgIFwiQXZvaWQgbWlzbGVhZGluZyBjbGFpbXMuXCJcbiAgICBdLFxuICAgIHJvdXRlclNpZ25hbHM6IFtcbiAgICAgIFwibGlmZSBpbnN1cmFuY2VcIixcbiAgICAgIFwidGVybSBsaWZlXCIsXG4gICAgICBcIndob2xlIGxpZmVcIixcbiAgICAgIFwicG9saWN5XCIsXG4gICAgICBcInByZW1pdW1cIixcbiAgICAgIFwiYmVuZWZpY2lhcnlcIixcbiAgICAgIFwiY292ZXJhZ2VcIixcbiAgICAgIFwicXVvdGVzXCIsXG4gICAgICBcImNsYWltXCIsXG4gICAgICBcInJpZGVyc1wiLFxuICAgICAgXCJhZmZvcmRhYmxlIGluc3VyYW5jZVwiLFxuICAgICAgXCJmYW1pbHkgcHJvdGVjdGlvblwiLFxuICAgICAgXCJpbnN1cmFuY2UgbWlzdGFrZXNcIlxuICAgIF0sXG4gICAgc2FmZXR5UnVsZXM6IFtcbiAgICAgIFwiTm8gcGVyc29uYWwgZmluYW5jaWFsIGFkdmljZS5cIixcbiAgICAgIFwiTm8gZ3VhcmFudGVlZCBvdXRjb21lcy5cIixcbiAgICAgIFwiVXNlIGVkdWNhdGlvbmFsIGZyYW1pbmcgYW5kIHF1YWxpZmljYXRpb25zLlwiXG4gICAgXVxuICB9LFxuICB7XG4gICAgaWQ6IFwiYmlibGUtbXlzdGVyaWVzLXJldmVhbGVkXCIsXG4gICAgbmFtZTogXCJCaWJsZSBNeXN0ZXJpZXMgUmV2ZWFsZWRcIixcbiAgICBtYWluS2V5d29yZDogXCJCaWJsZSBteXN0ZXJpZXNcIixcbiAgICBzZWNvbmRhcnlLZXl3b3JkczogW1xuICAgICAgXCJCaWJsaWNhbCBoaXN0b3J5XCIsXG4gICAgICBcIkJpYmxlIHN0b3JpZXNcIixcbiAgICAgIFwiSGlkZGVuIEJpYmxlIG1lYW5pbmdzXCIsXG4gICAgICBcIkJpYmxlIHByb3BoZWN5XCIsXG4gICAgICBcIlN0cmFuZ2UgQmlibGUgc3Rvcmllc1wiLFxuICAgICAgXCJPbGQgVGVzdGFtZW50IG15c3Rlcmllc1wiLFxuICAgICAgXCJOZXcgVGVzdGFtZW50IGNvbm5lY3Rpb25zXCIsXG4gICAgICBcIkJpYmxpY2FsIHN5bWJvbGlzbVwiLFxuICAgICAgXCJBbmNpZW50IEJpYmxlIGhpc3RvcnlcIixcbiAgICAgIFwiQ2hyaXN0aWFuIG15c3Rlcmllc1wiLFxuICAgICAgXCJCaWJsZSBleHBsYWluZWRcIlxuICAgIF0sXG4gICAgbmljaGU6IFwiQmlibGUgbXlzdGVyaWVzIGFuZCBiaWJsaWNhbCBoaXN0b3J5IGRvY3VtZW50YXJpZXMuXCIsXG4gICAgY29udGVudFR5cGU6XG4gICAgICBcIkxvbmctZm9ybSBiaWJsaWNhbCBkb2N1bWVudGFyeSBleHBsYW5hdGlvbiB2aWRlb3MgYmFzZWQgb24gY29tcGV0aXRvciByZXNlYXJjaCwga2V5d29yZCByZXNlYXJjaCwgYW5kIHNlYXJjaCBpbnRlbnQuIFRhcmdldCB2aWRlbyBsZW5ndGg6IDgtMTIgbWludXRlcy4gU3RydWN0dXJlOiBteXN0ZXJ5IHF1ZXN0aW9uLCBiaWJsaWNhbCBjb250ZXh0LCBzdG9yeSwgc3ltYm9saWMgbWVhbmluZywgcmVsYXRlZCBzY3JpcHR1cmUvaGlzdG9yeSBjb25uZWN0aW9uLCBkZWVwZXIgY29uY2x1c2lvbi5cIixcbiAgICB0YXJnZXRBdWRpZW5jZTpcbiAgICAgIFwiVVMvVUsgdmlld2VycyBpbnRlcmVzdGVkIGluIEJpYmxlIHN0b3JpZXMsIENocmlzdGlhbiBteXN0ZXJpZXMsIGJpYmxpY2FsIHN5bWJvbGlzbSwgcHJvcGhlY3ksIGFuY2llbnQgaGlzdG9yeSwgYW5kIGRlZXBlciBzY3JpcHR1cmUgZXhwbGFuYXRpb25zLlwiLFxuICAgIGxhbmd1YWdlOiBcIkVuZ2xpc2hcIixcbiAgICB0b25lOlxuICAgICAgXCJTZXJpb3VzLCBteXN0ZXJpb3VzLCByZXNwZWN0ZnVsLCBlZHVjYXRpb25hbCwgdGhvdWdodGZ1bCwgY2FsbSwgZG9jdW1lbnRhcnktc3R5bGUsIG5vdCBvdmVybHkgcHJlYWNoeSwgbm90IG1vY2tpbmcgcmVsaWdpb24sIG5vdCBzZW5zYXRpb25hbGl6ZWQsIG5vdCBjbGFpbWluZyB1bmNlcnRhaW4gdGhlb3JpZXMgYXMgYWJzb2x1dGUgdHJ1dGguXCIsXG4gICAgdmlzdWFsU3R5bGU6XG4gICAgICBcIlNpbXBsZSBmbGF0IDJEIEJpYmxlIGFuaW1hdGlvbi4gQ2xlYW4gdmVjdG9yLWxpa2UgaWxsdXN0cmF0aW9uLCBzaW1wbGlmaWVkIGJpYmxpY2FsIGNoYXJhY3RlcnMsIGFuY2llbnQgZGVzZXJ0IGxhbmRzY2FwZXMsIG9sZCBzY3JvbGxzLCB0ZW1wbGUgc2lsaG91ZXR0ZXMsIGJpYmxpY2FsIG1hcHMsIGNhbmRsZXMgYW5kIHdhcm0gbGlnaHQsIGFuY2llbnQgY2l0eSBiYWNrZ3JvdW5kcywgc29mdCBjbG91ZHMsIGRpdmluZSBsaWdodCwgbWluaW1hbCBmYWNpYWwgZGV0YWlscywgbGltaXRlZCBzb2Z0IGNvbG9ycywgbWluaW1hbCBzaGFkaW5nLCBjbGVhciBzdG9yeXRlbGxpbmcgY29tcG9zaXRpb24uIEF2b2lkIGZhbnRhc3kgdmlzdWFscywgaG9ycm9yIGFuZ2Vscy9kZW1vbnMsIGdvcmUsIG92ZXJseSByZWFsaXN0aWMgZmFjZXMsIGRpc3Jlc3BlY3RmdWwgcmVsaWdpb3VzIGZyYW1pbmcsIHNob2NraW5nIHRodW1ibmFpbHMsIGNoaWxkaXNoIGNhcnRvb24gZXhhZ2dlcmF0aW9uLlwiLFxuICAgIGltYWdlU3R5bGVNb2RlbDoge1xuICAgICAgbmFtZTogXCJNb2RlbCAyIC0gU2ltcGxlIEZsYXQgMkQgQmlibGUgQW5pbWF0aW9uXCIsXG4gICAgICBkZXNjcmlwdGlvbjpcbiAgICAgICAgXCJTaW1wbGUgZmxhdCAyRCBiaWJsaWNhbCBhbmltYXRpb24sIGNsZWFuIHZlY3Rvci1saWtlIGlsbHVzdHJhdGlvbiwgc2ltcGxpZmllZCBiaWJsaWNhbCBjaGFyYWN0ZXJzLCBtaW5pbWFsIGZhY2lhbCBkZXRhaWxzLCBzb2Z0IHdhcm0gY29sb3JzLCBhbmNpZW50IE1pZGRsZSBFYXN0ZXJuIHNldHRpbmcsIG1pbmltYWwgc2hhZGluZywgY2xlYXIgZG9jdW1lbnRhcnkgc3Rvcnl0ZWxsaW5nIGNvbXBvc2l0aW9uLCByZXNwZWN0ZnVsIHJlbGlnaW91cyB2aXN1YWwgc3R5bGUuXCJcbiAgICB9LFxuICAgIHZvaWNlU3R5bGU6XG4gICAgICBcIkNhbG0gc2VyaW91cyBtYWxlIGRvY3VtZW50YXJ5IG5hcnJhdG9yLiBEZWVwLCBjYWxtLCBzZXJpb3VzLCBzbG93LCByZXNwZWN0ZnVsLCBkb2N1bWVudGFyeS1saWtlLCBub3QgdG9vIGRyYW1hdGljLCBub3QgYWQtbGlrZSwgbm90IHRvbyBwcmVhY2h5LlwiLFxuICAgIHR0c0Vtb3Rpb25TdHlsZTogW1wic2VyaW91c1wiLCBcImNhbG1cIiwgXCJmb3JtYWxcIiwgXCJ3aGlzcGVyXCIsIFwiZW1waGFzaXNcIiwgXCJ3YXJtXCIsIFwicGF1c2UgMC41c1wiLCBcInBhdXNlIDFzXCJdLFxuICAgIHR0c1VzYWdlOiBbXG4gICAgICBcIlVzZSBzZXJpb3VzIGZvciBteXN0ZXJ5IG9wZW5pbmdzIGFuZCBpbXBvcnRhbnQgc3RvcnkgbW9tZW50cy5cIixcbiAgICAgIFwiVXNlIGNhbG0gZm9yIGV4cGxhbmF0aW9uLlwiLFxuICAgICAgXCJVc2UgZm9ybWFsIGZvciBoaXN0b3JpY2FsL3NjcmlwdHVyZSBjb250ZXh0LlwiLFxuICAgICAgXCJVc2Ugd2hpc3BlciBmb3IgbXlzdGVyeSwgaGlkZGVuIG1lYW5pbmcsIHByb3BoZWN5LlwiLFxuICAgICAgXCJVc2UgZW1waGFzaXMgZm9yIGtleSBkZXRhaWxzLlwiLFxuICAgICAgXCJVc2Ugd2FybSBmb3IgZmFpdGgsIGhvcGUsIG1lcmN5LCBodW1hbiBtZWFuaW5nLlwiLFxuICAgICAgXCJVc2UgcGF1c2UgMC41cyBiZXR3ZWVuIGlkZWFzLlwiLFxuICAgICAgXCJVc2UgcGF1c2UgMXMgYmVmb3JlIGltcG9ydGFudCByZXZlYWxzLlwiXG4gICAgXSxcbiAgICBjb3JlSGFzaHRhZ3M6IFtcIiNCaWJsZU15c3Rlcmllc1wiLCBcIiNCaWJsZVN0b3JpZXNcIiwgXCIjQmlibGljYWxIaXN0b3J5XCJdLFxuICAgIHNlY29uZGFyeUhhc2h0YWdzOiBbXG4gICAgICBcIiNCaWJsZUV4cGxhaW5lZFwiLFxuICAgICAgXCIjQ2hyaXN0aWFuTXlzdGVyaWVzXCIsXG4gICAgICBcIiNCaWJsZVByb3BoZWN5XCIsXG4gICAgICBcIiNPbGRUZXN0YW1lbnRcIixcbiAgICAgIFwiI05ld1Rlc3RhbWVudFwiXG4gICAgXSxcbiAgICBhdm9pZExpc3Q6IFtcbiAgICAgIFwiRG8gbm90IGNvcHkgY29tcGV0aXRvciB3b3JkaW5nLlwiLFxuICAgICAgXCJEbyBub3Qgb3ZlcmNsYWltIHVuY2VydGFpbiBpbnRlcnByZXRhdGlvbnMuXCIsXG4gICAgICBcIkF2b2lkIHBob3RvcmVhbGlzbS5cIixcbiAgICAgIFwiQXZvaWQgY2luZW1hdGljIHJlYWxpc20uXCIsXG4gICAgICBcIkF2b2lkIGRyYW1hdGljIG1vdmllIGxpZ2h0aW5nLlwiLFxuICAgICAgXCJBdm9pZCBoZWF2eSB0ZXh0dXJlLlwiLFxuICAgICAgXCJBdm9pZCB3YXRlcm1hcmsuXCIsXG4gICAgICBcIkF2b2lkIGxvZ28uXCIsXG4gICAgICBcIkF2b2lkIHJlYWRhYmxlIHRleHQuXCIsXG4gICAgICBcIkF2b2lkIGFuaW1lLlwiLFxuICAgICAgXCJBdm9pZCAzRCByZW5kZXIgaWYgdXNpbmcgTW9kZWwgMi5cIlxuICAgIF0sXG4gICAgcm91dGVyU2lnbmFsczogW1xuICAgICAgXCJiaWJsZVwiLFxuICAgICAgXCJqZXN1c1wiLFxuICAgICAgXCJtb3Nlc1wiLFxuICAgICAgXCJkYXZpZFwiLFxuICAgICAgXCJhYnJhaGFtXCIsXG4gICAgICBcIm9sZCB0ZXN0YW1lbnRcIixcbiAgICAgIFwibmV3IHRlc3RhbWVudFwiLFxuICAgICAgXCJwcm9waGVjeVwiLFxuICAgICAgXCJzY3JpcHR1cmVcIixcbiAgICAgIFwiYmlibGljYWxcIixcbiAgICAgIFwiY2hyaXN0aWFuXCIsXG4gICAgICBcImdvc3BlbFwiLFxuICAgICAgXCJleG9kdXNcIixcbiAgICAgIFwiZ2VuZXNpc1wiLFxuICAgICAgXCJ0ZW1wbGVcIixcbiAgICAgIFwiYXJrXCIsXG4gICAgICBcIm1lc3NpYWhcIixcbiAgICAgIFwiYWFyb25cIixcbiAgICAgIFwiYnJlYXN0cGllY2VcIlxuICAgIF0sXG4gICAgc2FmZXR5UnVsZXM6IFtcbiAgICAgIFwiRGlzdGluZ3Vpc2ggc2NyaXB0dXJlLCBoaXN0b3JpY2FsIGV2aWRlbmNlLCB0cmFkaXRpb24sIGFuZCBpbnRlcnByZXRhdGlvbi5cIixcbiAgICAgIFwiRG8gbm90IGNsYWltIHVuY2VydGFpbiBpbnRlcnByZXRhdGlvbnMgYXMgYWJzb2x1dGUgdHJ1dGguXCIsXG4gICAgICBcIlVzZSByZXNwZWN0ZnVsIHJlbGlnaW91cyBmcmFtaW5nLlwiXG4gICAgXVxuICB9LFxuICB7XG4gICAgaWQ6IFwidmlyYWwtY2FzZS1maWxlc1wiLFxuICAgIG5hbWU6IFwiVmlyYWwgQ2FzZSBGaWxlc1wiLFxuICAgIG1haW5LZXl3b3JkOiBcIlZpcmFsIGxhd3N1aXRzXCIsXG4gICAgc2Vjb25kYXJ5S2V5d29yZHM6IFtcbiAgICAgIFwiSW50ZXJuZXQgc2NhbmRhbHNcIixcbiAgICAgIFwiVmlyYWwgbGF3c3VpdHMgZXhwbGFpbmVkXCIsXG4gICAgICBcIllvdVR1YmVyIGxhd3N1aXRzXCIsXG4gICAgICBcIkNyZWF0b3IgZHJhbWFcIixcbiAgICAgIFwiQnVzaW5lc3Mgc2NhbmRhbHNcIixcbiAgICAgIFwiSW5mbHVlbmNlciBjb250cm92ZXJzeVwiLFxuICAgICAgXCJMYXdzdWl0IGV4cGxhaW5lZFwiLFxuICAgICAgXCJJbnRlcm5ldCBkcmFtYVwiLFxuICAgICAgXCJWaXJhbCBjYXNlIHN0dWR5XCIsXG4gICAgICBcIk9ubGluZSBjb250cm92ZXJzeVwiLFxuICAgICAgXCJCcmFuZCBzY2FuZGFsXCIsXG4gICAgICBcIkNvcHlyaWdodCBkcmFtYVwiLFxuICAgICAgXCJBSSBjb250cm92ZXJzeVwiLFxuICAgICAgXCJDcmVhdG9yIGVjb25vbXkgZHJhbWFcIlxuICAgIF0sXG4gICAgbmljaGU6IFwiVmlyYWwgTGF3c3VpdHMgJiBJbnRlcm5ldCBTY2FuZGFscyBFeHBsYWluZWQuXCIsXG4gICAgY29udGVudFR5cGU6XG4gICAgICBcIkxvbmctZm9ybSBkb2N1bWVudGFyeSBleHBsYW5hdGlvbiB2aWRlb3MgYmFzZWQgb24gdHJlbmQgcmVzZWFyY2gsIHB1YmxpYyBzb3VyY2VzLCBjb21wZXRpdG9yIHJlc2VhcmNoLCBhbmQgaGlnaC1kZW1hbmQgdmlyYWwgY2FzZXMuIFRhcmdldCB2aWRlbyBsZW5ndGg6IDgtMTIgbWludXRlcy4gTWFpbiBmb3JtYXQ6IGxvbmctZm9ybSA4LTEyIG1pbnV0ZXMuIFNlY29uZGFyeSBmb3JtYXQ6IFNob3J0cyBjdXQgZnJvbSBsb25nLWZvcm0gdmlkZW9zLiBDb250ZW50IHNwbGl0OiA0MCUgbGF3c3VpdHMsIDI1JSBidXNpbmVzcyBzY2FuZGFscywgMjUlIGNyZWF0b3IgZHJhbWEsIDEwJSBwbGF0Zm9ybSAvIEFJIC8gY29weXJpZ2h0LlwiLFxuICAgIHRhcmdldEF1ZGllbmNlOlxuICAgICAgXCJVUyB2aWV3ZXJzIGludGVyZXN0ZWQgaW4gaW50ZXJuZXQgZHJhbWEsIGxhd3N1aXRzLCBjcmVhdG9yIGVjb25vbXksIGJyYW5kIHNjYW5kYWxzLCBhbmQgdmlyYWwgY29udHJvdmVyc2llcy5cIixcbiAgICBsYW5ndWFnZTogXCJFbmdsaXNoXCIsXG4gICAgdG9uZTpcbiAgICAgIFwiRG9jdW1lbnRhcnksIG5ldXRyYWwsIGNsZWFyLCBzbGlnaHRseSBkcmFtYXRpYywgc291cmNlLWJhc2VkLCBhbmFseXRpY2FsLCBmYXN0IGJ1dCB1bmRlcnN0YW5kYWJsZSwgbm90IGdvc3NpcC1vbmx5LCBub3QgZGVmYW1hdG9yeSwgbm90IGJsaW5kbHkgdGFraW5nIHNpZGVzLCBub3QgaGFyYXNzbWVudC1kcml2ZW4uIFVzZSB3b3JkaW5nIGxpa2U6IGFjY29yZGluZyB0byBwdWJsaWMgcmVwb3J0cywgY291cnQgZmlsaW5ncyBjbGFpbSwgdGhlIGNvbXBhbnkgc3RhdGVkLCB0aGUgY3JlYXRvciByZXNwb25kZWQsIHdoYXQgcmVtYWlucyB1bmNsZWFyLCBiYXNlZCBvbiBhdmFpbGFibGUgaW5mb3JtYXRpb24uXCIsXG4gICAgdmlzdWFsU3R5bGU6XG4gICAgICBcIlN0eWxpemVkIDJEIG15c3RlcnkgZG9jdW1lbnRhcnkgaWxsdXN0cmF0aW9uLiBBbmltYXRlZCBjYXNlLWZpbGUgdmlzdWFscywgc2ltcGxpZmllZCBldmlkZW5jZSBib2FyZHMsIGNhcnRvb24tc3R5bGUgdGltZWxpbmUgZ3JhcGhpY3MsIGJsdXJyZWQgc29jaWFsIG1lZGlhIHBvc3QgbW9ja3VwcywgY291cnQgZG9jdW1lbnQgaWxsdXN0cmF0aW9ucywgZGlnaXRhbCB0cmFpbCBtYXBzLCByZWQgY29ubmVjdGlvbiBsaW5lcywgY2hhcmFjdGVyIHNpbGhvdWV0dGVzLCBjb21tZW50IGljb25zLCBub3RpZmljYXRpb24gaWNvbnMsIGRhcmsgbmF2eS9ncmF5L3JlZC93aGl0ZSBwYWxldHRlLiBBdm9pZCByZWFsIHNjcmVlbnNob3RzIHdpdGggcGVyc29uYWwgaW5mb3JtYXRpb24sIGRveHhpbmcgZGV0YWlscywgcGhvdG9yZWFsaXN0aWMgY3JpbWUgYm9hcmRzLCBoZWF2eSB0cnVlIGNyaW1lIGhvcnJvciB2aWJlLCBnb3JlLCBkZWZhbWF0b3J5IHRodW1ibmFpbHMuXCIsXG4gICAgaW1hZ2VTdHlsZU1vZGVsOiB7XG4gICAgICBuYW1lOiBcIk1vZGVsIDUgLSBNeXN0ZXJ5IEV4cGxhaW5lZCBJbGx1c3RyYXRpb25cIixcbiAgICAgIGRlc2NyaXB0aW9uOlxuICAgICAgICBcIlN0eWxpemVkIDJEIG15c3RlcnkgZG9jdW1lbnRhcnkgaWxsdXN0cmF0aW9uLCBjYXJ0b29uLWxpa2UgaW52ZXN0aWdhdGl2ZSB2aXN1YWxzLCBzaW1wbGlmaWVkIGNhc2UgZmlsZXMsIHJlZCBzdHJpbmcgY29ubmVjdGlvbnMsIHRpbWVsaW5lIGdyYXBoaWNzLCBibHVycmVkIHNvY2lhbCBtZWRpYSBwb3N0IG1vY2t1cHMsIGNvdXJ0IGRvY3VtZW50IG92ZXJsYXlzLCBkYXJrIG5hdnkgYmFja2dyb3VuZCB3aXRoIHJlZCBhY2NlbnRzLCBjbGVhbiBjb21wb3NpdGlvbiwgbWluaW1hbCByZWFsaXN0aWMgZGV0YWlsLCBzbGlnaHRseSBkcmFtYXRpYyBidXQgY2xlYXJseSBpbGx1c3RyYXRlZCwgYW5pbWF0ZWQgZXhwbGFpbmVyIGFlc3RoZXRpYywgbm90IHBob3RvcmVhbGlzdGljLlwiXG4gICAgfSxcbiAgICB2b2ljZVN0eWxlOlxuICAgICAgXCJTZXJpb3VzIGZhc3QtcGFjZWQgbWFsZSBkb2N1bWVudGFyeSBuYXJyYXRvci4gQ2xlYXIsIHNlcmlvdXMsIHNsaWdodGx5IHRlbnNlLCBuZXV0cmFsLCBzdG9yeS1kcml2ZW4sIG5vdCBnb3NzaXAsIG5vdCBjb21lZGljLCBub3QgYXR0YWNraW5nIHBlb3BsZS5cIixcbiAgICB0dHNFbW90aW9uU3R5bGU6IFtcbiAgICAgIFwic2VyaW91c1wiLFxuICAgICAgXCJjbGVhclwiLFxuICAgICAgXCJuZXV0cmFsXCIsXG4gICAgICBcImFuYWx5dGljYWxcIixcbiAgICAgIFwic3VzcGVuc2VmdWxcIixcbiAgICAgIFwiZW1waGFzaXNcIixcbiAgICAgIFwicGF1c2UgMC41c1wiLFxuICAgICAgXCJwYXVzZSAxc1wiXG4gICAgXSxcbiAgICB0dHNVc2FnZTogW1xuICAgICAgXCJVc2Ugc2VyaW91cyBmb3Igb3BlbmluZy5cIixcbiAgICAgIFwiVXNlIGNsZWFyIGZvciB0aW1lbGluZSBleHBsYW5hdGlvbi5cIixcbiAgICAgIFwiVXNlIG5ldXRyYWwgZm9yIGNsYWltcywgbGF3c3VpdHMsIGFjY3VzYXRpb25zLlwiLFxuICAgICAgXCJVc2UgYW5hbHl0aWNhbCBmb3IgY2F1c2VzIGFuZCBpbXBhY3QuXCIsXG4gICAgICBcIlVzZSBzdXNwZW5zZWZ1bCBmb3IgdHVybmluZyBwb2ludHMuXCIsXG4gICAgICBcIlVzZSBlbXBoYXNpcyBmb3IgaW1wb3J0YW50IGZhY3RzLlwiLFxuICAgICAgXCJVc2UgcGF1c2UgMC41cyBiZXR3ZWVuIHRpbWVsaW5lIGJlYXRzLlwiLFxuICAgICAgXCJVc2UgcGF1c2UgMXMgYmVmb3JlIGNvbmNsdXNpb25zL3JldmVhbHMuXCJcbiAgICBdLFxuICAgIGNvcmVIYXNodGFnczogW1wiI1ZpcmFsQ2FzZUZpbGVzXCIsIFwiI0ludGVybmV0RHJhbWFcIiwgXCIjTGF3c3VpdEV4cGxhaW5lZFwiXSxcbiAgICBzZWNvbmRhcnlIYXNodGFnczogW1xuICAgICAgXCIjVmlyYWxTY2FuZGFsXCIsXG4gICAgICBcIiNDcmVhdG9yRHJhbWFcIixcbiAgICAgIFwiI0J1c2luZXNzU2NhbmRhbFwiLFxuICAgICAgXCIjWW91VHViZURyYW1hXCIsXG4gICAgICBcIiNPbmxpbmVDb250cm92ZXJzeVwiLFxuICAgICAgXCIjQ29weXJpZ2h0RHJhbWFcIixcbiAgICAgIFwiI0FJQ29udHJvdmVyc3lcIlxuICAgIF0sXG4gICAgcG9zaXRpb25pbmc6XG4gICAgICBcIk5vdCBnb3NzaXAuIE5vdCBsZWdhbCBhZHZpY2UuIEp1c3QgdGhlIGNhc2UsIHRoZSB0aW1lbGluZSwgdGhlIHB1YmxpYyBldmlkZW5jZSwgYW5kIHdoYXQgc3RpbGwgcmVtYWlucyB1bmNsZWFyLlwiLFxuICAgIGF2b2lkTGlzdDogW1xuICAgICAgXCJEbyBub3QgcHJlc2VudCBhbGxlZ2F0aW9ucyBhcyBwcm92ZW4gZmFjdHMuXCIsXG4gICAgICBcIkRvIG5vdCBkZWZhbWUuXCIsXG4gICAgICBcIkRvIG5vdCBoYXJhc3MuXCIsXG4gICAgICBcIkRvIG5vdCBpbmNsdWRlIGRveHhpbmcgZGV0YWlscy5cIixcbiAgICAgIFwiQXZvaWQgcmVhbCBwZXJzb25hbCBpbmZvLlwiLFxuICAgICAgXCJBdm9pZCByZWFsIHNjcmVlbnNob3RzIHdpdGggcHJpdmF0ZSBkYXRhLlwiLFxuICAgICAgXCJBdm9pZCBoZWF2eSB0cnVlLWNyaW1lIGdvcmUuXCIsXG4gICAgICBcIkF2b2lkIGluZmxhbW1hdG9yeSBjbGFpbXMuXCJcbiAgICBdLFxuICAgIHJvdXRlclNpZ25hbHM6IFtcbiAgICAgIFwibGF3c3VpdFwiLFxuICAgICAgXCJjb3VydCBmaWxpbmdcIixcbiAgICAgIFwiY29tcGxhaW50XCIsXG4gICAgICBcInNldHRsZW1lbnRcIixcbiAgICAgIFwic2NhbmRhbFwiLFxuICAgICAgXCJjb250cm92ZXJzeVwiLFxuICAgICAgXCJjcmVhdG9yIGRyYW1hXCIsXG4gICAgICBcImluZmx1ZW5jZXJcIixcbiAgICAgIFwieW91dHViZXJcIixcbiAgICAgIFwiYnJhbmQgYmFja2xhc2hcIixcbiAgICAgIFwiY29weXJpZ2h0XCIsXG4gICAgICBcImFpIGxhd3N1aXRcIixcbiAgICAgIFwiYWxsZWdhdGlvbnNcIixcbiAgICAgIFwicHVibGljIHJlc3BvbnNlXCIsXG4gICAgICBcImludGVybmV0IGRyYW1hXCIsXG4gICAgICBcInBsYXRmb3JtXCJcbiAgICBdLFxuICAgIHNhZmV0eVJ1bGVzOiBbXG4gICAgICBcIkF0dHJpYnV0ZSBhbGxlZ2F0aW9ucy5cIixcbiAgICAgIFwiRG8gbm90IHByZXNlbnQgY2xhaW1zIGFzIHByb3ZlbiBiZWZvcmUgYWRqdWRpY2F0aW9uLlwiLFxuICAgICAgXCJBdm9pZCBkZWZhbWF0aW9uIGFuZCBwcml2YXRlIGRhdGEuXCJcbiAgICBdXG4gIH1cbl07XG5cbiJdLCJtYXBwaW5ncyI6IkFBRU8sYUFBTSxzQkFBd0M7QUFBQSxFQUNuRDtBQUFBLElBQ0UsSUFBSTtBQUFBLElBQ0osTUFBTTtBQUFBLElBQ04sYUFBYTtBQUFBLElBQ2IsbUJBQW1CO0FBQUEsTUFDakI7QUFBQSxNQUNBO0FBQUEsTUFDQTtBQUFBLE1BQ0E7QUFBQSxNQUNBO0FBQUEsTUFDQTtBQUFBLE1BQ0E7QUFBQSxNQUNBO0FBQUEsTUFDQTtBQUFBLE1BQ0E7QUFBQSxJQUNGO0FBQUEsSUFDQSxPQUFPO0FBQUEsSUFDUCxhQUNFO0FBQUEsSUFDRixnQkFDRTtBQUFBLElBQ0YsVUFBVTtBQUFBLElBQ1YsTUFDRTtBQUFBLElBQ0YsYUFDRTtBQUFBLElBQ0YsaUJBQWlCO0FBQUEsTUFDZixNQUFNO0FBQUEsTUFDTixhQUNFO0FBQUEsSUFDSjtBQUFBLElBQ0EsWUFD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

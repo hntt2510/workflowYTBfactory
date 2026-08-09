@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "project-6a1fc78d-1a19-43c5-98fb-a0b8a16ad944",
+    "topic": "How a forgotten lighthouse changed coastal rescue forever",
+    "format": "short",
+    "targetLanguage": "English"
+  },
+  "artifactIds": [
+    "artifact-5dc4de6d-72f3-4216-b5be-69b9528c1afe",
+    "artifact-6cad78bc-f702-4529-bf1c-efc4b3011b64",
+    "artifact-bd4520b8-eb74-4cce-9d83-7cf40e5900f1",
+    "artifact-29f36954-fb87-4188-80be-509764d75331",
+    "artifact-24dec524-dfa4-42a0-8fef-7e489add0349",
+    "artifact-d5af3ce3-14a8-4706-810a-95b614310fa4",
+    "artifact-cffac3a3-fd8f-4a4c-ba80-77baf049a08a",
+    "artifact-c89f70c7-e545-4bbe-a871-a9ef906b6a2b",
+    "artifact-fdfaed69-e923-4e2d-85cd-f7f71e124f0b",
+    "artifact-e0cdd6df-ecc3-4a8a-ab90-9c889c5f3d4e"
+  ]
+}

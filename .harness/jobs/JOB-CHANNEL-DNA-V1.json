@@ -2,7 +2,7 @@
   "jobId": "JOB-CHANNEL-DNA-V1",
   "type": "long",
   "title": "Channel DNA and style-aware creator workspace",
-  "status": "planned",
+  "status": "ready",
   "targetBranch": "chore/setup-agent-harness",
   "assignedRole": "builder",
   "description": "Add backward-compatible Channel DNA profiles, deterministic style recommendations, channel-scoped characters/assets, project channel snapshots, and typed Channels UI without changing the legacy production pipeline.",

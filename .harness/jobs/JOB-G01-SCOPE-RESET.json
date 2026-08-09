@@ -1,0 +1,63 @@
+{
+  "jobId": "JOB-G01-SCOPE-RESET",
+  "type": "long",
+  "title": "G01 pre-production workflow scope reset",
+  "status": "planned",
+  "targetBranch": "main",
+  "assignedRole": "builder",
+  "description": "Establish one registry-driven YouTube Pre-production / Director Factory workflow and detach legacy production capabilities from the default project journey without deleting compatibility code.",
+  "businessContext": "New Topic, Existing Script, and Reference projects need a truthful pre-production journey through GG Lab image review and production handoff; existing SQLite projects must remain loadable.",
+  "allowedPaths": [
+    "apps/desktop/src/main/**",
+    "apps/desktop/src/preload/**",
+    "apps/desktop/src/renderer/**",
+    "packages/domain/src/**",
+    "packages/domain/test/**",
+    "packages/db/src/**",
+    "packages/db/test/**",
+    "fixtures/g01/**",
+    "scripts/verify-electron-ui.cjs",
+    "docs/G01_WORKFLOW_CONTRACT.md",
+    ".harness/jobs/JOB-G01-SCOPE-RESET.json",
+    ".harness/state.json",
+    ".harness/locks/JOB-G01-SCOPE-RESET.lock",
+    ".harness/handoffs/JOB-G01-SCOPE-RESET.md"
+  ],
+  "forbiddenPaths": [
+    "packages/providers/**",
+    "packages/generation-queue/**",
+    "packages/media/**",
+    "packages/capcut/**",
+    "python/capcut_bridge/**",
+    "OmniVoice/**",
+    "docs/product/acceptance-criteria.md"
+  ],
+  "dependencies": ["Latest main branch", "Existing SQLite project persistence", "Typed preload API boundary"],
+  "acceptanceCriteria": [
+    "A single registry defines ordered pre-production stages, applicability, dependencies, interaction requirements, artifact contracts, routes, and invalidation relationships without a hardcoded total.",
+    "Topic, Existing Script, and Reference project modes resolve truthful applicable and not_applicable stages; skipped stages are never fake-approved and do not enter the required-progress denominator.",
+    "New projects can reach Production Handoff without image/video-model certification, TTS, FFmpeg, CapCut, stock, or image-provider requirements.",
+    "Project creation, persistence loading, and runtime normalization safely support new workflow data and legacy projects with unknown or missing stage data.",
+    "Opening a project resolves its current applicable stage from workflow metadata/state and new projects are never routed to TTS, FFmpeg, CapCut, preview, QA, or export routes.",
+    "The creator project journey visibly renders dynamic stage state and overall progress, including optional and not_applicable states where useful.",
+    "Focused domain, persistence, routing, renderer, and Electron/runtime tests cover all three new modes plus a legacy fixture and restart behavior.",
+    "Independent reviewer and QA evidence are recorded before integration."
+  ],
+  "verificationCommands": [
+    "pnpm --filter @lsf/domain test",
+    "pnpm --filter @lsf/db test",
+    "pnpm --filter @lsf/desktop test",
+    "pnpm typecheck",
+    "pnpm lint",
+    "git diff --check",
+    "node scripts/verify-electron-ui.cjs"
+  ],
+  "requiredReviewers": ["reviewer", "qa"],
+  "maxReviewRounds": 3,
+  "humanEscalationConditions": [
+    "A compatibility change would overwrite existing project data or user files.",
+    "Implementation must change an excluded provider, rendering, queue, or CapCut package.",
+    "The latest-main baseline fails in an unrelated area after targeted isolation.",
+    "An unresolved product-mode distinction changes the documented G01 workflow contract."
+  ]
+}
