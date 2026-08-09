@@ -40,6 +40,10 @@ export class ActionRunStore {
     return (this.db.prepare("SELECT * FROM action_runs WHERE project_id = ? ORDER BY updated_at DESC").all(projectId) as unknown as ActionRunRow[]).map(toActionRun);
   }
 
+  listActive(): ActionRun[] {
+    return (this.db.prepare("SELECT * FROM action_runs WHERE state IN ('queued', 'running', 'waiting_user', 'failed') ORDER BY updated_at DESC").all() as unknown as ActionRunRow[]).map(toActionRun);
+  }
+
   update(run: ActionRun): void {
     const result = this.db.prepare(`UPDATE action_runs SET state = ?, progress_mode = ?, completed_units = ?, total_units = ?, current_unit = ?, message = ?, safe_error_code = ?, safe_error_message = ?, retryable = ?, output_artifact_ids_json = ?, started_at = ?, finished_at = ?, updated_at = ? WHERE id = ?`)
       .run(run.state, run.progress.mode, run.progress.mode === "determinate" ? run.progress.completedUnits : null, run.progress.mode === "determinate" ? run.progress.totalUnits : null, run.progress.mode === "determinate" ? run.progress.currentUnit ?? null : null, run.progress.message, run.safeErrorCode ?? null, run.safeErrorMessage ?? null, run.retryable ? 1 : 0, JSON.stringify(run.outputArtifactIds), run.startedAt ?? null, run.finishedAt ?? null, run.updatedAt, run.id);

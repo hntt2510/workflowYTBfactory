@@ -258,7 +258,7 @@ function TopBar(props: {
         {activeRuns.length ? <button className="queue-chip" type="button" onClick={() => setRuntimeOpen((value) => !value)}><Play size={15} /> {activeRuns.length} tác vụ</button> : null}
         <button className="icon-button" type="button" aria-label="Mở cài đặt" onClick={() => props.setRoute("settings")}><Settings size={17} /></button>
       </div>
-      {runtimeOpen ? <div className="runtime-drawer" role="dialog" aria-label="Action runtime">{activeRuns.map((run) => <div className="status-row" key={run.id}><span>{run.actionId}</span><small>{run.state} · {run.progress.mode === "determinate" ? `${run.progress.completedUnits}/${run.progress.totalUnits}` : run.progress.message}{run.safeErrorMessage ? ` · ${run.safeErrorMessage}` : ""}</small></div>)}</div> : null}
+      {runtimeOpen ? <div className="runtime-drawer" role="dialog" aria-label="Action runtime">{activeRuns.map((run) => <div className="status-row" key={run.id}><span>{run.actionId}</span><small>{props.projects.find((project) => project.id === run.projectId)?.projectName ?? run.projectId} · {run.checkpointId} · {run.state} · {run.progress.mode === "determinate" ? `${run.progress.completedUnits}/${run.progress.totalUnits} · ${run.progress.totalUnits ? Math.round(run.progress.completedUnits / run.progress.totalUnits * 100) : 0}%${run.progress.currentUnit ? ` · ${run.progress.currentUnit}` : ""}` : run.progress.message}{run.safeErrorMessage ? ` · ${run.safeErrorMessage}` : ""}</small></div>)}</div> : null}
     </header>
   );
 }

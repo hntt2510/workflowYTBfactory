@@ -260,11 +260,43 @@ import { prepareCapCutVisualClip } from "@lsf/media";
 
 type InternalIpcHandler = (...args: never[]) => unknown;
 const internalIpcHandlers = new Map<string, InternalIpcHandler>();
+const trackedActionByIpcChannel: Readonly<Record<string, ActionId>> = {
+  "run-transcript-cleaning": "GENERATE_RESEARCH_ANALYSIS",
+  "run-idea-lab": "GENERATE_IDEAS",
+  "run-script": "GENERATE_SCRIPT",
+  "run-scene-plan": "GENERATE_DIRECTOR_PLAN",
+  "run-shot-plan": "GENERATE_STORYBOARD",
+  "run-prompt-preparation": "PREPARE_GG_LAB_PROMPTS"
+};
+const trackedStageByIpcChannel: Readonly<Record<string, string>> = {
+  "run-transcript-cleaning": "transcript-cleaning"
+};
 const forceScriptRegenerationProjects = new Set<string>();
 const ipcMain = {
   handle(channel: string, listener: InternalIpcHandler) {
-    internalIpcHandlers.set(channel, listener);
-    return electronIpcMain.handle(channel, listener as never);
+    const actionId = trackedActionByIpcChannel[channel];
+    const trackedListener: InternalIpcHandler = actionId ? (async (...args: never[]) => {
+      const input = args[1] as unknown as { projectId?: unknown } | undefined;
+      const projectId = typeof input?.projectId === "string" ? input.projectId : undefined;
+      const project = projectId ? projectRepository.loadProject(projectId) : undefined;
+      if (!project) return await listener(...args);
+      const action = actionDefinitions.find((definition) => definition.id === actionId)!;
+      const stageId = trackedStageByIpcChannel[channel] ?? action.stageId;
+      const fingerprint = canonicalSha256({ actionId, stageId, projectId, setup: project.setup, approvedIdeaId: project.approvedIdeaId, claims: project.claims, stages: project.stages.map((stage) => ({ id: stage.id, status: stage.status })), currentArtifacts: project.stages.flatMap((stage) => workflowRunStore.listArtifacts(project.id, stage.id).filter((artifact) => artifact.status === "approved").map((artifact) => ({ id: artifact.id, stageId: artifact.stageId, updatedAt: artifact.updatedAt }))) });
+      const actionRun = beginTrackedAction(project, actionId, stageId, fingerprint, { mode: "indeterminate", startedAt: new Date().toISOString(), message: "Action is running." });
+      try {
+        const output = await listener(...args);
+        const latest = actionRunStore.list(project.id).find((run) => run.id === actionRun.id);
+        if (latest?.state === "running" || latest?.state === "queued") updateTrackedAction(latest, { state: "success", progress: { mode: "indeterminate", startedAt: latest.startedAt ?? new Date().toISOString(), message: "Action completed. Review the generated output in this checkpoint." }, retryable: false, finishedAt: new Date().toISOString() });
+        return output;
+      } catch (error) {
+        const latest = actionRunStore.list(project.id).find((run) => run.id === actionRun.id);
+        if (latest?.state === "running" || latest?.state === "queued") updateTrackedAction(latest, { state: "failed", progress: latest.progress, safeErrorCode: "action_failed", safeErrorMessage: (error instanceof Error ? error.message : "Project action failed.").slice(0, 500), retryable: true, finishedAt: new Date().toISOString() });
+        throw error;
+      }
+    }) as InternalIpcHandler : listener;
+    internalIpcHandlers.set(channel, trackedListener);
+    return electronIpcMain.handle(channel, trackedListener as never);
   }
 };
 
@@ -896,6 +928,7 @@ app.whenReady().then(async () => {
     const topic = "G02 runtime verification project";
     if (!projectRepository.listProjects().some((project) => project.topic === topic)) {
       const fixture = createFixtureProject({ topic, format: "short", targetLanguage: "Vietnamese", workflowMode: "guided", visualWorkflow: "legacy", projectName: topic, profiles: seedChannelProfiles });
+      fixture.stages = fixture.stages.map((stage) => stage.id === "project-setup" ? { ...stage, status: "not_started" } : stage);
       projectRepository.createProject(fixture);
       const now = new Date().toISOString();
       actionRunStore.create({ id: "e2e-g02-waiting-import", projectId: fixture.id, checkpointId: "images", actionId: "IMPORT_IMAGES", stageId: "gglab-generation-gate", state: "waiting_user", progress: { mode: "indeterminate", startedAt: now, message: "Import images from GG Lab" }, retryable: true, inputFingerprint: "e2e-g02-import-v1", outputArtifactIds: [], startedAt: now, updatedAt: now });
@@ -919,6 +952,7 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
       await navigateToRoute(win, "projects");
       await assertText(win, topic);
       await clickProjectOpen(win, topic);
+      await navigateToRoute(win, "project-overview");
       await waitForEnabledControl(win, "2 tác vụ", 20_000);
       await clickText(win, "2 tác vụ");
       await assertText(win, "IMPORT_IMAGES");
@@ -926,14 +960,50 @@ async function runUiVerification(win: BrowserWindow, reportPath: string, mode: s
       await assertText(win, "2/3");
       const project = projectRepository.listProjects().find((candidate) => candidate.topic === topic);
       if (!project) throw new Error("G02 runtime project was not persisted.");
+      const navigationRunCount = actionRunStore.list(project.id).length;
+      await win.webContents.executeJavaScript(`(() => {
+        const checkpoints = [...document.querySelectorAll('[aria-label="Project checkpoints"] button')];
+        if (checkpoints.length !== 9) throw new Error("Expected 9 checkpoints, found " + checkpoints.length + ".");
+        for (const checkpoint of checkpoints) checkpoint.click();
+        checkpoints[0]?.click();
+      })()`, true);
+      await delay(300);
+      if (actionRunStore.list(project.id).length !== navigationRunCount) throw new Error("Checkpoint navigation started an action.");
+      await win.webContents.executeJavaScript(`(() => {
+        const action = [...document.querySelectorAll("button")].find((button) => button.textContent?.includes("Lưu Brief"));
+        if (!action) throw new Error("SAVE_BRIEF action button was not rendered.");
+        action.click();
+        action.click();
+      })()`, true);
+      await delay(1_200);
+      const briefRuns = actionRunStore.list(project.id).filter((run) => run.actionId === "SAVE_BRIEF");
+      if (briefRuns.length !== 1 || briefRuns[0]?.state !== "waiting_user") throw new Error("Rapid double click did not create exactly one persistent waiting ActionRun.");
       const waiting = actionRunStore.list(project.id).find((run) => run.id === "e2e-g02-waiting-import");
       if (!waiting || waiting.state !== "waiting_user") throw new Error("Waiting ActionRun did not persist.");
+      await win.webContents.executeJavaScript(`(() => {
+        const checkpoint = [...document.querySelectorAll("button.status-row")].find((button) => button.textContent?.includes("Nhập + Duyệt ảnh"));
+        if (!checkpoint) throw new Error("Images checkpoint was not rendered.");
+        checkpoint.click();
+      })()`, true);
+      await waitForText(win, "Controlled G02 failure", 10_000);
+      await win.webContents.executeJavaScript(`(() => {
+        const retry = [...document.querySelectorAll("button")].find((button) => button.textContent?.includes("Thử lại Duyệt ảnh"));
+        if (!retry) throw new Error("Failed action did not expose a retry button.");
+        retry.click();
+      })()`, true);
+      await delay(1_200);
+      const retriedReview = actionRunStore.list(project.id).filter((run) => run.actionId === "APPROVE_IMAGES");
+      if (retriedReview.length !== 2 || retriedReview[0]?.state !== "waiting_user") throw new Error("Retry did not create a visible persistent ActionRun.");
       let duplicateBlocked = false;
       try { actionRunStore.create({ ...waiting, id: "e2e-g02-duplicate", updatedAt: new Date().toISOString() }); } catch { duplicateBlocked = true; }
       if (!duplicateBlocked) throw new Error("Duplicate ActionRun was not rejected.");
       const retry = { ...waiting, id: "e2e-g02-retry-import", state: "success" as const, progress: { mode: "indeterminate" as const, startedAt: waiting.startedAt ?? waiting.updatedAt, message: "Retry completed" }, finishedAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
       actionRunStore.update({ ...retry, id: waiting.id });
       if (actionRunStore.list(project.id).find((run) => run.id === waiting.id)?.state !== "success") throw new Error("Action retry completion did not persist.");
+      win.webContents.reloadIgnoringCache();
+      await waitForRenderer(win);
+      if (actionRunStore.list(project.id).find((run) => run.id === waiting.id)?.state !== "success") throw new Error("Completed ActionRun changed state after renderer reload.");
+      if (actionRunStore.list(project.id).filter((run) => run.actionId === "SAVE_BRIEF").length !== 1) throw new Error("Renderer reload re-ran a completed or waiting action.");
       writeUiVerificationReport(reportPath, { ok: true, mode, workspaceRoot, databasePath });
     } catch (error) {
       writeUiVerificationReport(reportPath, { ok: false, mode, error: error instanceof Error ? error.message : String(error), workspaceRoot, databasePath });
@@ -1764,6 +1834,36 @@ function saveProjectWithWorkflowInvalidation(project: FactoryProject, options: {
   }
 }
 
+function beginTrackedAction(project: FactoryProject, actionId: ActionId, stageId: string, inputFingerprint: string, progress: import("@lsf/domain").ActionProgress) {
+  const existing = actionRunStore.list(project.id).find((run) => run.actionId === actionId && run.stageId === stageId && ["queued", "running", "waiting_user"].includes(run.state));
+  if (existing) {
+    if (existing.state === "waiting_user") return updateTrackedAction(existing, { state: "running", progress });
+    return existing;
+  }
+  const now = new Date().toISOString();
+  return actionRunStore.create({
+    id: `action-run-${randomUUID()}`,
+    projectId: project.id,
+    checkpointId: actionDefinitions.find((action) => action.id === actionId)!.checkpointId,
+    actionId,
+    stageId,
+    state: "running",
+    progress,
+    retryable: true,
+    inputFingerprint,
+    outputArtifactIds: [],
+    startedAt: now,
+    updatedAt: now
+  });
+}
+
+function updateTrackedAction(run: ReturnType<ActionRunStore["list"]>[number], update: Partial<Pick<ReturnType<ActionRunStore["list"]>[number], "state" | "progress" | "safeErrorCode" | "safeErrorMessage" | "retryable" | "outputArtifactIds" | "finishedAt">>) {
+  const updatedAt = new Date().toISOString();
+  const next = { ...run, ...update, updatedAt };
+  actionRunStore.update(next);
+  return next;
+}
+
 function saveAndReturnProject(project: FactoryProject, options: { invalidateArtifacts?: boolean } = {}): FactoryProject {
   let normalized: FactoryProject;
   db.exec("BEGIN IMMEDIATE;");
@@ -2051,6 +2151,8 @@ ipcMain.handle("list-action-runs", (_event, input: unknown) => {
   return actionRunStore.list(projectId);
 });
 
+ipcMain.handle("list-active-action-runs", () => actionRunStore.listActive());
+
 ipcMain.handle("start-project-action", async (_event, input: unknown) => {
   const request = input as { projectId?: unknown; actionId?: unknown };
   const projectId = typeof request.projectId === "string" ? request.projectId : "";
@@ -2064,9 +2166,17 @@ ipcMain.handle("start-project-action", async (_event, input: unknown) => {
   if (availability.state === "RUNNING") throw new Error("An equivalent action is already running.");
   if (availability.state === "SUCCESS") throw new Error("Action is already complete. An explicit regenerate flow is required.");
   const now = new Date().toISOString();
-  const fingerprint = canonicalSha256({ actionId: action.id, stageId: action.stageId, stage: project.stages.find((stage) => stage.id === action.stageId)?.status ?? "not_started" });
+  const fingerprint = canonicalSha256({
+    actionId: action.id,
+    stageId: action.stageId,
+    topic: project.topic,
+    setup: project.setup,
+    approvedIdeaId: project.approvedIdeaId,
+    claims: project.claims,
+    stages: project.stages.map((stage) => ({ id: stage.id, status: stage.status })),
+    currentArtifacts: project.stages.flatMap((stage) => workflowRunStore.listArtifacts(project.id, stage.id).filter((artifact) => artifact.status === "approved").map((artifact) => ({ id: artifact.id, stageId: artifact.stageId, updatedAt: artifact.updatedAt })))
+  });
   const channelByAction: Partial<Record<ActionId, string>> = {
-    GENERATE_RESEARCH_ANALYSIS: "run-competitor-dna",
     GENERATE_IDEAS: "run-idea-lab",
     GENERATE_SCRIPT: "run-script",
     GENERATE_DIRECTOR_PLAN: "run-scene-plan",
@@ -2092,19 +2202,22 @@ ipcMain.handle("start-project-action", async (_event, input: unknown) => {
   if (!channel) return run;
   const handler = internalIpcHandlers.get(channel);
   if (!handler) throw new Error(`Project action handler is unavailable: ${action.id}`);
-  try {
-    await (handler as (event: unknown, value: unknown) => Promise<unknown>)(undefined, { projectId });
-    const completedAt = new Date().toISOString();
-    const success = { ...run, state: "success" as const, progress: { mode: "indeterminate" as const, startedAt: now, message: "Action completed. Review the generated output in this checkpoint." }, retryable: false, finishedAt: completedAt, updatedAt: completedAt };
-    actionRunStore.update(success);
-    return success;
-  } catch (error) {
+  void (async () => {
+    try {
+      await (handler as (event: unknown, value: unknown) => Promise<unknown>)(undefined, { projectId });
+      const latest = actionRunStore.list(projectId).find((candidate) => candidate.id === run.id);
+      if (latest?.state === "success") return;
+      const completedAt = new Date().toISOString();
+      actionRunStore.update({ ...run, state: "success" as const, progress: { mode: "indeterminate" as const, startedAt: now, message: "Action completed. Review the generated output in this checkpoint." }, retryable: false, finishedAt: completedAt, updatedAt: completedAt });
+    } catch (error) {
     const finishedAt = new Date().toISOString();
     const message = error instanceof Error ? error.message : "Project action failed.";
     const failed = { ...run, state: "failed" as const, progress: { mode: "indeterminate" as const, startedAt: now, message: "Action failed." }, safeErrorCode: "action_failed", safeErrorMessage: message.slice(0, 500), retryable: true, finishedAt, updatedAt: finishedAt };
     actionRunStore.update(failed);
-    throw new Error(failed.safeErrorMessage);
-  }
+      logger.warn("project_action_failed", { projectId, actionId: action.id });
+    }
+  })();
+  return run;
 });
 
 ipcMain.handle("route-topic", (_event, input: unknown) => {
@@ -2787,6 +2900,10 @@ ipcMain.handle("run-transcript-cleaning", async (_event, input: unknown) => {
     return factoryProjectResponseSchema.parse(project);
   }
 
+  const actionRun = beginTrackedAction(project, "GENERATE_RESEARCH_ANALYSIS", "transcript-cleaning", inputFingerprint, {
+    mode: "indeterminate", startedAt: new Date().toISOString(), message: "Preparing transcript chunks."
+  });
+
   const now = new Date().toISOString();
   const runId = `stage-run-${randomUUID()}`;
   const configuredModel = textProviderExecution.configuredModelId;
@@ -2838,6 +2955,15 @@ ipcMain.handle("run-transcript-cleaning", async (_event, input: unknown) => {
           chunkCount: progress.totalChunks,
           completedChunkCount: persistedChunks.filter((item) => typeof item === "object" && item !== null && "status" in item && item.status === "completed").length
         });
+        updateTrackedAction(actionRun, {
+          progress: {
+            mode: "determinate",
+            completedUnits: persistedChunks.filter((item) => typeof item === "object" && item !== null && "status" in item && item.status === "completed").length,
+            totalUnits: progress.totalChunks,
+            currentUnit: `Chunk ${progress.chunkIndex + 1}`,
+            message: progress.status === "completed" ? "Transcript chunk saved." : "Cleaning transcript chunk."
+          }
+        });
       }
     });
     const artifactId = `artifact-${randomUUID()}`;
@@ -2881,6 +3007,7 @@ ipcMain.handle("run-transcript-cleaning", async (_event, input: unknown) => {
       db.exec("ROLLBACK;");
       throw error;
     }
+    updateTrackedAction(actionRun, { state: "success", progress: { mode: "determinate", completedUnits: cleaned.execution.completedChunkCount, totalUnits: cleaned.execution.chunkCount, message: "Transcript chunks cleaned; output is ready for review." }, outputArtifactIds: [artifactId], retryable: false, finishedAt });
     return factoryProjectResponseSchema.parse(reviewProject);
   } catch (error) {
     const finishedAt = new Date().toISOString();
@@ -2922,6 +3049,11 @@ ipcMain.handle("run-transcript-cleaning", async (_event, input: unknown) => {
       throw persistenceError;
     }
     logger.warn("transcript_cleaning_failed", { projectId: project.id, referenceId: reference.id, category: safeCategory });
+    const totalUnits = (() => {
+      const chunk = persistedChunks.find((item) => typeof item === "object" && item !== null && "totalChunks" in item) as { totalChunks?: unknown } | undefined;
+      return typeof chunk?.totalChunks === "number" ? chunk.totalChunks : undefined;
+    })();
+    updateTrackedAction(actionRun, { state: "failed", progress: totalUnits === undefined ? { mode: "indeterminate", startedAt: actionRun.startedAt ?? finishedAt, message: "Transcript Cleaning failed." } : { mode: "determinate", completedUnits: persistedChunks.filter((item) => typeof item === "object" && item !== null && "status" in item && item.status === "completed").length, totalUnits, message: "Transcript Cleaning failed; completed chunks are preserved." }, safeErrorCode: safeCategory, safeErrorMessage: safeMessage, retryable: true, finishedAt });
     throw new Error(safeMessage);
   }
 });
@@ -4077,7 +4209,7 @@ ipcMain.handle("revise-scene-review", (_event, input: unknown) => {
 ipcMain.handle("approve-visual-routing", (_event, input: unknown) => { const { projectId } = visualRoutingRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "visual-routing").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Visual Routing exists."); const shots = visualRoutingOutputSchema.parse(artifact.payloadJson).shots; const approved = transitionProjectStage(markDownstreamStagesStale({ ...project, shots }, "visual-routing"), "visual-routing", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
 ipcMain.handle("reject-visual-routing", (_event, input: unknown) => { const { projectId } = visualRoutingRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "visual-routing").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId) throw new Error("No reviewable Visual Routing exists."); const rejected = transitionProjectStage(project, "visual-routing", "rejected"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(rejected, { withinTransaction: true }); workflowRunStore.rejectReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(rejected); });
 
-ipcMain.handle("run-prompt-preparation", async (_event, input: unknown) => { const { projectId } = promptPreparationRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const routingArtifact = currentApprovedArtifacts(project, "visual-routing").find((item) => item.payloadJson); if (!routingArtifact?.payloadJson) throw new Error("Prompt Preparation requires approved Visual Routing."); const routing = visualRoutingOutputSchema.parse(routingArtifact.payloadJson); const profile = projectRepository.loadChannelProfile(project.profileId); const character = project.setup.visualWorkflow === "character_first" ? resolveApprovedCharacterVersion(profile, project.setup.characterVersionId) : undefined; if (project.setup.visualWorkflow === "character_first" && !character) throw new Error("Prompt Preparation requires an approved character version."); const assetConceptArtifact = project.setup.visualWorkflow === "character_first" ? currentApprovedArtifacts(project, "asset-concepts").find((item) => item.payloadJson) : undefined; if (project.setup.visualWorkflow === "character_first" && !assetConceptArtifact?.payloadJson) throw new Error("Prompt Preparation requires approved Asset Concepts."); const assetConcepts = assetConceptArtifact?.payloadJson ? assetConceptsOutputSchema.parse(assetConceptArtifact.payloadJson).concepts : undefined; const aspectRatio = project.format === "short" ? "9:16" : "16:9" as const; const fingerprint = canonicalSha256({ stageId: "prompt-preparation", visualRoutingArtifactId: routingArtifact.id, assetConceptArtifactId: assetConceptArtifact?.id, characterVersionId: character?.id, manualMode: project.setup.visualWorkflow === "character_first", aspectRatio }); const existing = workflowRunStore.findLatestByInput(projectId, "prompt-preparation", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project); const runId = `stage-run-${randomUUID()}`; const running = transitionProjectStage(transitionProjectStage(project, "prompt-preparation", "queued"), "prompt-preparation", "running"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(running, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "prompt-preparation", status: "running", runnerId: "prompt-preparation-9router", runnerVersion: "prompt-preparation-v1", providerId: "9router", promptTemplateId: "visual-prompt-v1", promptVersion: "v1", inputArtifactIds: [routingArtifact.id, ...(assetConceptArtifact ? [assetConceptArtifact.id] : [])], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: new Date().toISOString() }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } try { const result = await runPromptPreparation({ shots: routing.shots, character, assetConcepts, manualMode: project.setup.visualWorkflow === "character_first", aspectRatio, credentialStore, certificationStore: textCertificationStore }); const artifactId = `artifact-${randomUUID()}`; const finishedAt = new Date().toISOString(); const review = transitionProjectStage(running, "prompt-preparation", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "prompt-preparation", status: "needs_review", runnerId: "prompt-preparation-9router", runnerVersion: "prompt-preparation-v1", providerId: "9router", promptTemplateId: "visual-prompt-v1", promptVersion: "v1", inputArtifactIds: [routingArtifact.id, ...(assetConceptArtifact ? [assetConceptArtifact.id] : [])], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt, ...(result.returnedModelId ? { returnedModelId: result.returnedModelId } : {}) }, { id: artifactId, projectId, stageId: "prompt-preparation", stageRunId: runId, type: "visual-prompts", version: workflowRunStore.listArtifacts(projectId, "prompt-preparation").length + 1, status: "needs_review", payloadJson: result.output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(review); } catch (error) { const message = error instanceof PromptPreparationError ? error.message : "Prompt Preparation failed."; const attention = createStageAttention("prompt-preparation", error instanceof PromptPreparationError ? error.category : "unexpected_failure", message, { retryAction: "Retry Prompt Preparation" }); const failed = updateProjectStage(running, "prompt-preparation", "needs_attention", attention); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "prompt-preparation", status: "needs_attention", runnerId: "prompt-preparation-9router", runnerVersion: "prompt-preparation-v1", providerId: "9router", inputArtifactIds: [routingArtifact.id, ...(assetConceptArtifact ? [assetConceptArtifact.id] : [])], inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof PromptPreparationError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; } throw new Error(message); } });
+ipcMain.handle("run-prompt-preparation", async (_event, input: unknown) => { const { projectId } = promptPreparationRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const routingArtifact = currentApprovedArtifacts(project, "visual-routing").find((item) => item.payloadJson); if (!routingArtifact?.payloadJson) throw new Error("Prompt Preparation requires approved Visual Routing."); const routing = visualRoutingOutputSchema.parse(routingArtifact.payloadJson); const profile = projectRepository.loadChannelProfile(project.profileId); const character = project.setup.visualWorkflow === "character_first" ? resolveApprovedCharacterVersion(profile, project.setup.characterVersionId) : undefined; if (project.setup.visualWorkflow === "character_first" && !character) throw new Error("Prompt Preparation requires an approved character version."); const assetConceptArtifact = project.setup.visualWorkflow === "character_first" ? currentApprovedArtifacts(project, "asset-concepts").find((item) => item.payloadJson) : undefined; if (project.setup.visualWorkflow === "character_first" && !assetConceptArtifact?.payloadJson) throw new Error("Prompt Preparation requires approved Asset Concepts."); const assetConcepts = assetConceptArtifact?.payloadJson ? assetConceptsOutputSchema.parse(assetConceptArtifact.payloadJson).concepts : undefined; const aspectRatio = project.format === "short" ? "9:16" : "16:9" as const; const fingerprint = canonicalSha256({ stageId: "prompt-preparation", visualRoutingArtifactId: routingArtifact.id, assetConceptArtifactId: assetConceptArtifact?.id, characterVersionId: character?.id, manualMode: project.setup.visualWorkflow === "character_first", aspectRatio }); const existing = workflowRunStore.findLatestByInput(projectId, "prompt-preparation", fingerprint); if (isPendingOrAcceptedRun(existing)) return factoryProjectResponseSchema.parse(project); const actionRun = beginTrackedAction(project, "PREPARE_GG_LAB_PROMPTS", "prompt-preparation", fingerprint, { mode: "indeterminate", startedAt: new Date().toISOString(), message: "Preparing prompt batches." }); const runId = `stage-run-${randomUUID()}`; const running = transitionProjectStage(transitionProjectStage(project, "prompt-preparation", "queued"), "prompt-preparation", "running"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(running, { withinTransaction: true }); workflowRunStore.createRun({ id: runId, projectId, stageId: "prompt-preparation", status: "running", runnerId: "prompt-preparation-9router", runnerVersion: "prompt-preparation-v1", providerId: "9router", promptTemplateId: "visual-prompt-v1", promptVersion: "v1", inputArtifactIds: [routingArtifact.id, ...(assetConceptArtifact ? [assetConceptArtifact.id] : [])], inputFingerprint: fingerprint, outputArtifactIds: [], startedAt: new Date().toISOString() }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } try { const result = await runPromptPreparation({ shots: routing.shots, character, assetConcepts, manualMode: project.setup.visualWorkflow === "character_first", aspectRatio, credentialStore, certificationStore: textCertificationStore, onBatchProgress: ({ completedBatches, totalBatches, currentBatch }) => { updateTrackedAction(actionRun, { progress: { mode: "determinate", completedUnits: completedBatches, totalUnits: totalBatches, currentUnit: `Batch ${currentBatch}`, message: "Prompt batch saved." } }); } }); const artifactId = `artifact-${randomUUID()}`; const finishedAt = new Date().toISOString(); const review = transitionProjectStage(running, "prompt-preparation", "needs_review"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(review, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "prompt-preparation", status: "needs_review", runnerId: "prompt-preparation-9router", runnerVersion: "prompt-preparation-v1", providerId: "9router", promptTemplateId: "visual-prompt-v1", promptVersion: "v1", inputArtifactIds: [routingArtifact.id, ...(assetConceptArtifact ? [assetConceptArtifact.id] : [])], inputFingerprint: fingerprint, outputArtifactIds: [artifactId], finishedAt, ...(result.returnedModelId ? { returnedModelId: result.returnedModelId } : {}) }, { id: artifactId, projectId, stageId: "prompt-preparation", stageRunId: runId, type: "visual-prompts", version: workflowRunStore.listArtifacts(projectId, "prompt-preparation").length + 1, status: "needs_review", payloadJson: result.output, createdAt: finishedAt, updatedAt: finishedAt }, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } const batchCount = Math.ceil(routing.shots.filter((shot) => shot.visualMode === "ai_image" || shot.visualMode === "ai_video").length / 4); updateTrackedAction(actionRun, { state: "success", progress: batchCount ? { mode: "determinate", completedUnits: batchCount, totalUnits: batchCount, message: "Prompt batches prepared; output is ready for review." } : { mode: "indeterminate", startedAt: actionRun.startedAt ?? finishedAt, message: "Local prompt package is ready for review." }, outputArtifactIds: [artifactId], retryable: false, finishedAt }); return factoryProjectResponseSchema.parse(review); } catch (error) { const message = error instanceof PromptPreparationError ? error.message : "Prompt Preparation failed."; const attention = createStageAttention("prompt-preparation", error instanceof PromptPreparationError ? error.category : "unexpected_failure", message, { retryAction: "Retry Prompt Preparation" }); const failed = updateProjectStage(running, "prompt-preparation", "needs_attention", attention); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(failed, { withinTransaction: true }); workflowRunStore.finishRun({ id: runId, projectId, stageId: "prompt-preparation", status: "needs_attention", runnerId: "prompt-preparation-9router", runnerVersion: "prompt-preparation-v1", providerId: "9router", inputArtifactIds: [routingArtifact.id, ...(assetConceptArtifact ? [assetConceptArtifact.id] : [])], inputFingerprint: fingerprint, outputArtifactIds: [], finishedAt: new Date().toISOString(), safeErrorCategory: error instanceof PromptPreparationError ? error.category : "unexpected_failure", safeErrorMessage: message }, undefined, { withinTransaction: true }); db.exec("COMMIT;"); } catch (persistenceError) { db.exec("ROLLBACK;"); throw persistenceError; } updateTrackedAction(actionRun, { state: "failed", progress: actionRun.progress, safeErrorCode: error instanceof PromptPreparationError ? error.category : "unexpected_failure", safeErrorMessage: message, retryable: true, finishedAt: new Date().toISOString() }); throw new Error(message); } });
 ipcMain.handle("list-prompt-preparation-artifacts", (_event, input: unknown) => { const { projectId } = promptPreparationRequestSchema.parse(input); return promptPreparationArtifactsResponseSchema.parse(workflowRunStore.listArtifacts(projectId, "prompt-preparation").map((artifact) => ({ id: artifact.id, ...(artifact.stageRunId ? { stageRunId: artifact.stageRunId } : {}), status: artifact.status, payloadJson: artifact.payloadJson, createdAt: artifact.createdAt, updatedAt: artifact.updatedAt }))); });
 ipcMain.handle("approve-prompt-preparation", (_event, input: unknown) => { const { projectId } = promptPreparationRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "prompt-preparation").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId || !artifact.payloadJson) throw new Error("No reviewable Prompt Preparation exists."); const prompts = promptPreparationOutputSchema.parse(artifact.payloadJson).prompts; const promptVersions = new Map(prompts.map((prompt) => [prompt.shotId, prompt.promptVersionId])); const approved = transitionProjectStage(markDownstreamStagesStale({ ...project, shots: project.shots.map((shot) => promptVersions.has(shot.id) ? { ...shot, promptVersionId: promptVersions.get(shot.id)! } : shot) }, "prompt-preparation"), "prompt-preparation", "approved"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(approved, { withinTransaction: true }); workflowRunStore.approveReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(approved); });
 ipcMain.handle("reject-prompt-preparation", (_event, input: unknown) => { const { projectId } = promptPreparationRequestSchema.parse(input); const project = projectRepository.loadProject(projectId); if (!project) throw new Error(`Project not found: ${projectId}`); const artifact = workflowRunStore.listArtifacts(projectId, "prompt-preparation").find((item) => item.status === "needs_review"); if (!artifact?.stageRunId) throw new Error("No reviewable Prompt Preparation exists."); const rejected = transitionProjectStage(project, "prompt-preparation", "rejected"); db.exec("BEGIN IMMEDIATE;"); try { saveProjectWithWorkflowInvalidation(rejected, { withinTransaction: true }); workflowRunStore.rejectReviewRun(artifact.stageRunId, { withinTransaction: true }); db.exec("COMMIT;"); } catch (error) { db.exec("ROLLBACK;"); throw error; } return factoryProjectResponseSchema.parse(rejected); });

@@ -31,6 +31,22 @@ describe("prompt preparation service", () => {
   });
   it("uses the extended provider timeout and rejects prompts not bound exactly to approved AI-routed shots", async () => { const db = openFactoryDatabase(join(mkdtempSync(join(tmpdir(), "lsf-prompts-")), "factory.sqlite")); const credentials = new ProviderCredentialStore(db, new MemoryKeychain()); const certifications = new TextCertificationStore(db); await credentials.saveProviderCredential({ providerId: "cockpit", baseUrl: "http://127.0.0.1:20128/v1", textModel: "prompt-v1" }, "sk-secret"); certifications.saveTextCertificationRecord({ id: "cert-prompts", providerId: "cockpit", configuredModelId: "prompt-v1", baseUrlFingerprint: fingerprintBaseUrl("http://127.0.0.1:20128/v1")!, credentialVersionRef: credentials.loadProviderCredentialVersionRef("cockpit"), endpointStrategy: "responses", implementationVersion: "text-capability-v1", exactTextTest: { status: "passed", latencyMs: 1 }, strictJsonTest: { status: "passed", latencyMs: 1 }, overallStatus: "verified", testedAt: "2026-07-30T00:00:00.000Z" }); const input = { shots: [{ id: "shot-1", visualMode: "ai_image", framing: "Close", cameraAngle: "Eye", cameraMovement: "Static", subjectAction: "Reveal", continuityRefs: [] }], aspectRatio: "16:9" as const, credentialStore: credentials, certificationStore: certifications, createClient: () => ({ createResponseText: async (request: { timeoutMs?: number }) => { expect(request.timeoutMs).toBe(promptPreparationTimeoutMs); return { text: JSON.stringify({ prompts: [{ shotId: "missing", promptVersionId: "prompt-1", positivePrompt: "subject", negativePrompt: "text", aspectRatio: "16:9", continuityConstraints: [], prohibitedElements: [] }] }) }; } }) }; await expect(runPromptPreparation(input)).rejects.toMatchObject({ category: "invalid_output" }); db.close(); });
 
+  it("reports completed provider batches using real batch counts", async () => {
+    const db = openFactoryDatabase(join(mkdtempSync(join(tmpdir(), "lsf-prompts-progress-")), "factory.sqlite"));
+    const credentials = new ProviderCredentialStore(db, new MemoryKeychain());
+    const certifications = new TextCertificationStore(db);
+    await credentials.saveProviderCredential({ providerId: "cockpit", baseUrl: "http://127.0.0.1:20128/v1", textModel: "prompt-v1" }, "sk-secret");
+    certifications.saveTextCertificationRecord({ id: "cert-prompts-progress", providerId: "cockpit", configuredModelId: "prompt-v1", baseUrlFingerprint: fingerprintBaseUrl("http://127.0.0.1:20128/v1")!, credentialVersionRef: credentials.loadProviderCredentialVersionRef("cockpit"), endpointStrategy: "responses", implementationVersion: "text-capability-v1", exactTextTest: { status: "passed", latencyMs: 1 }, strictJsonTest: { status: "passed", latencyMs: 1 }, overallStatus: "verified", testedAt: "2026-07-30T00:00:00.000Z" });
+    let batch = 0;
+    const seen: Array<{ completedBatches: number; totalBatches: number }> = [];
+    const shots = Array.from({ length: 5 }, (_, index) => ({ id: `shot-${index + 1}`, visualMode: "ai_image", framing: "Close", cameraAngle: "Eye", cameraMovement: "Static", subjectAction: "Reveal", continuityRefs: [] }));
+    await runPromptPreparation({ shots, aspectRatio: "16:9", credentialStore: credentials, certificationStore: certifications, onBatchProgress: ({ completedBatches, totalBatches }) => { seen.push({ completedBatches, totalBatches }); }, createClient: () => ({ createResponseText: async () => { const current = shots.slice(batch * 4, ++batch * 4); return { text: JSON.stringify({ prompts: current.map((shot) => ({ shotId: shot.id, promptVersionId: `prompt-${shot.id}`, positivePrompt: "subject", negativePrompt: "text", aspectRatio: "16:9", continuityConstraints: [], prohibitedElements: [] })) }) }; } }) });
+    expect(seen).toHaveLength(2);
+    expect(seen.every((progress) => progress.totalBatches === 2)).toBe(true);
+    expect(seen.map((progress) => progress.completedBatches).sort()).toEqual([1, 2]);
+    db.close();
+  });
+
   it("appends the character framing and approved asset mapping to every AI prompt", async () => {
     const db = openFactoryDatabase(join(mkdtempSync(join(tmpdir(), "lsf-prompts-contract-")), "factory.sqlite"));
     const credentials = new ProviderCredentialStore(db, new MemoryKeychain());

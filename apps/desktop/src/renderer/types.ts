@@ -355,6 +355,7 @@ export interface ImageModelCertificationResponse { status: "not_tested" | "verif
 export interface LongShortFactoryApi {
   bootstrap: () => Promise<BootstrapData>;
   listActionRuns: (input: { projectId: string }) => Promise<ActionRunView[]>;
+  listActiveActionRuns: () => Promise<ActionRunView[]>;
   startProjectAction: (input: { projectId: string; actionId: ActionId }) => Promise<ActionRunView>;
   listChannelProfiles: () => Promise<ChannelProfile[]>;
   generateCharacterPack: (input: CharacterGenerationInput) => Promise<ChannelProfile>;

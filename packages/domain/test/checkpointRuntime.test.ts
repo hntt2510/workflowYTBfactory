@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createFixtureProject, getActionState, resolveProjectCheckpoints } from "../src";
+import { actionDefinitions, createFixtureProject, getActionState, resolveProjectCheckpoints } from "../src";
 
 describe("G02 checkpoint runtime", () => {
   it("uses only applicable checkpoints for topic and existing-script projects", () => {
@@ -25,6 +25,14 @@ describe("G02 checkpoint runtime", () => {
   it("reports a blocked action until prerequisite checkpoints are complete", () => {
     const project = createFixtureProject({ topic: "Topic", format: "short", targetLanguage: "Vietnamese", inputMode: "topic" });
     expect(getActionState(project, "GENERATE_SCRIPT").state).toBe("BLOCKED");
+    expect(getActionState(project, "GENERATE_DIRECTOR_PLAN").reason).toContain("Câu chuyện");
+  });
+
+  it("keeps command metadata, retry policy, and downstream invalidation in one action registry", () => {
+    const promptAction = actionDefinitions.find((action) => action.id === "PREPARE_GG_LAB_PROMPTS")!;
+    expect(promptAction.prerequisites).toEqual(["storyboard"]);
+    expect(promptAction.retryPolicy).toBe("retry_missing_units");
+    expect(promptAction.invalidates).toEqual(["images", "handoff"]);
   });
 
   it("lets the latest successful retry supersede an older failed action run", () => {

@@ -11,7 +11,7 @@ const promptBatchOutputSchema = promptPreparationOutputSchema.pick({ prompts: tr
 
 type PromptShot = { id: string; sceneId?: string; purpose?: string; durationFrames?: number; visualMode: string; framing: string; cameraAngle: string; cameraMovement: string; subjectAction: string; continuityRefs: string[]; semanticBeat?: string | undefined; assetConceptIds?: string[] | undefined; motion?: ShotMotionPlan | undefined };
 
-export async function runPromptPreparation(input: { shots: PromptShot[]; aspectRatio: "16:9" | "9:16"; character?: CharacterVersion | undefined; assetConcepts?: AssetConcept[] | undefined; manualMode?: boolean; credentialStore: ProviderCredentialStore; certificationStore: TextCertificationStore; createClient?: (config: { baseUrl: string; apiKey: string }) => TextClient }) {
+export async function runPromptPreparation(input: { shots: PromptShot[]; aspectRatio: "16:9" | "9:16"; character?: CharacterVersion | undefined; assetConcepts?: AssetConcept[] | undefined; manualMode?: boolean; credentialStore: ProviderCredentialStore; certificationStore: TextCertificationStore; createClient?: (config: { baseUrl: string; apiKey: string }) => TextClient; onBatchProgress?: (progress: { completedBatches: number; totalBatches: number; currentBatch: number }) => void | Promise<void> }) {
   const imageShots = input.shots.filter((shot) => ["ai_image", "ai_video", "stock_image", "stock_video", "manual_upload", "uploaded"].includes(shot.visualMode));
   if (input.manualMode) {
     const prompts = imageShots.map((shot) => localPromptForShot(shot, input.aspectRatio, input.character, input.assetConcepts ?? []));
@@ -31,7 +31,13 @@ export async function runPromptPreparation(input: { shots: PromptShot[]; aspectR
   const batches = Array.from({ length: Math.ceil(aiShots.length / promptPreparationBatchSize) }, (_, index) => aiShots.slice(index * promptPreparationBatchSize, (index + 1) * promptPreparationBatchSize));
   let responses: Array<{ data: ReturnType<typeof promptBatchOutputSchema.parse>; returnedModelId?: string }>;
   try {
-    responses = await Promise.all(batches.map((batch) => client ? client.generateStructured({ model: configured.model, timeoutMs: promptPreparationTimeoutMs, input: buildPromptRequest(batch, input.aspectRatio, input.character, input.assetConcepts), schema: promptBatchOutputSchema }) : configured.provider.generateStructured({ model: configured.model, timeoutMs: promptPreparationTimeoutMs, input: buildPromptRequest(batch, input.aspectRatio, input.character, input.assetConcepts), schema: promptBatchOutputSchema })));
+    let completedBatches = 0;
+    responses = await Promise.all(batches.map(async (batch, index) => {
+      const response = await (client ? client.generateStructured({ model: configured.model, timeoutMs: promptPreparationTimeoutMs, input: buildPromptRequest(batch, input.aspectRatio, input.character, input.assetConcepts), schema: promptBatchOutputSchema }) : configured.provider.generateStructured({ model: configured.model, timeoutMs: promptPreparationTimeoutMs, input: buildPromptRequest(batch, input.aspectRatio, input.character, input.assetConcepts), schema: promptBatchOutputSchema }));
+      completedBatches += 1;
+      await input.onBatchProgress?.({ completedBatches, totalBatches: batches.length, currentBatch: index + 1 });
+      return response;
+    }));
   } catch (error) {
     if (error instanceof TextProviderError && error.code === "invalid_json") throw new PromptPreparationError("invalid_json", "Prompt Preparation returned invalid JSON.");
     if (error instanceof TextProviderError && error.code === "schema_validation_failed") throw new PromptPreparationError("invalid_output", "Prompt Preparation returned an invalid structured output.");

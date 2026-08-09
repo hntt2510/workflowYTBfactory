@@ -78,9 +78,11 @@ export function AppRuntime() {
   }, []);
 
   useEffect(() => {
-    if (!selectedProject) { setActionRuns([]); return; }
-    void factoryClient.listActionRuns({ projectId: selectedProject.id }).then(setActionRuns).catch(() => setActionRuns([]));
-  }, [selectedProject]);
+    const refreshRuns = () => void factoryClient.listActiveActionRuns().then(setActionRuns).catch(() => setActionRuns([]));
+    refreshRuns();
+    const timer = window.setInterval(refreshRuns, 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const onHashChange = () => setRoute(routeFromHash());

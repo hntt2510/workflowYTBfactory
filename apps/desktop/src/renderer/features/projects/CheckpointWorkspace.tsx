@@ -25,7 +25,11 @@ export function CheckpointWorkspace(props: ProjectWorkspaceProps) {
   const [researchView, setResearchView] = useState<"intake" | "analysis">("intake");
   const load = async () => setRuns(await factoryClient.listActionRuns({ projectId: props.project.id }));
 
-  useEffect(() => { void load().catch((reason) => setError(reason instanceof Error ? reason.message : String(reason))); }, [props.project.id]);
+  useEffect(() => {
+    void load().catch((reason) => setError(reason instanceof Error ? reason.message : String(reason)));
+    const timer = window.setInterval(() => { void load().catch(() => undefined); }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [props.project.id]);
   const progress = useMemo(() => resolveProjectCheckpoints(props.project, runs), [props.project, runs]);
   const active = progress.checkpoints.find((checkpoint) => checkpoint.definition.id === selectedCheckpoint) ?? progress.checkpoints[0]!;
 
@@ -87,10 +91,20 @@ function CheckpointContent({ checkpointId, researchView, props }: { checkpointId
   if (checkpointId === "prompts") return <ProjectStudioScreen {...props} workspace="director" initialTab="prompts" />;
   if (checkpointId === "images") return <ProjectStudioScreen {...props} workspace="assets" />;
   if (checkpointId === "handoff") return <p className="muted">Handoff ghi nhận project đã hoàn tất các checkpoint tiền sản xuất. Video production legacy không thuộc G02.</p>;
-  return <p className="muted">Cập nhật brief trong thông tin dự án trước khi chạy các action tiếp theo.</p>;
+  return <BriefContent project={props.project} />;
+}
+
+function BriefContent({ project }: { project: ProjectWorkspaceProps["project"] }) {
+  return <div className="settings-list">
+    <div><span>Chủ đề</span><strong>{project.topic}</strong></div>
+    <div><span>Định dạng</span><strong>{project.format}</strong></div>
+    <div><span>Ngôn ngữ</span><strong>{project.setup.language || project.targetLanguage}</strong></div>
+    <div><span>Mục tiêu</span><strong>{project.setup.targetDuration}</strong></div>
+    <p className="muted">Brief đã lưu là đầu vào cho các action rõ ràng ở từng checkpoint; điều hướng checkpoint không tự chạy production.</p>
+  </div>;
 }
 
 function RuntimePanel({ runs }: { runs: readonly ActionRunView[] }) {
   if (!runs.length) return null;
-  return <SectionCard title="Runtime checkpoint" description="Tiến độ chỉ dùng đơn vị thực tế; Cockpit không báo đơn vị được hiển thị không xác định."><div className="status-grid">{runs.map((run) => <div className="status-row" key={run.id}><span>{run.actionId}</span><StatusBadge tone={stateTone[run.state] ?? "default"}>{run.state}</StatusBadge><small>{run.progress.mode === "determinate" ? `${run.progress.completedUnits}/${run.progress.totalUnits} · ${run.progress.message}` : `${run.progress.message} · bắt đầu ${new Date(run.progress.startedAt).toLocaleTimeString()}`}{run.safeErrorMessage ? ` · ${run.safeErrorMessage}` : ""}</small></div>)}</div></SectionCard>;
+  return <SectionCard title="Runtime checkpoint" description="Tiến độ chỉ dùng đơn vị thực tế; Cockpit không báo đơn vị được hiển thị không xác định."><div className="status-grid">{runs.map((run) => <div className="status-row" key={run.id}><span>{run.actionId}</span><StatusBadge tone={stateTone[run.state] ?? "default"}>{run.state}</StatusBadge>{run.progress.mode === "determinate" ? <progress value={run.progress.completedUnits} max={run.progress.totalUnits} aria-label={`${run.actionId} progress`} /> : null}<small>{run.progress.mode === "determinate" ? `${run.progress.completedUnits}/${run.progress.totalUnits} · ${run.progress.totalUnits ? Math.round(run.progress.completedUnits / run.progress.totalUnits * 100) : 0}% · ${run.progress.currentUnit ?? run.progress.message}` : `${run.progress.message} · bắt đầu ${new Date(run.progress.startedAt).toLocaleTimeString()}`}{run.safeErrorMessage ? ` · ${run.safeErrorMessage}` : ""}</small></div>)}</div></SectionCard>;
 }

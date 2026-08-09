@@ -31,20 +31,30 @@ export const checkpointDefinitions: readonly CheckpointDefinition[] = [
 ];
 
 export type ActionId = "SAVE_BRIEF" | "GENERATE_RESEARCH_ANALYSIS" | "GENERATE_IDEAS" | "SELECT_IDEA" | "GENERATE_SCRIPT" | "REVISE_SCRIPT" | "GENERATE_DIRECTOR_PLAN" | "GENERATE_STORYBOARD" | "PREPARE_GG_LAB_PROMPTS" | "IMPORT_IMAGES" | "APPROVE_IMAGES" | "GENERATE_HANDOFF";
-export interface ActionDefinition { id: ActionId; checkpointId: CheckpointId; stageId: string; label: string; kind: "command" | "user_input"; }
+export interface ActionDefinition {
+  id: ActionId;
+  checkpointId: CheckpointId;
+  stageId: string;
+  label: string;
+  kind: "command" | "user_input";
+  prerequisites: readonly CheckpointId[];
+  expectedOutput: string;
+  retryPolicy: "retry_failed" | "retry_missing_units" | "resume_user_input";
+  invalidates: readonly CheckpointId[];
+}
 export const actionDefinitions: readonly ActionDefinition[] = [
-  { id: "SAVE_BRIEF", checkpointId: "brief", stageId: "project-setup", label: "Lưu Brief", kind: "user_input" },
-  { id: "GENERATE_RESEARCH_ANALYSIS", checkpointId: "research", stageId: "reference-intake", label: "Phân tích tham khảo", kind: "command" },
-  { id: "GENERATE_IDEAS", checkpointId: "idea", stageId: "idea-lab", label: "Tạo ý tưởng", kind: "command" },
-  { id: "SELECT_IDEA", checkpointId: "idea", stageId: "idea-lab", label: "Chọn ý tưởng", kind: "user_input" },
-  { id: "GENERATE_SCRIPT", checkpointId: "script", stageId: "script", label: "Tạo kịch bản", kind: "command" },
-  { id: "REVISE_SCRIPT", checkpointId: "script", stageId: "script", label: "Sửa kịch bản", kind: "user_input" },
-  { id: "GENERATE_DIRECTOR_PLAN", checkpointId: "director", stageId: "scene-plan", label: "Tạo kế hoạch đạo diễn", kind: "command" },
-  { id: "GENERATE_STORYBOARD", checkpointId: "storyboard", stageId: "shot-plan", label: "Tạo storyboard", kind: "command" },
-  { id: "PREPARE_GG_LAB_PROMPTS", checkpointId: "prompts", stageId: "prompt-preparation", label: "Chuẩn bị prompt GG Lab", kind: "command" },
-  { id: "IMPORT_IMAGES", checkpointId: "images", stageId: "gglab-generation-gate", label: "Nhập ảnh từ GG Lab", kind: "user_input" },
-  { id: "APPROVE_IMAGES", checkpointId: "images", stageId: "asset-review", label: "Duyệt ảnh", kind: "user_input" },
-  { id: "GENERATE_HANDOFF", checkpointId: "handoff", stageId: "production-handoff", label: "Tạo gói bàn giao", kind: "user_input" }
+  { id: "SAVE_BRIEF", checkpointId: "brief", stageId: "project-setup", label: "Lưu Brief", kind: "user_input", prerequisites: [], expectedOutput: "Saved project brief", retryPolicy: "resume_user_input", invalidates: ["research", "idea", "script", "director", "storyboard", "prompts", "images", "handoff"] },
+  { id: "GENERATE_RESEARCH_ANALYSIS", checkpointId: "research", stageId: "reference-intake", label: "Phân tích tham khảo", kind: "command", prerequisites: ["brief"], expectedOutput: "Reference analysis artifacts", retryPolicy: "retry_missing_units", invalidates: ["idea", "script", "director", "storyboard", "prompts", "images", "handoff"] },
+  { id: "GENERATE_IDEAS", checkpointId: "idea", stageId: "idea-lab", label: "Tạo ý tưởng", kind: "command", prerequisites: ["brief"], expectedOutput: "Reviewable idea candidates", retryPolicy: "retry_failed", invalidates: ["script", "director", "storyboard", "prompts", "images", "handoff"] },
+  { id: "SELECT_IDEA", checkpointId: "idea", stageId: "idea-lab", label: "Chọn ý tưởng", kind: "user_input", prerequisites: ["brief"], expectedOutput: "Approved idea", retryPolicy: "resume_user_input", invalidates: ["script", "director", "storyboard", "prompts", "images", "handoff"] },
+  { id: "GENERATE_SCRIPT", checkpointId: "script", stageId: "script", label: "Tạo kịch bản", kind: "command", prerequisites: ["idea"], expectedOutput: "Reviewable script", retryPolicy: "retry_failed", invalidates: ["director", "storyboard", "prompts", "images", "handoff"] },
+  { id: "REVISE_SCRIPT", checkpointId: "script", stageId: "script", label: "Sửa kịch bản", kind: "user_input", prerequisites: ["idea"], expectedOutput: "Revised script", retryPolicy: "resume_user_input", invalidates: ["director", "storyboard", "prompts", "images", "handoff"] },
+  { id: "GENERATE_DIRECTOR_PLAN", checkpointId: "director", stageId: "scene-plan", label: "Tạo kế hoạch đạo diễn", kind: "command", prerequisites: ["script"], expectedOutput: "Reviewable director plan", retryPolicy: "retry_failed", invalidates: ["storyboard", "prompts", "images", "handoff"] },
+  { id: "GENERATE_STORYBOARD", checkpointId: "storyboard", stageId: "shot-plan", label: "Tạo storyboard", kind: "command", prerequisites: ["director"], expectedOutput: "Reviewable storyboard", retryPolicy: "retry_missing_units", invalidates: ["prompts", "images", "handoff"] },
+  { id: "PREPARE_GG_LAB_PROMPTS", checkpointId: "prompts", stageId: "prompt-preparation", label: "Chuẩn bị prompt GG Lab", kind: "command", prerequisites: ["storyboard"], expectedOutput: "Reviewable GG Lab prompt batches", retryPolicy: "retry_missing_units", invalidates: ["images", "handoff"] },
+  { id: "IMPORT_IMAGES", checkpointId: "images", stageId: "gglab-generation-gate", label: "Nhập ảnh từ GG Lab", kind: "user_input", prerequisites: ["prompts"], expectedOutput: "Imported image files", retryPolicy: "resume_user_input", invalidates: ["handoff"] },
+  { id: "APPROVE_IMAGES", checkpointId: "images", stageId: "asset-review", label: "Duyệt ảnh", kind: "user_input", prerequisites: ["prompts"], expectedOutput: "Approved image mapping", retryPolicy: "resume_user_input", invalidates: ["handoff"] },
+  { id: "GENERATE_HANDOFF", checkpointId: "handoff", stageId: "production-handoff", label: "Tạo gói bàn giao", kind: "user_input", prerequisites: ["images"], expectedOutput: "Project handoff package", retryPolicy: "resume_user_input", invalidates: [] }
 ];
 
 export interface ActionRunSnapshot { actionId: ActionId; state: "queued" | "running" | "waiting_user" | "success" | "failed" | "cancelled"; safeErrorMessage?: string; progress?: ActionProgress; }
@@ -103,7 +113,10 @@ export function getActionState(project: FactoryProject, actionId: ActionId, runs
   if (run?.state === "running" || run?.state === "queued") return { state: "RUNNING" };
   if (run?.state === "waiting_user") return { state: "WAITING_USER", ...(run.progress?.message ? { reason: run.progress.message } : {}) };
   if (run?.state === "failed") return { state: "ERROR", ...(run.safeErrorMessage ? { reason: run.safeErrorMessage } : {}) };
-  const checkpoint = resolveProjectCheckpoints(project, runs).checkpoints.find((entry) => entry.definition.id === action.checkpointId)!;
+  const checkpoints = resolveProjectCheckpoints(project, runs).checkpoints;
+  const unmetPrerequisite = action.prerequisites.map((id) => checkpoints.find((entry) => entry.definition.id === id)!).find((entry) => entry.state !== "complete" && entry.state !== "not_applicable");
+  if (unmetPrerequisite) return { state: "BLOCKED", reason: `Hoàn tất ${unmetPrerequisite.definition.label} trước khi tiếp tục.` };
+  const checkpoint = checkpoints.find((entry) => entry.definition.id === action.checkpointId)!;
   if (checkpoint.state === "complete") return { state: "SUCCESS" };
   if (checkpoint.state === "ready") return { state: "READY" };
   return { state: "BLOCKED", reason: checkpoint.blockingReason ?? "Checkpoint chưa sẵn sàng." };

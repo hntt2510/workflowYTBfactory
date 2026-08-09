@@ -58,4 +58,24 @@ describe("ActionRunStore", () => {
     ]));
     reopened.close();
   });
+
+  it("lists active runtime work across projects without resurfacing completed actions", () => {
+    const { db, store } = openStore();
+    store.create(run("running"));
+    store.create({ ...run("failed", "failed"), inputFingerprint: "failed-input", finishedAt: "2026-01-01T00:01:00.000Z" });
+    store.create({ ...run("success", "success"), inputFingerprint: "success-input", finishedAt: "2026-01-01T00:01:00.000Z" });
+    expect(store.listActive().map((item) => item.id)).toEqual(expect.arrayContaining(["running", "failed"]));
+    expect(store.listActive().map((item) => item.id)).not.toContain("success");
+    db.close();
+  });
+
+  it("cancels active action runs when their downstream stage becomes stale without deleting prior outputs", () => {
+    const { db, store } = openStore();
+    store.create({ ...run("stale-run"), stageId: "script", outputArtifactIds: ["saved-artifact"] });
+    expect(store.markStaleForStages("project-1", ["script"])).toBe(1);
+    expect(store.list("project-1")).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "stale-run", state: "cancelled", outputArtifactIds: ["saved-artifact"] })
+    ]));
+    db.close();
+  });
 });
