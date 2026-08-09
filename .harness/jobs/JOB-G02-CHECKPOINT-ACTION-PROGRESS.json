@@ -2,7 +2,7 @@
   "jobId": "JOB-G02-CHECKPOINT-ACTION-PROGRESS",
   "type": "long",
   "title": "G02 project checkpoints, actions, and persistent progress runtime",
-  "status": "active",
+  "status": "review_required",
   "targetBranch": "main",
   "baseCommit": "8f7f49f0fa26f53f221f5320071a6c55de207b05",
   "assignedRole": "builder",
